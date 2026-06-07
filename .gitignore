@@ -1,0 +1,30 @@
+# ── Dependencies ───────────────────────────────
+node_modules/
+**/node_modules/
+
+# ── Bí mật / môi trường (KHÔNG đẩy lên) ─────────
+.env
+**/.env
+.env.local
+**/.env.local
+
+# ── Database (chứa mật khẩu plaintext — KHÔNG đẩy lên) ──
+backend/data/*.db
+backend/data/*.db-shm
+backend/data/*.db-wal
+
+# ── File người dùng tải lên ─────────────────────
+backend/uploads/*/*
+!backend/uploads/*/.gitkeep
+
+# ── Build output ────────────────────────────────
+frontend/dist/
+dist/
+build/
+
+# ── Logs / tạm ──────────────────────────────────
+*.log
+npm-debug.log*
+backend/test-tmp/
+.DS_Store
+Thumbs.db
