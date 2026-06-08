@@ -2,8 +2,18 @@ import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../../lib/api';
 import Modal from '../../components/Modal';
+import GradingDetails from '../../components/GradingDetails';
+import FileViewer from '../../components/FileViewer';
 import { toast } from '../../components/Toast';
 import { ChevronLeft, Users, CheckCircle, Clock, Bot, Star, Eye } from 'lucide-react';
+
+// Danh sách URL file của một bài nộp (hỗ trợ cũ: 1 file, mới: nhiều file dạng JSON)
+function submissionFileUrls(s: any): string[] {
+  let names: string[] = [];
+  if (s.files) { try { const a = JSON.parse(s.files); if (Array.isArray(a)) names = a; } catch { /* ignore */ } }
+  if (names.length === 0 && s.file_path) names = [s.file_path];
+  return names.map((n: string) => `/uploads/submissions/${n}`);
+}
 
 export default function HomeworkDetail() {
   const { id } = useParams();
@@ -13,7 +23,7 @@ export default function HomeworkDetail() {
   const [gradeForm, setGradeForm] = useState({ score: '', feedback: '' });
   const [loading, setLoading] = useState(false);
   const [regrading, setRegrading] = useState<number | null>(null);
-  const [viewPdf, setViewPdf] = useState<string | null>(null);
+  const [viewFiles, setViewFiles] = useState<string[] | null>(null);
 
   useEffect(() => { fetchHw(); }, [id]);
 
@@ -79,6 +89,12 @@ export default function HomeworkDetail() {
           <div style={{ fontSize: '0.82rem', color: '#888', marginBottom: 4 }}>{hw.class_title}</div>
           <h1 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 800 }}>{hw.title}</h1>
           {hw.description && <p style={{ color: '#888', margin: '4px 0 0', fontSize: '0.88rem' }}>{hw.description}</p>}
+          {hw.grading_note && (
+            <div style={{ marginTop: 8, padding: '0.6rem 0.8rem', background: '#F3E9FF', borderRadius: 8, fontSize: '0.8rem', color: '#6A1B9A', display: 'flex', gap: 6 }}>
+              <Bot size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span><strong>Ghi chú cho AI:</strong> {hw.grading_note}</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -113,12 +129,12 @@ export default function HomeworkDetail() {
       {(hw.pdf_file || hw.answer_file) && (
         <div style={{ display: 'flex', gap: 10, marginBottom: '1.5rem' }}>
           {hw.pdf_file && (
-            <button className="btn btn-secondary" onClick={() => setViewPdf(`/uploads/homework/${hw.pdf_file}`)}>
+            <button className="btn btn-secondary" onClick={() => setViewFiles([`/uploads/homework/${hw.pdf_file}`])}>
               <Eye size={15} /> Xem đề bài
             </button>
           )}
           {hw.answer_file && (
-            <button className="btn btn-success" onClick={() => setViewPdf(`/uploads/homework/${hw.answer_file}`)}>
+            <button className="btn btn-success" onClick={() => setViewFiles([`/uploads/homework/${hw.answer_file}`])}>
               <Eye size={15} /> Xem đáp án
             </button>
           )}
@@ -142,14 +158,15 @@ export default function HomeworkDetail() {
           <tbody>
             {hw.submissions?.map((s: any) => {
               const sc = s.score !== null ? scoreColor(s.score, hw.max_score) : null;
+              const fileUrls = submissionFileUrls(s);
               return (
                 <tr key={s.id}>
                   <td><strong>{s.full_name}</strong><div style={{ fontSize: '0.78rem', color: '#999' }}>{s.username}</div></td>
                   <td style={{ fontSize: '0.82rem', color: '#888' }}>{new Date(s.submitted_at).toLocaleString('vi-VN')}</td>
                   <td>
-                    {s.file_path && (
-                      <button className="btn btn-ghost btn-sm" onClick={() => setViewPdf(`/uploads/submissions/${s.file_path}`)}>
-                        <Eye size={13} /> Xem
+                    {fileUrls.length > 0 && (
+                      <button className="btn btn-ghost btn-sm" onClick={() => setViewFiles(fileUrls)}>
+                        <Eye size={13} /> Xem{fileUrls.length > 1 ? ` (${fileUrls.length})` : ''}
                       </button>
                     )}
                   </td>
@@ -168,7 +185,7 @@ export default function HomeworkDetail() {
                       <button className="btn btn-secondary btn-sm" onClick={() => openGrade(s)}>
                         <Star size={13} /> {s.score !== null ? 'Sửa điểm' : 'Chấm'}
                       </button>
-                      {hw.answer_file && s.file_path && (
+                      {hw.answer_file && fileUrls.length > 0 && (
                         <button className="btn btn-ghost btn-sm" onClick={() => regrade(s.id)} disabled={regrading === s.id} title="Chấm lại bằng AI">
                           <Bot size={13} style={{ color: '#6A1B9A' }} />
                           {regrading === s.id ? '...' : 'AI'}
@@ -197,26 +214,16 @@ export default function HomeworkDetail() {
           <label className="label">Nhận xét</label>
           <textarea className="input" rows={4} placeholder="Nhận xét về bài làm..." value={gradeForm.feedback} onChange={(e) => setGradeForm({ ...gradeForm, feedback: e.target.value })} />
         </div>
-        {grading?.file_path && (
-          <button className="btn btn-ghost btn-sm" onClick={() => setViewPdf(`/uploads/submissions/${grading.file_path}`)}>
-            <Eye size={13} /> Xem bài nộp
+        {grading && submissionFileUrls(grading).length > 0 && (
+          <button className="btn btn-ghost btn-sm" onClick={() => setViewFiles(submissionFileUrls(grading))}>
+            <Eye size={13} /> Xem bài nộp{submissionFileUrls(grading).length > 1 ? ` (${submissionFileUrls(grading).length})` : ''}
           </button>
         )}
+        {grading?.grading_details && <GradingDetails details={grading.grading_details} />}
       </Modal>
 
-      {/* PDF Viewer Modal */}
-      {viewPdf && (
-        <div className="modal-overlay" onClick={() => setViewPdf(null)}>
-          <div style={{ background: 'white', borderRadius: 12, width: '90vw', height: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
-            onClick={(e) => e.stopPropagation()}>
-            <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #EEE', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontWeight: 600 }}>Xem tài liệu</span>
-              <button className="btn btn-ghost btn-sm" onClick={() => setViewPdf(null)}>Đóng</button>
-            </div>
-            <iframe src={viewPdf} style={{ flex: 1, border: 'none' }} title="PDF Viewer" />
-          </div>
-        </div>
-      )}
+      {/* File Viewer Modal */}
+      {viewFiles && <FileViewer files={viewFiles} onClose={() => setViewFiles(null)} />}
     </div>
   );
 }

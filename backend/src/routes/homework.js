@@ -9,13 +9,21 @@ const { gradeSubmission } = require('../services/aiGrading');
 
 router.use(authMiddleware);
 
+// Lấy danh sách tên file của một bài nộp (hỗ trợ cũ: file_path đơn, mới: files JSON)
+function submissionFilenames(sub) {
+  if (sub && sub.files) {
+    try { const a = JSON.parse(sub.files); if (Array.isArray(a) && a.length) return a; } catch { /* ignore */ }
+  }
+  return sub && sub.file_path ? [sub.file_path] : [];
+}
+
 // ── Create homework (teacher/admin) ────────────────────────────────────
 router.post(
   '/classes/:classId/homework',
   requireRole('teacher', 'admin'),
   uploadHomework.fields([{ name: 'pdf_file', maxCount: 1 }, { name: 'answer_file', maxCount: 1 }]),
   (req, res) => {
-    const { title, description, due_date, answer_visible_date, max_score } = req.body;
+    const { title, description, due_date, answer_visible_date, max_score, grading_note } = req.body;
     if (!title) return res.status(400).json({ message: 'Cần tiêu đề bài tập' });
     const db = getDb();
     const cls = db.prepare('SELECT * FROM classes WHERE id=?').get(req.params.classId);
@@ -23,13 +31,14 @@ router.post(
     if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
 
     const result = db.prepare(`
-      INSERT INTO homework (class_id,title,description,pdf_file,answer_file,due_date,answer_visible_date,max_score)
-      VALUES (?,?,?,?,?,?,?,?)
+      INSERT INTO homework (class_id,title,description,pdf_file,answer_file,due_date,answer_visible_date,max_score,grading_note)
+      VALUES (?,?,?,?,?,?,?,?,?)
     `).run(
       req.params.classId, title, description || null,
       req.files?.pdf_file?.[0]?.filename || null,
       req.files?.answer_file?.[0]?.filename || null,
-      due_date || null, answer_visible_date || null, parseInt(max_score) || 10
+      due_date || null, answer_visible_date || null, parseInt(max_score) || 10,
+      grading_note || null
     );
     res.status(201).json({ id: result.lastInsertRowid, title });
   }
@@ -41,7 +50,7 @@ router.put(
   requireRole('teacher', 'admin'),
   uploadHomework.fields([{ name: 'pdf_file', maxCount: 1 }, { name: 'answer_file', maxCount: 1 }]),
   (req, res) => {
-    const { title, description, due_date, answer_visible_date, max_score } = req.body;
+    const { title, description, due_date, answer_visible_date, max_score, grading_note } = req.body;
     const db = getDb();
     const hw = db.prepare('SELECT h.*,c.teacher_id FROM homework h JOIN classes c ON h.class_id=c.id WHERE h.id=?').get(req.params.id);
     if (!hw) return res.status(404).json({ message: 'Không tìm thấy' });
@@ -53,6 +62,7 @@ router.put(
     if (due_date !== undefined) { sets.push('due_date=?'); vals.push(due_date || null); }
     if (answer_visible_date !== undefined) { sets.push('answer_visible_date=?'); vals.push(answer_visible_date || null); }
     if (max_score) { sets.push('max_score=?'); vals.push(parseInt(max_score)); }
+    if (grading_note !== undefined) { sets.push('grading_note=?'); vals.push(grading_note || null); }
     if (req.files?.pdf_file?.[0]) { sets.push('pdf_file=?'); vals.push(req.files.pdf_file[0].filename); }
     if (req.files?.answer_file?.[0]) { sets.push('answer_file=?'); vals.push(req.files.answer_file[0].filename); }
 
@@ -64,12 +74,12 @@ router.put(
 router.delete('/homework/:id', requireRole('teacher', 'admin'), (req, res) => {
   const db = getDb();
   // Xóa các bài nộp tham chiếu trước (tránh lỗi FOREIGN KEY)
-  const subs = db.prepare('SELECT file_path FROM submissions WHERE homework_id=?').all(req.params.id);
+  const subs = db.prepare('SELECT file_path,files FROM submissions WHERE homework_id=?').all(req.params.id);
   subs.forEach(s => {
-    if (s.file_path) {
-      const f = path.join(__dirname, '../../uploads/submissions', s.file_path);
+    submissionFilenames(s).forEach(name => {
+      const f = path.join(__dirname, '../../uploads/submissions', name);
       if (fs.existsSync(f)) fs.unlinkSync(f);
-    }
+    });
   });
   db.prepare('DELETE FROM submissions WHERE homework_id=?').run(req.params.id);
   db.prepare('DELETE FROM homework WHERE id=?').run(req.params.id);
@@ -92,8 +102,9 @@ router.get('/homework/:id', (req, res) => {
 
   if (req.user.role === 'student') {
     const submission = db.prepare('SELECT * FROM submissions WHERE homework_id=? AND student_id=?').get(req.params.id, req.user.id);
+    const { grading_note, ...hwPublic } = hw; // ẩn ghi chú chấm của giáo viên
     return res.json({
-      ...hw,
+      ...hwPublic,
       answer_file: canSeeAnswer ? hw.answer_file : null,
       submission: submission || null,
       can_submit: !hw.due_date || now <= hw.due_date,
@@ -113,35 +124,48 @@ router.get('/homework/:id', (req, res) => {
 router.post(
   '/homework/:id/submit',
   requireRole('student'),
-  uploadSubmission.single('file'),
+  // .any() nhận nhiều file (field 'files'), vẫn tương thích field 'file' đơn lẻ cũ
+  uploadSubmission.any(),
   async (req, res) => {
-    if (!req.file) return res.status(400).json({ message: 'Cần file bài nộp' });
+    const uploaded = req.files || [];
+    const cleanup = () => uploaded.forEach(f => { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); });
+
+    if (uploaded.length === 0) return res.status(400).json({ message: 'Cần ít nhất một file bài nộp' });
+    if (uploaded.length > 20) { cleanup(); return res.status(400).json({ message: 'Tối đa 20 file mỗi lần nộp' }); }
+
     const db = getDb();
     const hw = db.prepare('SELECT * FROM homework WHERE id=?').get(req.params.id);
-    if (!hw) return res.status(404).json({ message: 'Không tìm thấy bài tập' });
+    if (!hw) { cleanup(); return res.status(404).json({ message: 'Không tìm thấy bài tập' }); }
 
     const now = new Date().toISOString();
     if (hw.due_date && now > hw.due_date) {
-      fs.unlinkSync(req.file.path);
+      cleanup();
       return res.status(400).json({ message: 'Đã quá hạn nộp bài' });
     }
 
     const enrolled = db.prepare('SELECT * FROM class_students WHERE class_id=? AND student_id=?').get(hw.class_id, req.user.id);
-    if (!enrolled) return res.status(403).json({ message: 'Bạn không thuộc lớp này' });
+    if (!enrolled) { cleanup(); return res.status(403).json({ message: 'Bạn không thuộc lớp này' }); }
+
+    const filenames = uploaded.map(f => f.filename);
+    const filesJson = JSON.stringify(filenames);
 
     const existing = db.prepare('SELECT * FROM submissions WHERE homework_id=? AND student_id=?').get(req.params.id, req.user.id);
-    if (existing?.file_path) {
-      const old = path.join(__dirname, '../../uploads/submissions', existing.file_path);
-      if (fs.existsSync(old)) fs.unlinkSync(old);
+    if (existing) {
+      // Xóa các file của lần nộp trước
+      submissionFilenames(existing).forEach(name => {
+        const old = path.join(__dirname, '../../uploads/submissions', name);
+        if (fs.existsSync(old)) fs.unlinkSync(old);
+      });
     }
 
     let submissionId;
     if (existing) {
-      db.prepare('UPDATE submissions SET file_path=?,submitted_at=?,score=NULL,feedback=NULL,graded_at=NULL WHERE id=?')
-        .run(req.file.filename, now, existing.id);
+      db.prepare('UPDATE submissions SET file_path=?,files=?,submitted_at=?,score=NULL,feedback=NULL,grading_details=NULL,graded_at=NULL WHERE id=?')
+        .run(filenames[0], filesJson, now, existing.id);
       submissionId = existing.id;
     } else {
-      const r = db.prepare('INSERT INTO submissions (homework_id,student_id,file_path,submitted_at) VALUES (?,?,?,?)').run(req.params.id, req.user.id, req.file.filename, now);
+      const r = db.prepare('INSERT INTO submissions (homework_id,student_id,file_path,files,submitted_at) VALUES (?,?,?,?,?)')
+        .run(req.params.id, req.user.id, filenames[0], filesJson, now);
       submissionId = r.lastInsertRowid;
     }
 
@@ -149,10 +173,10 @@ router.post(
     if (hw.answer_file) {
       try {
         const answerPath = path.join(__dirname, '../../uploads/homework', hw.answer_file);
-        const subPath = path.join(__dirname, '../../uploads/submissions', req.file.filename);
-        const result = await gradeSubmission(answerPath, subPath, hw.max_score);
-        db.prepare('UPDATE submissions SET score=?,feedback=?,graded_at=?,graded_by_ai=1 WHERE id=?')
-          .run(result.score, result.feedback, now, submissionId);
+        const subPaths = filenames.map(name => path.join(__dirname, '../../uploads/submissions', name));
+        const result = await gradeSubmission(answerPath, subPaths, hw.max_score, hw.grading_note);
+        db.prepare('UPDATE submissions SET score=?,feedback=?,grading_details=?,graded_at=?,graded_by_ai=1 WHERE id=?')
+          .run(result.score, result.feedback, JSON.stringify(result.details || []), now, submissionId);
       } catch (err) {
         console.error('AI grading error:', err.message);
       }
@@ -175,18 +199,19 @@ router.put('/submissions/:id/grade', requireRole('teacher', 'admin'), (req, res)
 // ── Re-grade with AI ────────────────────────────────────────────────────
 router.post('/submissions/:id/regrade', requireRole('teacher', 'admin'), async (req, res) => {
   const db = getDb();
-  const sub = db.prepare('SELECT s.*,h.answer_file,h.max_score FROM submissions s JOIN homework h ON s.homework_id=h.id WHERE s.id=?').get(req.params.id);
+  const sub = db.prepare('SELECT s.*,h.answer_file,h.max_score,h.grading_note FROM submissions s JOIN homework h ON s.homework_id=h.id WHERE s.id=?').get(req.params.id);
   if (!sub) return res.status(404).json({ message: 'Không tìm thấy' });
   if (!sub.answer_file) return res.status(400).json({ message: 'Không có file đáp án' });
-  if (!sub.file_path) return res.status(400).json({ message: 'Học sinh chưa nộp bài' });
+  const subFiles = submissionFilenames(sub);
+  if (subFiles.length === 0) return res.status(400).json({ message: 'Học sinh chưa nộp bài' });
 
   try {
     const answerPath = path.join(__dirname, '../../uploads/homework', sub.answer_file);
-    const subPath = path.join(__dirname, '../../uploads/submissions', sub.file_path);
-    const result = await gradeSubmission(answerPath, subPath, sub.max_score);
-    db.prepare('UPDATE submissions SET score=?,feedback=?,graded_at=?,graded_by_ai=1 WHERE id=?')
-      .run(result.score, result.feedback, new Date().toISOString(), req.params.id);
-    res.json({ message: 'Đã chấm lại', score: result.score, feedback: result.feedback });
+    const subPaths = subFiles.map(name => path.join(__dirname, '../../uploads/submissions', name));
+    const result = await gradeSubmission(answerPath, subPaths, sub.max_score, sub.grading_note);
+    db.prepare('UPDATE submissions SET score=?,feedback=?,grading_details=?,graded_at=?,graded_by_ai=1 WHERE id=?')
+      .run(result.score, result.feedback, JSON.stringify(result.details || []), new Date().toISOString(), req.params.id);
+    res.json({ message: 'Đã chấm lại', score: result.score, feedback: result.feedback, details: result.details });
   } catch (err) {
     res.status(500).json({ message: 'Lỗi chấm bài: ' + err.message });
   }

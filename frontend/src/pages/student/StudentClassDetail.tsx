@@ -3,8 +3,18 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../../lib/api';
 import VideoPlayer from '../../components/VideoPlayer';
 import Modal from '../../components/Modal';
+import GradingDetails from '../../components/GradingDetails';
+import FileViewer from '../../components/FileViewer';
 import { toast } from '../../components/Toast';
-import { ChevronLeft, Play, ClipboardList, BookOpen, Upload, CheckCircle, Clock, Eye, Bot, Lock, FileText } from 'lucide-react';
+import { ChevronLeft, Play, ClipboardList, BookOpen, Upload, CheckCircle, Clock, Eye, Bot, Lock, FileText, X, Plus } from 'lucide-react';
+
+// Danh sách URL các file đã nộp (hỗ trợ cũ: 1 file, mới: nhiều file dạng JSON)
+function submittedFileUrls(hw: any): string[] {
+  let names: string[] = [];
+  if (hw.submitted_files) { try { const a = JSON.parse(hw.submitted_files); if (Array.isArray(a)) names = a; } catch { /* ignore */ } }
+  if (names.length === 0 && hw.submitted_file) names = [hw.submitted_file];
+  return names.map((n: string) => `/uploads/submissions/${n}`);
+}
 
 export default function StudentClassDetail() {
   const { id } = useParams();
@@ -14,9 +24,9 @@ export default function StudentClassDetail() {
   const [viewingLesson, setViewingLesson] = useState<any>(null);
   const [submitModal, setSubmitModal] = useState(false);
   const [submitting, setSubmitting] = useState<any>(null);
-  const [submitFile, setSubmitFile] = useState<File | null>(null);
+  const [submitFiles, setSubmitFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
-  const [viewPdf, setViewPdf] = useState<string | null>(null);
+  const [viewFiles, setViewFiles] = useState<string[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { fetchClass(); }, [id]);
@@ -28,16 +38,28 @@ export default function StudentClassDetail() {
 
   const openSubmit = (hw: any) => {
     setSubmitting(hw);
-    setSubmitFile(null);
+    setSubmitFiles([]);
     setSubmitModal(true);
   };
 
+  // Thêm file vào danh sách (gộp với file đã chọn, loại trùng tên+kích thước)
+  const addFiles = (incoming: FileList | File[]) => {
+    const arr = Array.from(incoming);
+    setSubmitFiles((prev) => {
+      const merged = [...prev];
+      arr.forEach((f) => { if (!merged.some((x) => x.name === f.name && x.size === f.size)) merged.push(f); });
+      return merged.slice(0, 20);
+    });
+  };
+
+  const removeFile = (idx: number) => setSubmitFiles((prev) => prev.filter((_, i) => i !== idx));
+
   const doSubmit = async () => {
-    if (!submitFile) { toast.error('Chọn file bài làm'); return; }
+    if (submitFiles.length === 0) { toast.error('Chọn ít nhất một file bài làm'); return; }
     setLoading(true);
     try {
       const body = new FormData();
-      body.append('file', submitFile);
+      submitFiles.forEach((f) => body.append('files', f));
       const { data } = await api.post(`/homework/${submitting.id}/submit`, body);
       toast.success(data.message);
       setSubmitModal(false);
@@ -152,6 +174,7 @@ export default function StudentClassDetail() {
                             <strong>Nhận xét:</strong> {hw.feedback}
                           </div>
                         )}
+                        <GradingDetails details={hw.grading_details} />
                       </div>
                     )}
                   </div>
@@ -159,12 +182,17 @@ export default function StudentClassDetail() {
                   {/* Actions */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end', flexShrink: 0 }}>
                     {hw.pdf_file && (
-                      <button className="btn btn-ghost btn-sm" onClick={() => setViewPdf(`/uploads/homework/${hw.pdf_file}`)}>
+                      <button className="btn btn-ghost btn-sm" onClick={() => setViewFiles([`/uploads/homework/${hw.pdf_file}`])}>
                         <FileText size={13} /> Xem đề
                       </button>
                     )}
+                    {isSubmitted && submittedFileUrls(hw).length > 0 && (
+                      <button className="btn btn-ghost btn-sm" onClick={() => setViewFiles(submittedFileUrls(hw))}>
+                        <Eye size={13} /> Bài đã nộp ({submittedFileUrls(hw).length})
+                      </button>
+                    )}
                     {hw.can_see_answer && hw.answer_file && (
-                      <button className="btn btn-success btn-sm" onClick={() => setViewPdf(`/uploads/homework/${hw.answer_file}`)}>
+                      <button className="btn btn-success btn-sm" onClick={() => setViewFiles([`/uploads/homework/${hw.answer_file}`])}>
                         <Eye size={13} /> Đáp án
                       </button>
                     )}
@@ -201,47 +229,51 @@ export default function StudentClassDetail() {
 
       {/* Submit Homework Modal */}
       <Modal open={submitModal} onClose={() => setSubmitModal(false)} title={`Nộp bài: ${submitting?.title}`}
-        footer={<><button className="btn btn-ghost" onClick={() => setSubmitModal(false)}>Hủy</button><button className="btn btn-primary" onClick={doSubmit} disabled={loading || !submitFile}>{loading ? 'Đang nộp...' : 'Nộp bài'}</button></>}>
+        footer={<><button className="btn btn-ghost" onClick={() => setSubmitModal(false)}>Hủy</button><button className="btn btn-primary" onClick={doSubmit} disabled={loading || submitFiles.length === 0}>{loading ? 'Đang nộp...' : `Nộp bài${submitFiles.length > 0 ? ` (${submitFiles.length} file)` : ''}`}</button></>}>
         <div style={{ marginBottom: '1rem', padding: '0.75rem', background: '#F5F5F5', borderRadius: 8, fontSize: '0.82rem', color: '#666' }}>
-          Nộp bài dạng ảnh chụp (JPG, PNG) hoặc file PDF. Hệ thống AI sẽ tự động chấm điểm và cho kết quả ngay sau khi nộp.
+          Nộp bài dạng ảnh chụp (JPG, PNG) hoặc file PDF. Có thể chọn <strong>nhiều ảnh</strong> cho một bài. Hệ thống AI sẽ tự động chấm điểm và cho kết quả ngay sau khi nộp.
         </div>
         <div className="form-group">
           <label className="label">File bài làm (PDF hoặc ảnh) *</label>
           <div className="dropzone" onClick={() => fileRef.current?.click()}
             onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }}
             onDragLeave={(e) => e.currentTarget.classList.remove('drag-over')}
-            onDrop={(e) => { e.preventDefault(); e.currentTarget.classList.remove('drag-over'); const f = e.dataTransfer.files[0]; if (f) setSubmitFile(f); }}>
-            {submitFile ? (
-              <div>
-                <CheckCircle size={24} color="#2E7D32" style={{ margin: '0 auto 8px' }} />
-                <div style={{ color: '#2E7D32', fontWeight: 600 }}>{submitFile.name}</div>
-                <div style={{ fontSize: '0.75rem', color: '#888' }}>{(submitFile.size / 1024 / 1024).toFixed(1)} MB</div>
-              </div>
-            ) : (
-              <div>
-                <Upload size={28} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
-                <div style={{ fontWeight: 500 }}>Kéo thả hoặc click để chọn file</div>
-                <div style={{ fontSize: '0.75rem', color: '#aaa', marginTop: 4 }}>PDF, JPG, PNG - tối đa 20MB</div>
-              </div>
-            )}
+            onDrop={(e) => { e.preventDefault(); e.currentTarget.classList.remove('drag-over'); if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files); }}>
+            <div>
+              <Upload size={28} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
+              <div style={{ fontWeight: 500 }}>Kéo thả hoặc click để chọn file</div>
+              <div style={{ fontSize: '0.75rem', color: '#aaa', marginTop: 4 }}>PDF, JPG, PNG · chọn được nhiều ảnh · tối đa 20MB/file</div>
+            </div>
           </div>
-          <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" hidden onChange={(e) => { if (e.target.files?.[0]) setSubmitFile(e.target.files[0]); }} />
+          <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple hidden
+            onChange={(e) => { if (e.target.files?.length) addFiles(e.target.files); e.target.value = ''; }} />
+
+          {submitFiles.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
+              {submitFiles.map((f, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0.5rem 0.7rem', background: '#F1F8E9', borderRadius: 8 }}>
+                  {f.type === 'application/pdf'
+                    ? <FileText size={16} color="#C62828" style={{ flexShrink: 0 }} />
+                    : <CheckCircle size={16} color="#2E7D32" style={{ flexShrink: 0 }} />}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '0.83rem', fontWeight: 600, color: '#2E7D32', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</div>
+                    <div style={{ fontSize: '0.72rem', color: '#888' }}>{(f.size / 1024 / 1024).toFixed(1)} MB</div>
+                  </div>
+                  <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} onClick={() => removeFile(i)} title="Xóa">
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+              <button className="btn btn-ghost btn-sm" style={{ alignSelf: 'flex-start' }} onClick={() => fileRef.current?.click()}>
+                <Plus size={14} /> Thêm file
+              </button>
+            </div>
+          )}
         </div>
       </Modal>
 
-      {/* PDF Viewer */}
-      {viewPdf && (
-        <div className="modal-overlay" onClick={() => setViewPdf(null)}>
-          <div style={{ background: 'white', borderRadius: 12, width: '90vw', height: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
-            onClick={(e) => e.stopPropagation()}>
-            <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #EEE', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontWeight: 600 }}>Xem tài liệu</span>
-              <button className="btn btn-ghost btn-sm" onClick={() => setViewPdf(null)}>Đóng</button>
-            </div>
-            <iframe src={viewPdf} style={{ flex: 1, border: 'none' }} title="PDF" />
-          </div>
-        </div>
-      )}
+      {/* File Viewer */}
+      {viewFiles && <FileViewer files={viewFiles} onClose={() => setViewFiles(null)} />}
     </div>
   );
 }

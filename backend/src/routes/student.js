@@ -35,7 +35,8 @@ router.get('/my-classes/:id', (req, res) => {
 
   const now = new Date().toISOString();
   const homework = db.prepare(`
-    SELECT h.*,s.id submission_id,s.score,s.feedback,s.submitted_at,s.graded_at,s.file_path submitted_file,s.graded_by_ai
+    SELECT h.id,h.class_id,h.title,h.description,h.pdf_file,h.answer_file,h.due_date,h.answer_visible_date,h.max_score,h.created_at,
+           s.id submission_id,s.score,s.feedback,s.grading_details,s.submitted_at,s.graded_at,s.file_path submitted_file,s.files submitted_files,s.graded_by_ai
     FROM homework h LEFT JOIN submissions s ON h.id=s.homework_id AND s.student_id=?
     WHERE h.class_id=? ORDER BY h.created_at DESC
   `).all(req.user.id, req.params.id).map(hw => ({

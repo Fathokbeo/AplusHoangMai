@@ -204,6 +204,20 @@ function initSchema() {
   if (!cols.some(c => c.name === 'parent_phone')) {
     db.exec('ALTER TABLE users ADD COLUMN parent_phone TEXT');
   }
+  // Migration: ghi chú của giáo viên cho AI chấm bài
+  const hwCols = db.prepare("PRAGMA table_info(homework)").all();
+  if (!hwCols.some(c => c.name === 'grading_note')) {
+    db.exec('ALTER TABLE homework ADD COLUMN grading_note TEXT');
+  }
+  // Migration: chi tiết chấm từng câu (JSON) trong bài nộp
+  const subCols = db.prepare("PRAGMA table_info(submissions)").all();
+  if (!subCols.some(c => c.name === 'grading_details')) {
+    db.exec('ALTER TABLE submissions ADD COLUMN grading_details TEXT');
+  }
+  // Migration: nhiều file bài nộp (JSON array tên file). file_path giữ file đầu cho tương thích cũ
+  if (!subCols.some(c => c.name === 'files')) {
+    db.exec('ALTER TABLE submissions ADD COLUMN files TEXT');
+  }
 
   const admin = db.prepare("SELECT id FROM users WHERE role='admin' LIMIT 1").get();
   if (!admin) {

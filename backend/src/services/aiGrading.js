@@ -32,27 +32,47 @@ function buildInlinePart(filePath) {
 // Thứ tự ưu tiên model: flash trước (có free tier), pro làm dự phòng
 const MODELS = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-pro'];
 
-async function gradeSubmission(answerFilePath, submissionFilePath, maxScore = 10) {
+async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 10, gradingNote = '') {
   if (!fs.existsSync(answerFilePath))   throw new Error('File đáp án không tồn tại');
-  if (!fs.existsSync(submissionFilePath)) throw new Error('File bài nộp không tồn tại');
+  // Học sinh có thể nộp nhiều file (nhiều ảnh / PDF) — chuẩn hóa về mảng
+  const subPaths = (Array.isArray(submissionFilePaths) ? submissionFilePaths : [submissionFilePaths]).filter(Boolean);
+  if (subPaths.length === 0) throw new Error('Không có file bài nộp');
+  for (const p of subPaths) {
+    if (!fs.existsSync(p)) throw new Error('File bài nộp không tồn tại');
+  }
 
-  const prompt = `Bạn là giáo viên toán. Hãy chấm điểm bài làm của học sinh.
+  const noteBlock = gradingNote && gradingNote.trim()
+    ? `\nHƯỚNG DẪN CHẤM CỦA GIÁO VIÊN (BẮT BUỘC tuân theo — chấm phần nào, chấm theo kiểu gì):\n"""${gradingNote.trim()}"""\n`
+    : '';
 
-ĐÁP ÁN (tài liệu đầu tiên):
-BÀI LÀM HỌC SINH (tài liệu thứ hai):
+  const subDesc = subPaths.length > 1
+    ? `- Các tài liệu tiếp theo (${subPaths.length} tệp): BÀI LÀM CỦA HỌC SINH — gồm nhiều ảnh/trang, hãy xem xét TẤT CẢ như một bài làm liền mạch.`
+    : `- Tài liệu thứ hai: BÀI LÀM CỦA HỌC SINH`;
 
+  const prompt = `Bạn là giáo viên chấm bài. Hãy chấm điểm bài làm của học sinh dựa trên đáp án.
+
+- Tài liệu thứ nhất: ĐÁP ÁN
+${subDesc}
+${noteBlock}
 Yêu cầu:
-- So sánh từng bài/câu trong bài làm với đáp án
-- Tính điểm hợp lý trên thang ${maxScore} điểm
-- Viết nhận xét chi tiết bằng tiếng Việt: nêu rõ các câu đúng, câu sai, cách cải thiện
+- So sánh TỪNG câu/bài trong bài làm với đáp án.
+- Với MỖI câu, xác định trạng thái: "correct" (đúng), "wrong" (sai), hoặc "partial" (đúng một phần) và giải thích NGẮN GỌN bằng tiếng Việt vì sao.
+- Tính điểm hợp lý trên thang ${maxScore} điểm.
+- Viết nhận xét tổng quan bằng tiếng Việt.
 
-Trả lời CHÍNH XÁC theo định dạng JSON sau (không thêm bất kỳ text nào khác):
-{"score": <số từ 0 đến ${maxScore}>, "feedback": "<nhận xét chi tiết>"}`;
+Trả lời CHÍNH XÁC theo định dạng JSON sau (không thêm bất kỳ text nào khác, không markdown):
+{
+  "score": <số từ 0 đến ${maxScore}>,
+  "feedback": "<nhận xét tổng quan>",
+  "details": [
+    {"question": "<tên câu, vd: Câu 1>", "status": "correct|wrong|partial", "comment": "<giải thích ngắn gọn vì sao đúng/sai>"}
+  ]
+}`;
 
   const parts = [
     prompt,
     buildInlinePart(answerFilePath),
-    buildInlinePart(submissionFilePath),
+    ...subPaths.map(buildInlinePart),
   ];
 
   let lastErr;
@@ -65,6 +85,15 @@ Trả lời CHÍNH XÁC theo định dạng JSON sau (không thêm bất kỳ te
       if (!jsonMatch) throw new Error('AI không trả về định dạng JSON hợp lệ');
       const parsed = JSON.parse(jsonMatch[0]);
       parsed.score = Math.max(0, Math.min(maxScore, parseFloat(parsed.score) || 0));
+      // Chuẩn hóa details thành mảng hợp lệ
+      if (!Array.isArray(parsed.details)) parsed.details = [];
+      parsed.details = parsed.details
+        .filter(d => d && (d.question || d.comment))
+        .map(d => ({
+          question: String(d.question || '').slice(0, 100),
+          status: ['correct', 'wrong', 'partial'].includes(d.status) ? d.status : 'partial',
+          comment: String(d.comment || '').slice(0, 500),
+        }));
       return parsed;
     } catch (err) {
       lastErr = err;

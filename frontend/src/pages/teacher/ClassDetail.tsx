@@ -6,7 +6,7 @@ import VideoPlayer from '../../components/VideoPlayer';
 import { toast } from '../../components/Toast';
 import {
   Users, BookOpen, ClipboardList, Plus, Edit, Trash2,
-  UserPlus, UserMinus, Play, File, ChevronLeft, Upload, Clock, Eye
+  UserPlus, UserMinus, Play, File, ChevronLeft, Upload, Clock, Eye, Bot
 } from 'lucide-react';
 
 export default function ClassDetail() {
@@ -23,7 +23,7 @@ export default function ClassDetail() {
   const [viewingLesson, setViewingLesson] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [lessonForm, setLessonForm] = useState({ title: '', description: '', video_url: '', video_type: 'youtube', lesson_order: '0' });
-  const [hwForm, setHwForm] = useState({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10' });
+  const [hwForm, setHwForm] = useState({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '' });
   const [hwFiles, setHwFiles] = useState<{ pdf?: File; answer?: File }>({});
   const [selectedStudent, setSelectedStudent] = useState('');
   const [addMode, setAddMode] = useState<'new' | 'existing'>('new');
@@ -125,7 +125,7 @@ export default function ClassDetail() {
   // Homework CRUD
   const openCreateHw = () => {
     setEditingHw(null);
-    setHwForm({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10' });
+    setHwForm({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '' });
     setHwFiles({});
     setHwModal(true);
   };
@@ -137,6 +137,7 @@ export default function ClassDetail() {
       due_date: h.due_date ? h.due_date.slice(0, 16) : '',
       answer_visible_date: h.answer_visible_date ? h.answer_visible_date.slice(0, 16) : '',
       max_score: String(h.max_score),
+      grading_note: h.grading_note || '',
     });
     setHwFiles({});
     setHwModal(true);
@@ -447,6 +448,15 @@ export default function ClassDetail() {
             </div>
             <input ref={answerRef} type="file" accept=".pdf" hidden onChange={(e) => { if (e.target.files?.[0]) setHwFiles({ ...hwFiles, answer: e.target.files[0] }); }} />
             {editingHw?.answer_file && !hwFiles.answer && <div style={{ fontSize: '0.75rem', color: '#2E7D32', marginTop: 4 }}>✓ Đã có đáp án (AI sẽ dùng file này)</div>}
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="label">Ghi chú cho AI chấm bài (tùy chọn)</label>
+          <textarea className="input" rows={3}
+            placeholder="vd: Chỉ chấm câu 1 đến câu 5. Chấm chặt phần lập luận, mỗi bước sai trừ điểm. Ưu tiên cách giải tự luận, không chấm phần trắc nghiệm."
+            value={hwForm.grading_note} onChange={(e) => setHwForm({ ...hwForm, grading_note: e.target.value })} />
+          <div style={{ fontSize: '0.75rem', color: '#888', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Bot size={12} /> AI sẽ chấm theo đúng hướng dẫn này (chấm phần nào, chấm theo kiểu gì). Học sinh không nhìn thấy ghi chú này.
           </div>
         </div>
       </Modal>
