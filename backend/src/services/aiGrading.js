@@ -32,7 +32,7 @@ function buildInlinePart(filePath) {
 // Thứ tự ưu tiên model: flash trước (có free tier), pro làm dự phòng
 const MODELS = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-pro'];
 
-async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 10, gradingNote = '') {
+async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 10, gradingNote = '', attempts = 3) {
   if (!fs.existsSync(answerFilePath))   throw new Error('File đáp án không tồn tại');
   // Học sinh có thể nộp nhiều file (nhiều ảnh / PDF) — chuẩn hóa về mảng
   const subPaths = (Array.isArray(submissionFilePaths) ? submissionFilePaths : [submissionFilePaths]).filter(Boolean);
@@ -75,6 +75,24 @@ Trả lời CHÍNH XÁC theo định dạng JSON sau (không thêm bất kỳ te
     ...subPaths.map(buildInlinePart),
   ];
 
+  // Chấm nhiều lần (mặc định 3) rồi LẤY KẾT QUẢ CÓ ĐIỂM CAO NHẤT.
+  // Chạy song song cho nhanh; dùng allSettled để 1-2 lần lỗi vẫn lấy được lần thành công.
+  const n = Math.max(1, attempts);
+  const runs = await Promise.allSettled(
+    Array.from({ length: n }, () => callModelOnce(parts, maxScore))
+  );
+  const results = runs.filter(r => r.status === 'fulfilled').map(r => r.value);
+  if (results.length === 0) {
+    throw runs.find(r => r.status === 'rejected')?.reason || new Error('Chấm bài thất bại');
+  }
+  results.sort((a, b) => b.score - a.score);
+  console.log(`[AI grading] ${results.length}/${n} lần thành công, điểm: [${results.map(r => r.score).join(', ')}] → lấy cao nhất ${results[0].score}`);
+  return results[0];
+}
+
+// Gọi AI 1 lần để chấm; tự fallback sang model khác nếu dính quota (429).
+// Trả về { score, feedback, details } đã chuẩn hóa.
+async function callModelOnce(parts, maxScore) {
   let lastErr;
   for (const modelName of MODELS) {
     try {
