@@ -55,7 +55,7 @@ export default function Login() {
         }}>
           {/* Logo */}
           <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-            <img src="/logo.jpg" alt="Logo" style={{ height: 80, borderRadius: 12, objectFit: 'contain', marginBottom: 12 }} />
+            <img src="/logo.jpg" alt="Logo" style={{ height: 80, borderRadius: 12, objectFit: 'contain', display: 'block', margin: '0 auto 12px' }} />
             <h1 style={{ color: 'white', fontWeight: 800, fontSize: '1.4rem', margin: '0 0 4px' }}>
               APLUS HOÀNG MAI
             </h1>
