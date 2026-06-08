@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../../lib/api';
 import Modal from '../../components/Modal';
 import { toast } from '../../components/Toast';
-import { ArrowLeft, School, Users, BookOpen, Plus, Edit, Trash2, ChevronRight } from 'lucide-react';
+import { ArrowLeft, School, Users, BookOpen, Plus, Trash2, ChevronRight } from 'lucide-react';
 
 export default function TeacherCourseDetail() {
   const { courseId } = useParams<{ courseId: string }>();
