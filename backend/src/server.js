@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -25,6 +26,17 @@ app.use('/api', require('./routes/homework'));
 
 // Initialize DB (creates tables + default admin)
 require('./db/database').getDb();
+
+// Serve frontend build (single-service deploy). Nếu đã build frontend, phục vụ luôn.
+const frontendDist = path.join(__dirname, '../../frontend/dist');
+if (fs.existsSync(frontendDist)) {
+  app.use(express.static(frontendDist));
+  // SPA fallback: mọi request không phải /api hay /uploads trả về index.html
+  app.get(/^\/(?!api|uploads).*/, (req, res) => {
+    res.sendFile(path.join(frontendDist, 'index.html'));
+  });
+  console.log('🌐 Đang phục vụ frontend từ frontend/dist');
+}
 
 // Global error handler — always return JSON
 app.use((err, req, res, next) => {

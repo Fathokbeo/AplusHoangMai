@@ -1,0 +1,13 @@
+{
+  "name": "mathweb",
+  "version": "1.0.0",
+  "description": "APLUS Hoang Mai - single-service deploy (frontend + backend)",
+  "private": true,
+  "scripts": {
+    "build": "cd frontend && npm install --include=dev && npm run build && cd ../backend && npm install --omit=dev",
+    "start": "cd backend && npm start"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

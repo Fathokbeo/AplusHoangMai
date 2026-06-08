@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: mathweb
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      # Nhap 2 key duoi day trong dashboard Render (Environment).
+      # Lay tu file backend/.env cua ban. De trong neu chua dung tinh nang cham bai AI.
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
