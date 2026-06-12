@@ -31,22 +31,27 @@ router.get('/my-classes/:id', (req, res) => {
   `).get(req.params.id);
   if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp' });
 
+  const chapters = db.prepare('SELECT * FROM chapters WHERE class_id=? ORDER BY chapter_order,created_at').all(req.params.id);
   const lessons = db.prepare('SELECT * FROM lessons WHERE class_id=? ORDER BY lesson_order,created_at').all(req.params.id);
 
   const now = new Date().toISOString();
   const homework = db.prepare(`
-    SELECT h.id,h.class_id,h.title,h.description,h.pdf_file,h.answer_file,h.due_date,h.answer_visible_date,h.max_score,h.created_at,
+    SELECT h.id,h.class_id,h.chapter_id,h.title,h.description,h.pdf_file,h.answer_file,h.solution_video_url,h.due_date,h.answer_visible_date,h.max_score,h.created_at,
            s.id submission_id,s.score,s.feedback,s.grading_details,s.submitted_at,s.graded_at,s.file_path submitted_file,s.files submitted_files,s.graded_by_ai
     FROM homework h LEFT JOIN submissions s ON h.id=s.homework_id AND s.student_id=?
     WHERE h.class_id=? ORDER BY h.created_at DESC
-  `).all(req.user.id, req.params.id).map(hw => ({
-    ...hw,
-    can_submit: !hw.due_date || now <= hw.due_date,
-    can_see_answer: hw.answer_visible_date ? now >= hw.answer_visible_date : false,
-    answer_file: (hw.answer_visible_date && now >= hw.answer_visible_date) ? hw.answer_file : null,
-  }));
+  `).all(req.user.id, req.params.id).map(hw => {
+    const canSeeAnswer = hw.answer_visible_date ? now >= hw.answer_visible_date : false;
+    return {
+      ...hw,
+      can_submit: !hw.due_date || now <= hw.due_date,
+      can_see_answer: canSeeAnswer,
+      answer_file: canSeeAnswer ? hw.answer_file : null,
+      solution_video_url: canSeeAnswer ? hw.solution_video_url : null,
+    };
+  });
 
-  res.json({ ...cls, lessons, homework });
+  res.json({ ...cls, chapters, lessons, homework });
 });
 
 // Student's profile/stats

@@ -25,6 +25,7 @@ function hardDeleteClass(db, classId) {
   lessons.forEach(l => { if (l.video_type === 'local') rmFile('videos', l.video_url); });
   db.prepare('DELETE FROM lessons WHERE class_id=?').run(classId);
 
+  db.prepare('DELETE FROM chapters WHERE class_id=?').run(classId);
   db.prepare('DELETE FROM class_students WHERE class_id=?').run(classId);
   db.prepare('DELETE FROM classes WHERE id=?').run(classId);
 }

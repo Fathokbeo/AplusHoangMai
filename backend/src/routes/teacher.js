@@ -148,9 +148,10 @@ router.get('/classes/:id', (req, res) => {
     SELECT u.id,u.username,u.full_name,u.parent_phone FROM class_students cs
     JOIN users u ON cs.student_id=u.id WHERE cs.class_id=? AND u.active=1 ORDER BY u.full_name
   `).all(req.params.id);
+  const chapters = db.prepare('SELECT * FROM chapters WHERE class_id=? ORDER BY chapter_order,created_at').all(req.params.id);
   const lessons = db.prepare('SELECT * FROM lessons WHERE class_id=? ORDER BY lesson_order,created_at').all(req.params.id);
   const homework = db.prepare('SELECT * FROM homework WHERE class_id=? ORDER BY created_at DESC').all(req.params.id);
-  res.json({ ...cls, students, lessons, homework });
+  res.json({ ...cls, students, chapters, lessons, homework });
 });
 
 router.put('/classes/:id', (req, res) => {
@@ -249,22 +250,63 @@ router.delete('/classes/:id/students/:studentId', (req, res) => {
   res.json({ message: 'Đã xóa' });
 });
 
+// ── Chapters (chương: nhóm bài giảng & bài tập) ───────────────────────
+router.post('/classes/:id/chapters', (req, res) => {
+  const { title, chapter_order } = req.body;
+  if (!title) return res.status(400).json({ message: 'Cần tên chương' });
+  const db = getDb();
+  const cls = db.prepare('SELECT * FROM classes WHERE id=?').get(req.params.id);
+  if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp' });
+  if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  const result = db.prepare(
+    'INSERT INTO chapters (class_id,title,chapter_order) VALUES (?,?,?)'
+  ).run(req.params.id, title, parseInt(chapter_order) || 0);
+  res.status(201).json({ id: result.lastInsertRowid, title });
+});
+
+router.put('/chapters/:id', (req, res) => {
+  const { title, chapter_order } = req.body;
+  const db = getDb();
+  const ch = db.prepare('SELECT ch.*,c.teacher_id FROM chapters ch JOIN classes c ON ch.class_id=c.id WHERE ch.id=?').get(req.params.id);
+  if (!ch) return res.status(404).json({ message: 'Không tìm thấy' });
+  if (req.user.role === 'teacher' && ch.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  const sets = []; const vals = [];
+  if (title) { sets.push('title=?'); vals.push(title); }
+  if (chapter_order !== undefined) { sets.push('chapter_order=?'); vals.push(parseInt(chapter_order) || 0); }
+  if (sets.length > 0) { vals.push(req.params.id); db.prepare(`UPDATE chapters SET ${sets.join(',')} WHERE id=?`).run(...vals); }
+  res.json({ message: 'Đã cập nhật' });
+});
+
+// Xóa chương: gỡ liên kết bài giảng/bài tập (giữ lại nội dung) rồi xóa chương
+router.delete('/chapters/:id', (req, res) => {
+  const db = getDb();
+  const ch = db.prepare('SELECT ch.*,c.teacher_id FROM chapters ch JOIN classes c ON ch.class_id=c.id WHERE ch.id=?').get(req.params.id);
+  if (!ch) return res.status(404).json({ message: 'Không tìm thấy' });
+  if (req.user.role === 'teacher' && ch.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  db.transaction(() => {
+    db.prepare('UPDATE lessons SET chapter_id=NULL WHERE chapter_id=?').run(req.params.id);
+    db.prepare('UPDATE homework SET chapter_id=NULL WHERE chapter_id=?').run(req.params.id);
+    db.prepare('DELETE FROM chapters WHERE id=?').run(req.params.id);
+  })();
+  res.json({ message: 'Đã xóa chương' });
+});
+
 // ── Lessons ────────────────────────────────────────────────────────────
 router.post('/classes/:id/lessons', (req, res) => {
-  const { title, description, video_url, video_type, lesson_order } = req.body;
+  const { title, description, video_url, video_type, lesson_order, chapter_id } = req.body;
   if (!title) return res.status(400).json({ message: 'Cần tiêu đề bài giảng' });
   const db = getDb();
   const cls = db.prepare('SELECT * FROM classes WHERE id=?').get(req.params.id);
   if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp' });
   if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
   const result = db.prepare(
-    'INSERT INTO lessons (class_id,title,description,video_url,video_type,lesson_order) VALUES (?,?,?,?,?,?)'
-  ).run(req.params.id, title, description || null, video_url || null, video_type || null, lesson_order || 0);
+    'INSERT INTO lessons (class_id,title,description,video_url,video_type,lesson_order,chapter_id) VALUES (?,?,?,?,?,?,?)'
+  ).run(req.params.id, title, description || null, video_url || null, video_type || null, lesson_order || 0, chapter_id || null);
   res.status(201).json({ id: result.lastInsertRowid, title });
 });
 
 router.put('/lessons/:id', (req, res) => {
-  const { title, description, video_url, video_type, lesson_order } = req.body;
+  const { title, description, video_url, video_type, lesson_order, chapter_id } = req.body;
   const db = getDb();
   const lesson = db.prepare('SELECT l.*,c.teacher_id FROM lessons l JOIN classes c ON l.class_id=c.id WHERE l.id=?').get(req.params.id);
   if (!lesson) return res.status(404).json({ message: 'Không tìm thấy' });
@@ -275,6 +317,7 @@ router.put('/lessons/:id', (req, res) => {
   if (video_url !== undefined) { sets.push('video_url=?'); vals.push(video_url); }
   if (video_type) { sets.push('video_type=?'); vals.push(video_type); }
   if (lesson_order !== undefined) { sets.push('lesson_order=?'); vals.push(lesson_order); }
+  if (chapter_id !== undefined) { sets.push('chapter_id=?'); vals.push(chapter_id || null); }
   if (sets.length > 0) { vals.push(req.params.id); db.prepare(`UPDATE lessons SET ${sets.join(',')} WHERE id=?`).run(...vals); }
   res.json({ message: 'Đã cập nhật' });
 });

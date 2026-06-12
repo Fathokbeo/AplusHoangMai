@@ -23,7 +23,7 @@ router.post(
   requireRole('teacher', 'admin'),
   uploadHomework.fields([{ name: 'pdf_file', maxCount: 1 }, { name: 'answer_file', maxCount: 1 }]),
   (req, res) => {
-    const { title, description, due_date, answer_visible_date, max_score, grading_note } = req.body;
+    const { title, description, due_date, answer_visible_date, max_score, grading_note, chapter_id, solution_video_url } = req.body;
     if (!title) return res.status(400).json({ message: 'Cần tiêu đề bài tập' });
     const db = getDb();
     const cls = db.prepare('SELECT * FROM classes WHERE id=?').get(req.params.classId);
@@ -31,14 +31,14 @@ router.post(
     if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
 
     const result = db.prepare(`
-      INSERT INTO homework (class_id,title,description,pdf_file,answer_file,due_date,answer_visible_date,max_score,grading_note)
-      VALUES (?,?,?,?,?,?,?,?,?)
+      INSERT INTO homework (class_id,title,description,pdf_file,answer_file,due_date,answer_visible_date,max_score,grading_note,chapter_id,solution_video_url)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       req.params.classId, title, description || null,
       req.files?.pdf_file?.[0]?.filename || null,
       req.files?.answer_file?.[0]?.filename || null,
       due_date || null, answer_visible_date || null, parseInt(max_score) || 10,
-      grading_note || null
+      grading_note || null, chapter_id || null, solution_video_url || null
     );
     res.status(201).json({ id: result.lastInsertRowid, title });
   }
@@ -50,7 +50,7 @@ router.put(
   requireRole('teacher', 'admin'),
   uploadHomework.fields([{ name: 'pdf_file', maxCount: 1 }, { name: 'answer_file', maxCount: 1 }]),
   (req, res) => {
-    const { title, description, due_date, answer_visible_date, max_score, grading_note } = req.body;
+    const { title, description, due_date, answer_visible_date, max_score, grading_note, chapter_id, solution_video_url } = req.body;
     const db = getDb();
     const hw = db.prepare('SELECT h.*,c.teacher_id FROM homework h JOIN classes c ON h.class_id=c.id WHERE h.id=?').get(req.params.id);
     if (!hw) return res.status(404).json({ message: 'Không tìm thấy' });
@@ -63,6 +63,8 @@ router.put(
     if (answer_visible_date !== undefined) { sets.push('answer_visible_date=?'); vals.push(answer_visible_date || null); }
     if (max_score) { sets.push('max_score=?'); vals.push(parseInt(max_score)); }
     if (grading_note !== undefined) { sets.push('grading_note=?'); vals.push(grading_note || null); }
+    if (chapter_id !== undefined) { sets.push('chapter_id=?'); vals.push(chapter_id || null); }
+    if (solution_video_url !== undefined) { sets.push('solution_video_url=?'); vals.push(solution_video_url || null); }
     if (req.files?.pdf_file?.[0]) { sets.push('pdf_file=?'); vals.push(req.files.pdf_file[0].filename); }
     if (req.files?.answer_file?.[0]) { sets.push('answer_file=?'); vals.push(req.files.answer_file[0].filename); }
 
@@ -106,6 +108,7 @@ router.get('/homework/:id', (req, res) => {
     return res.json({
       ...hwPublic,
       answer_file: canSeeAnswer ? hw.answer_file : null,
+      solution_video_url: canSeeAnswer ? hw.solution_video_url : null,
       submission: submission || null,
       can_submit: !hw.due_date || now <= hw.due_date,
       can_see_answer: canSeeAnswer,

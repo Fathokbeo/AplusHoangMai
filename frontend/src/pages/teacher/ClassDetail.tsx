@@ -6,25 +6,28 @@ import VideoPlayer from '../../components/VideoPlayer';
 import { toast } from '../../components/Toast';
 import {
   Users, BookOpen, ClipboardList, Plus, Edit, Trash2,
-  UserPlus, UserMinus, Play, File, ChevronLeft, Upload, Clock, Eye, Bot
+  UserPlus, UserMinus, Play, File, ChevronLeft, Upload, Clock, Eye, Bot, Layers, Video
 } from 'lucide-react';
 
 export default function ClassDetail() {
   const { id } = useParams();
   const [cls, setCls] = useState<any>(null);
   const [allStudents, setAllStudents] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'students' | 'lessons' | 'homework'>('students');
+  const [activeTab, setActiveTab] = useState<'students' | 'chapters' | 'lessons' | 'homework'>('students');
   const [lessonModal, setLessonModal] = useState(false);
   const [editingLesson, setEditingLesson] = useState<any>(null);
   const [hwModal, setHwModal] = useState(false);
   const [editingHw, setEditingHw] = useState<any>(null);
+  const [chapterModal, setChapterModal] = useState(false);
+  const [editingChapter, setEditingChapter] = useState<any>(null);
   const [addStudentModal, setAddStudentModal] = useState(false);
   const [viewLessonModal, setViewLessonModal] = useState(false);
   const [viewingLesson, setViewingLesson] = useState<any>(null);
   const [loading, setLoading] = useState(false);
-  const [lessonForm, setLessonForm] = useState({ title: '', description: '', video_url: '', video_type: 'youtube', lesson_order: '0' });
-  const [hwForm, setHwForm] = useState({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '' });
+  const [lessonForm, setLessonForm] = useState({ title: '', description: '', video_url: '', video_type: 'youtube', lesson_order: '0', chapter_id: '' });
+  const [hwForm, setHwForm] = useState({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '', chapter_id: '', solution_video_url: '' });
   const [hwFiles, setHwFiles] = useState<{ pdf?: File; answer?: File }>({});
+  const [chapterForm, setChapterForm] = useState({ title: '', chapter_order: '0' });
   const [selectedStudent, setSelectedStudent] = useState('');
   const [addMode, setAddMode] = useState<'new' | 'existing'>('new');
   const [newStudent, setNewStudent] = useState({ username: '', password: '', full_name: '', parent_phone: '' });
@@ -82,16 +85,56 @@ export default function ClassDetail() {
     fetchClass();
   };
 
+  // Chapter CRUD
+  const openCreateChapter = () => {
+    setEditingChapter(null);
+    setChapterForm({ title: '', chapter_order: String(cls?.chapters?.length || 0) });
+    setChapterModal(true);
+  };
+
+  const openEditChapter = (ch: any) => {
+    setEditingChapter(ch);
+    setChapterForm({ title: ch.title, chapter_order: String(ch.chapter_order) });
+    setChapterModal(true);
+  };
+
+  const saveChapter = async () => {
+    if (!chapterForm.title) { toast.error('Cần tên chương'); return; }
+    setLoading(true);
+    try {
+      if (editingChapter) {
+        await api.put(`/teacher/chapters/${editingChapter.id}`, chapterForm);
+        toast.success('Đã cập nhật chương');
+      } else {
+        await api.post(`/teacher/classes/${id}/chapters`, chapterForm);
+        toast.success('Đã thêm chương');
+      }
+      setChapterModal(false);
+      fetchClass();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Lỗi');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteChapter = async (chapterId: number) => {
+    if (!confirm('Xóa chương này? Bài giảng và bài tập trong chương sẽ chuyển về "Chưa phân chương" (không bị xóa).')) return;
+    await api.delete(`/teacher/chapters/${chapterId}`);
+    toast.success('Đã xóa chương');
+    fetchClass();
+  };
+
   // Lesson CRUD
   const openCreateLesson = () => {
     setEditingLesson(null);
-    setLessonForm({ title: '', description: '', video_url: '', video_type: 'youtube', lesson_order: String(cls?.lessons?.length || 0) });
+    setLessonForm({ title: '', description: '', video_url: '', video_type: 'youtube', lesson_order: String(cls?.lessons?.length || 0), chapter_id: '' });
     setLessonModal(true);
   };
 
   const openEditLesson = (l: any) => {
     setEditingLesson(l);
-    setLessonForm({ title: l.title, description: l.description || '', video_url: l.video_url || '', video_type: l.video_type || 'youtube', lesson_order: String(l.lesson_order) });
+    setLessonForm({ title: l.title, description: l.description || '', video_url: l.video_url || '', video_type: l.video_type || 'youtube', lesson_order: String(l.lesson_order), chapter_id: l.chapter_id ? String(l.chapter_id) : '' });
     setLessonModal(true);
   };
 
@@ -125,7 +168,7 @@ export default function ClassDetail() {
   // Homework CRUD
   const openCreateHw = () => {
     setEditingHw(null);
-    setHwForm({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '' });
+    setHwForm({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '', chapter_id: '', solution_video_url: '' });
     setHwFiles({});
     setHwModal(true);
   };
@@ -138,6 +181,8 @@ export default function ClassDetail() {
       answer_visible_date: h.answer_visible_date ? h.answer_visible_date.slice(0, 16) : '',
       max_score: String(h.max_score),
       grading_note: h.grading_note || '',
+      chapter_id: h.chapter_id ? String(h.chapter_id) : '',
+      solution_video_url: h.solution_video_url || '',
     });
     setHwFiles({});
     setHwModal(true);
@@ -177,8 +222,82 @@ export default function ClassDetail() {
 
   if (!cls) return <div style={{ padding: '2rem', color: '#999', textAlign: 'center' }}>Đang tải...</div>;
 
+  const chapters: any[] = cls.chapters || [];
+  const hasChapters = chapters.length > 0;
+
+  // Nhóm bài giảng / bài tập theo chương (chương theo thứ tự, cuối là "Chưa phân chương")
+  const groupByChapter = (items: any[]) => {
+    const groups = chapters.map((ch) => ({ chapter: ch, items: items.filter((it) => it.chapter_id === ch.id) }));
+    const orphans = items.filter((it) => !it.chapter_id || !chapters.some((ch) => ch.id === it.chapter_id));
+    if (orphans.length || !hasChapters) groups.push({ chapter: null, items: orphans });
+    return groups;
+  };
+
+  const chapterLabel = (chapter: any) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0 10px' }}>
+      <Layers size={15} color={chapter ? '#1565C0' : '#999'} />
+      <span style={{ fontWeight: 700, fontSize: '0.92rem', color: chapter ? '#1A1A2E' : '#999' }}>
+        {chapter ? chapter.title : 'Chưa phân chương'}
+      </span>
+    </div>
+  );
+
+  const renderLessonCard = (l: any, i: number) => (
+    <div key={l.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '1rem 1.25rem' }}>
+      <div style={{ width: 36, height: 36, background: '#E3F2FD', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <span style={{ fontWeight: 700, color: '#1565C0', fontSize: '0.9rem' }}>{i + 1}</span>
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{l.title}</div>
+        {l.description && <div style={{ fontSize: '0.8rem', color: '#888', marginTop: 2 }}>{l.description}</div>}
+        {l.video_url && (
+          <span className="badge badge-blue" style={{ marginTop: 6 }}>
+            <Play size={10} style={{ marginRight: 4 }} />
+            {l.video_type === 'youtube' ? 'YouTube' : l.video_type === 'local' ? 'Video nội bộ' : 'Video URL'}
+          </span>
+        )}
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        {l.video_url && (
+          <button className="btn btn-secondary btn-sm" onClick={() => { setViewingLesson(l); setViewLessonModal(true); }}>
+            <Play size={13} /> Xem
+          </button>
+        )}
+        <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openEditLesson(l)}><Edit size={14} /></button>
+        <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} onClick={() => deleteLesson(l.id)}><Trash2 size={14} /></button>
+      </div>
+    </div>
+  );
+
+  const renderHomeworkCard = (h: any) => (
+    <div key={h.id} className="card" style={{ padding: '1rem 1.25rem' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ width: 36, height: 36, background: '#F3E5F5', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <ClipboardList size={18} color="#6A1B9A" />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: '0.95rem', marginBottom: 4 }}>{h.title}</div>
+          {h.description && <div style={{ fontSize: '0.82rem', color: '#888', marginBottom: 8 }}>{h.description}</div>}
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: '0.78rem', color: '#888' }}>
+            <span>Thang điểm: <strong style={{ color: '#1A1A2E' }}>{h.max_score}</strong></span>
+            {h.due_date && <span><Clock size={11} style={{ verticalAlign: 'middle' }} /> HH: {new Date(h.due_date).toLocaleString('vi-VN')}</span>}
+            {h.pdf_file && <span className="badge badge-orange"><File size={10} style={{ marginRight: 3 }} />Có đề</span>}
+            {h.answer_file && <span className="badge badge-green"><Eye size={10} style={{ marginRight: 3 }} />Có đáp án</span>}
+            {h.solution_video_url && <span className="badge badge-red"><Video size={10} style={{ marginRight: 3 }} />Video chữa</span>}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <Link to={`/teacher/homework/${h.id}`} className="btn btn-secondary btn-sm"><Eye size={13} /> Xem bài</Link>
+          <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openEditHw(h)}><Edit size={14} /></button>
+          <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} onClick={() => deleteHw(h.id)}><Trash2 size={14} /></button>
+        </div>
+      </div>
+    </div>
+  );
+
   const tabs = [
     { key: 'students', label: `Học sinh (${cls.students?.length || 0})`, icon: Users },
+    { key: 'chapters', label: `Chương (${chapters.length})`, icon: Layers },
     { key: 'lessons', label: `Bài giảng (${cls.lessons?.length || 0})`, icon: BookOpen },
     { key: 'homework', label: `Bài tập (${cls.homework?.length || 0})`, icon: ClipboardList },
   ];
@@ -200,7 +319,7 @@ export default function ClassDetail() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: 4, background: '#F5F5F5', padding: 4, borderRadius: 10, marginBottom: '1.5rem', width: 'fit-content' }}>
+      <div style={{ display: 'flex', gap: 4, background: '#F5F5F5', padding: 4, borderRadius: 10, marginBottom: '1.5rem', width: 'fit-content', flexWrap: 'wrap' }}>
         {tabs.map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => setActiveTab(key as any)} className="btn"
             style={{ background: activeTab === key ? 'white' : 'transparent', boxShadow: activeTab === key ? '0 2px 6px rgba(0,0,0,0.08)' : 'none', color: activeTab === key ? '#C62828' : '#888', border: 'none', gap: 6 }}>
@@ -241,43 +360,62 @@ export default function ClassDetail() {
         </div>
       )}
 
+      {/* Chapters tab */}
+      {activeTab === 'chapters' && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 12 }}>
+            <p style={{ margin: 0, fontSize: '0.82rem', color: '#888' }}>
+              Tạo chương để chia nhỏ bài giảng &amp; bài tập theo thứ tự. Khi thêm/sửa bài, chọn chương tương ứng.
+            </p>
+            <button className="btn btn-primary" style={{ flexShrink: 0 }} onClick={openCreateChapter}><Plus size={15} /> Thêm chương</button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {chapters.map((ch, i) => {
+              const lc = (cls.lessons || []).filter((l: any) => l.chapter_id === ch.id).length;
+              const hc = (cls.homework || []).filter((h: any) => h.chapter_id === ch.id).length;
+              return (
+                <div key={ch.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '1rem 1.25rem' }}>
+                  <div style={{ width: 36, height: 36, background: '#E3F2FD', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <span style={{ fontWeight: 700, color: '#1565C0', fontSize: '0.9rem' }}>{i + 1}</span>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{ch.title}</div>
+                    <div style={{ fontSize: '0.78rem', color: '#888', marginTop: 2 }}>{lc} bài giảng · {hc} bài tập</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openEditChapter(ch)}><Edit size={14} /></button>
+                    <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} onClick={() => deleteChapter(ch.id)}><Trash2 size={14} /></button>
+                  </div>
+                </div>
+              );
+            })}
+            {chapters.length === 0 && (
+              <div style={{ textAlign: 'center', color: '#999', padding: '2rem', background: 'white', borderRadius: 12 }}>Chưa có chương nào</div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Lessons tab */}
       {activeTab === 'lessons' && (
         <div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
             <button className="btn btn-primary" onClick={openCreateLesson}><Plus size={15} /> Thêm bài giảng</button>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {cls.lessons?.map((l: any, i: number) => (
-              <div key={l.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '1rem 1.25rem' }}>
-                <div style={{ width: 36, height: 36, background: '#E3F2FD', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <span style={{ fontWeight: 700, color: '#1565C0', fontSize: '0.9rem' }}>{i + 1}</span>
+          {(!cls.lessons || cls.lessons.length === 0) ? (
+            <div style={{ textAlign: 'center', color: '#999', padding: '2rem', background: 'white', borderRadius: 12 }}>Chưa có bài giảng</div>
+          ) : (
+            groupByChapter(cls.lessons).map(({ chapter, items }) => (
+              items.length === 0 ? null : (
+                <div key={chapter?.id || 'none'} style={{ marginBottom: 18 }}>
+                  {hasChapters && chapterLabel(chapter)}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {items.map((l: any, i: number) => renderLessonCard(l, i))}
+                  </div>
                 </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{l.title}</div>
-                  {l.description && <div style={{ fontSize: '0.8rem', color: '#888', marginTop: 2 }}>{l.description}</div>}
-                  {l.video_url && (
-                    <span className="badge badge-blue" style={{ marginTop: 6 }}>
-                      <Play size={10} style={{ marginRight: 4 }} />
-                      {l.video_type === 'youtube' ? 'YouTube' : l.video_type === 'local' ? 'Video nội bộ' : 'Video URL'}
-                    </span>
-                  )}
-                </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  {l.video_url && (
-                    <button className="btn btn-secondary btn-sm" onClick={() => { setViewingLesson(l); setViewLessonModal(true); }}>
-                      <Play size={13} /> Xem
-                    </button>
-                  )}
-                  <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openEditLesson(l)}><Edit size={14} /></button>
-                  <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} onClick={() => deleteLesson(l.id)}><Trash2 size={14} /></button>
-                </div>
-              </div>
-            ))}
-            {(!cls.lessons || cls.lessons.length === 0) && (
-              <div style={{ textAlign: 'center', color: '#999', padding: '2rem', background: 'white', borderRadius: 12 }}>Chưa có bài giảng</div>
-            )}
-          </div>
+              )
+            ))
+          )}
         </div>
       )}
 
@@ -287,35 +425,20 @@ export default function ClassDetail() {
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
             <button className="btn btn-primary" onClick={openCreateHw}><Plus size={15} /> Thêm bài tập</button>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {cls.homework?.map((h: any) => (
-              <div key={h.id} className="card" style={{ padding: '1rem 1.25rem' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                  <div style={{ width: 36, height: 36, background: '#F3E5F5', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <ClipboardList size={18} color="#6A1B9A" />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700, fontSize: '0.95rem', marginBottom: 4 }}>{h.title}</div>
-                    {h.description && <div style={{ fontSize: '0.82rem', color: '#888', marginBottom: 8 }}>{h.description}</div>}
-                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: '0.78rem', color: '#888' }}>
-                      <span>Thang điểm: <strong style={{ color: '#1A1A2E' }}>{h.max_score}</strong></span>
-                      {h.due_date && <span><Clock size={11} style={{ verticalAlign: 'middle' }} /> HH: {new Date(h.due_date).toLocaleString('vi-VN')}</span>}
-                      {h.pdf_file && <span className="badge badge-orange"><File size={10} style={{ marginRight: 3 }} />Có đề</span>}
-                      {h.answer_file && <span className="badge badge-green"><Eye size={10} style={{ marginRight: 3 }} />Có đáp án</span>}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <Link to={`/teacher/homework/${h.id}`} className="btn btn-secondary btn-sm"><Eye size={13} /> Xem bài</Link>
-                    <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openEditHw(h)}><Edit size={14} /></button>
-                    <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} onClick={() => deleteHw(h.id)}><Trash2 size={14} /></button>
+          {(!cls.homework || cls.homework.length === 0) ? (
+            <div style={{ textAlign: 'center', color: '#999', padding: '2rem', background: 'white', borderRadius: 12 }}>Chưa có bài tập</div>
+          ) : (
+            groupByChapter(cls.homework).map(({ chapter, items }) => (
+              items.length === 0 ? null : (
+                <div key={chapter?.id || 'none'} style={{ marginBottom: 18 }}>
+                  {hasChapters && chapterLabel(chapter)}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {items.map((h: any) => renderHomeworkCard(h))}
                   </div>
                 </div>
-              </div>
-            ))}
-            {(!cls.homework || cls.homework.length === 0) && (
-              <div style={{ textAlign: 'center', color: '#999', padding: '2rem', background: 'white', borderRadius: 12 }}>Chưa có bài tập</div>
-            )}
-          </div>
+              )
+            ))
+          )}
         </div>
       )}
 
@@ -364,12 +487,33 @@ export default function ClassDetail() {
         )}
       </Modal>
 
+      {/* Chapter Modal */}
+      <Modal open={chapterModal} onClose={() => setChapterModal(false)} title={editingChapter ? 'Sửa chương' : 'Thêm chương'}
+        footer={<><button className="btn btn-ghost" onClick={() => setChapterModal(false)}>Hủy</button><button className="btn btn-primary" onClick={saveChapter} disabled={loading}>{loading ? 'Đang lưu...' : 'Lưu'}</button></>}>
+        <div className="form-group">
+          <label className="label">Tên chương *</label>
+          <input className="input" placeholder="vd: Chương 1 — Hàm số bậc nhất" value={chapterForm.title} onChange={(e) => setChapterForm({ ...chapterForm, title: e.target.value })} />
+        </div>
+        <div className="form-group">
+          <label className="label">Thứ tự</label>
+          <input className="input" type="number" min={0} value={chapterForm.chapter_order} onChange={(e) => setChapterForm({ ...chapterForm, chapter_order: e.target.value })} />
+          <div style={{ fontSize: '0.75rem', color: '#888', marginTop: 4 }}>Số nhỏ hiển thị trước. Các chương sắp xếp theo thứ tự này.</div>
+        </div>
+      </Modal>
+
       {/* Lesson Modal */}
       <Modal open={lessonModal} onClose={() => setLessonModal(false)} title={editingLesson ? 'Sửa bài giảng' : 'Thêm bài giảng'}
         footer={<><button className="btn btn-ghost" onClick={() => setLessonModal(false)}>Hủy</button><button className="btn btn-primary" onClick={saveLesson} disabled={loading}>{loading ? 'Đang lưu...' : 'Lưu'}</button></>}>
         <div className="form-group">
           <label className="label">Tiêu đề *</label>
           <input className="input" placeholder="Tên bài giảng" value={lessonForm.title} onChange={(e) => setLessonForm({ ...lessonForm, title: e.target.value })} />
+        </div>
+        <div className="form-group">
+          <label className="label">Chương</label>
+          <select className="input" value={lessonForm.chapter_id} onChange={(e) => setLessonForm({ ...lessonForm, chapter_id: e.target.value })}>
+            <option value="">— Chưa phân chương —</option>
+            {chapters.map((ch) => <option key={ch.id} value={ch.id}>{ch.title}</option>)}
+          </select>
         </div>
         <div className="form-group">
           <label className="label">Mô tả</label>
@@ -415,6 +559,13 @@ export default function ClassDetail() {
           <input className="input" placeholder="Tên bài tập" value={hwForm.title} onChange={(e) => setHwForm({ ...hwForm, title: e.target.value })} />
         </div>
         <div className="form-group">
+          <label className="label">Chương</label>
+          <select className="input" value={hwForm.chapter_id} onChange={(e) => setHwForm({ ...hwForm, chapter_id: e.target.value })}>
+            <option value="">— Chưa phân chương —</option>
+            {chapters.map((ch) => <option key={ch.id} value={ch.id}>{ch.title}</option>)}
+          </select>
+        </div>
+        <div className="form-group">
           <label className="label">Mô tả / Hướng dẫn</label>
           <textarea className="input" rows={3} value={hwForm.description} onChange={(e) => setHwForm({ ...hwForm, description: e.target.value })} />
         </div>
@@ -432,6 +583,18 @@ export default function ClassDetail() {
           <label className="label">Thời gian xem đáp án</label>
           <input className="input" type="datetime-local" value={hwForm.answer_visible_date} onChange={(e) => setHwForm({ ...hwForm, answer_visible_date: e.target.value })} />
         </div>
+        <div className="form-group">
+          <label className="label">Link video chữa bài (YouTube)</label>
+          <input className="input" placeholder="https://youtube.com/watch?v=..." value={hwForm.solution_video_url} onChange={(e) => setHwForm({ ...hwForm, solution_video_url: e.target.value })} />
+          <div style={{ fontSize: '0.75rem', color: '#888', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Video size={12} /> Học sinh sẽ xem được video chữa cùng lúc với đáp án (theo "Thời gian xem đáp án").
+          </div>
+        </div>
+        {hwForm.solution_video_url && (
+          <div style={{ marginBottom: '1rem', borderRadius: 8, overflow: 'hidden' }}>
+            <VideoPlayer url={hwForm.solution_video_url} type="youtube" />
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div className="form-group">
             <label className="label">File đề bài (PDF)</label>

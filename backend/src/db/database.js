@@ -61,16 +61,28 @@ function initSchema() {
       FOREIGN KEY (student_id) REFERENCES users(id)
     );
 
+    -- Chương: nhóm bài giảng & bài tập trong một lớp, có thứ tự
+    CREATE TABLE IF NOT EXISTS chapters (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      class_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      chapter_order INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (class_id) REFERENCES classes(id)
+    );
+
     CREATE TABLE IF NOT EXISTS lessons (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       class_id INTEGER NOT NULL,
+      chapter_id INTEGER,
       title TEXT NOT NULL,
       description TEXT,
       video_url TEXT,
       video_type TEXT CHECK(video_type IN ('youtube','local','url')),
       lesson_order INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (class_id) REFERENCES classes(id)
+      FOREIGN KEY (class_id) REFERENCES classes(id),
+      FOREIGN KEY (chapter_id) REFERENCES chapters(id)
     );
 
     CREATE TABLE IF NOT EXISTS homework (
@@ -217,6 +229,18 @@ function initSchema() {
   // Migration: nhiều file bài nộp (JSON array tên file). file_path giữ file đầu cho tương thích cũ
   if (!subCols.some(c => c.name === 'files')) {
     db.exec('ALTER TABLE submissions ADD COLUMN files TEXT');
+  }
+  // Migration: chương cho bài giảng & bài tập
+  const lessonCols = db.prepare("PRAGMA table_info(lessons)").all();
+  if (!lessonCols.some(c => c.name === 'chapter_id')) {
+    db.exec('ALTER TABLE lessons ADD COLUMN chapter_id INTEGER');
+  }
+  if (!hwCols.some(c => c.name === 'chapter_id')) {
+    db.exec('ALTER TABLE homework ADD COLUMN chapter_id INTEGER');
+  }
+  // Migration: link video chữa bài (YouTube) cho bài tập
+  if (!hwCols.some(c => c.name === 'solution_video_url')) {
+    db.exec('ALTER TABLE homework ADD COLUMN solution_video_url TEXT');
   }
 
   const admin = db.prepare("SELECT id FROM users WHERE role='admin' LIMIT 1").get();
