@@ -216,10 +216,37 @@ tbody tr:hover { background: #FAFAFA; }
 .stat-value { font-size: 1.8rem; font-weight: 800; line-height: 1; }
 .stat-label { font-size: 0.82rem; color: #888; margin-top: 2px; }
 
+/* ── Public navbar (trang công khai) ──────────────────────── */
+.desktop-nav { display: flex; align-items: center; gap: 4px; }
+.mobile-menu-btn { display: none; background: none; border: none; cursor: pointer; padding: 4px; }
+
 /* ── Responsive ───────────────────────────────────────────── */
 @media (max-width: 768px) {
   .sidebar { transform: translateX(-240px); }
   .sidebar.mobile-open { transform: translateX(0); }
   .main-content { margin-left: 0; }
   .content-area { padding: 1rem; }
+
+  /* Trang công khai: ẩn menu ngang, hiện nút hamburger */
+  .desktop-nav { display: none; }
+  .mobile-menu-btn { display: flex; }
+
+  /* Thanh trên cùng gọn hơn */
+  .topbar { padding: 0.7rem 1rem; }
+
+  /* Thẻ & bảng gọn hơn cho dễ đọc */
+  .card { padding: 1.15rem; }
+  .page-title { font-size: 1.25rem; }
+  th, td { padding: 0.6rem 0.7rem; font-size: 0.85rem; }
+  th { letter-spacing: 0.02em; }
+
+  /* Modal rộng gần hết màn, dễ thao tác bằng ngón tay */
+  .modal-overlay { padding: 0.6rem; }
+  .modal { padding: 1.15rem; max-height: 94vh; border-radius: 14px; }
+  .modal-footer .btn { flex: 1; justify-content: center; }
+}
+
+/* Ẩn phần tử chỉ trên màn rất nhỏ (vd: tên người dùng trên topbar) */
+@media (max-width: 480px) {
+  .hide-mobile { display: none !important; }
 }

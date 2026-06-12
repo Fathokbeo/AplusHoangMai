@@ -52,7 +52,7 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
           </Link>
 
           {/* Desktop nav */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} className="desktop-nav">
+          <div className="desktop-nav">
             {NAV.map((n) => {
               const active = n.to === pathname;
               return (
@@ -86,7 +86,7 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
           </div>
 
           {/* Mobile hamburger */}
-          <button onClick={() => setNavOpen(!navOpen)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: solid ? '#333' : 'white', display: 'none' }} className="mobile-menu-btn">
+          <button onClick={() => setNavOpen(!navOpen)} style={{ color: solid ? '#333' : 'white' }} className="mobile-menu-btn">
             {navOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
         </div>

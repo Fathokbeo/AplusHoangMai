@@ -48,7 +48,7 @@ export default function Topbar({ onMenuClick, title }: Props) {
           }}>
             {user?.full_name?.[0] || 'U'}
           </div>
-          {user?.full_name}
+          <span className="hide-mobile">{user?.full_name}</span>
         </div>
       </div>
     </header>

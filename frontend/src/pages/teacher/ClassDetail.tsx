@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../../lib/api';
 import Modal from '../../components/Modal';
 import VideoPlayer from '../../components/VideoPlayer';
+import useIsMobile from '../../lib/useIsMobile';
 import { toast } from '../../components/Toast';
 import {
   Users, BookOpen, ClipboardList, Plus, Edit, Trash2,
@@ -33,6 +34,7 @@ export default function ClassDetail() {
   const [newStudent, setNewStudent] = useState({ username: '', password: '', full_name: '', parent_phone: '' });
   const pdfRef = useRef<HTMLInputElement>(null);
   const answerRef = useRef<HTMLInputElement>(null);
+  const isMobile = useIsMobile();
   useEffect(() => { fetchClass(); }, [id]);
 
   const fetchClass = async () => {
@@ -319,7 +321,7 @@ export default function ClassDetail() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: 4, background: '#F5F5F5', padding: 4, borderRadius: 10, marginBottom: '1.5rem', width: 'fit-content', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 4, background: '#F5F5F5', padding: 4, borderRadius: 10, marginBottom: '1.5rem', width: isMobile ? '100%' : 'fit-content', flexWrap: 'wrap' }}>
         {tabs.map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => setActiveTab(key as any)} className="btn"
             style={{ background: activeTab === key ? 'white' : 'transparent', boxShadow: activeTab === key ? '0 2px 6px rgba(0,0,0,0.08)' : 'none', color: activeTab === key ? '#C62828' : '#888', border: 'none', gap: 6 }}>
@@ -569,7 +571,7 @@ export default function ClassDetail() {
           <label className="label">Mô tả / Hướng dẫn</label>
           <textarea className="input" rows={3} value={hwForm.description} onChange={(e) => setHwForm({ ...hwForm, description: e.target.value })} />
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
           <div className="form-group">
             <label className="label">Thang điểm</label>
             <input className="input" type="number" min={1} value={hwForm.max_score} onChange={(e) => setHwForm({ ...hwForm, max_score: e.target.value })} />
@@ -595,7 +597,7 @@ export default function ClassDetail() {
             <VideoPlayer url={hwForm.solution_video_url} type="youtube" />
           </div>
         )}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
           <div className="form-group">
             <label className="label">File đề bài (PDF)</label>
             <div className="dropzone" style={{ padding: '1rem' }} onClick={() => pdfRef.current?.click()}>

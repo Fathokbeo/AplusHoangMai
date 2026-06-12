@@ -5,6 +5,7 @@ import VideoPlayer from '../../components/VideoPlayer';
 import Modal from '../../components/Modal';
 import GradingDetails from '../../components/GradingDetails';
 import FileViewer from '../../components/FileViewer';
+import useIsMobile from '../../lib/useIsMobile';
 import { toast } from '../../components/Toast';
 import { ChevronLeft, Play, ClipboardList, BookOpen, Upload, CheckCircle, Clock, Eye, Bot, Lock, FileText, X, Plus, Layers, Video } from 'lucide-react';
 
@@ -29,6 +30,7 @@ export default function StudentClassDetail() {
   const [loading, setLoading] = useState(false);
   const [viewFiles, setViewFiles] = useState<string[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const isMobile = useIsMobile();
 
   useEffect(() => { fetchClass(); }, [id]);
 
@@ -123,11 +125,12 @@ export default function StudentClassDetail() {
 
     return (
       <div key={hw.id} className="card" style={{ padding: '1.25rem' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flexDirection: isMobile ? 'column' : 'row' }}>
+          <div style={{ display: 'flex', gap: 12, flex: 1, minWidth: 0, width: isMobile ? '100%' : 'auto' }}>
           <div style={{ width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, background: isSubmitted ? '#E8F5E9' : '#F3E5F5' }}>
             {isSubmitted ? <CheckCircle size={18} color="#2E7D32" /> : <ClipboardList size={18} color="#6A1B9A" />}
           </div>
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
               <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>{hw.title}</span>
               {isSubmitted && <span className="badge badge-green">Đã nộp</span>}
@@ -162,9 +165,10 @@ export default function StudentClassDetail() {
               </div>
             )}
           </div>
+          </div>
 
           {/* Actions */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end', flexShrink: 0 }}>
+          <div style={{ display: 'flex', flexDirection: isMobile ? 'row' : 'column', flexWrap: 'wrap', gap: 6, alignItems: 'center', justifyContent: isMobile ? 'flex-start' : 'flex-end', flexShrink: 0, width: isMobile ? '100%' : 'auto' }}>
             {hw.pdf_file && (
               <button className="btn btn-ghost btn-sm" onClick={() => setViewFiles([`/uploads/homework/${hw.pdf_file}`])}>
                 <FileText size={13} /> Xem đề
@@ -218,7 +222,7 @@ export default function StudentClassDetail() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: 4, background: '#F5F5F5', padding: 4, borderRadius: 10, marginBottom: '1.5rem', width: 'fit-content' }}>
+      <div style={{ display: 'flex', gap: 4, background: '#F5F5F5', padding: 4, borderRadius: 10, marginBottom: '1.5rem', width: isMobile ? '100%' : 'fit-content', flexWrap: 'wrap' }}>
         {tabs.map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => setActiveTab(key as any)} className="btn"
             style={{ background: activeTab === key ? 'white' : 'transparent', boxShadow: activeTab === key ? '0 2px 6px rgba(0,0,0,0.08)' : 'none', color: activeTab === key ? '#C62828' : '#888', border: 'none', gap: 6 }}>
