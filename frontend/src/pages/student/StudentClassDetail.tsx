@@ -7,7 +7,7 @@ import GradingDetails from '../../components/GradingDetails';
 import FileViewer from '../../components/FileViewer';
 import useIsMobile from '../../lib/useIsMobile';
 import { toast } from '../../components/Toast';
-import { ChevronLeft, Play, ClipboardList, BookOpen, Upload, CheckCircle, Clock, Eye, Bot, Lock, FileText, X, Plus, Layers, Video } from 'lucide-react';
+import { ChevronLeft, Play, ClipboardList, BookOpen, Upload, CheckCircle, Clock, Eye, Bot, Lock, FileText, X, Plus, Layers, Video, ChevronDown, ChevronRight } from 'lucide-react';
 
 // Danh sách URL các file đã nộp (hỗ trợ cũ: 1 file, mới: nhiều file dạng JSON)
 function submittedFileUrls(hw: any): string[] {
@@ -20,7 +20,7 @@ function submittedFileUrls(hw: any): string[] {
 export default function StudentClassDetail() {
   const { id } = useParams();
   const [cls, setCls] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'lessons' | 'homework'>('lessons');
+  const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
   const [viewLessonModal, setViewLessonModal] = useState(false);
   const [viewingLesson, setViewingLesson] = useState<any>(null);
   const [solutionVideo, setSolutionVideo] = useState<{ title: string; url: string } | null>(null);
@@ -41,6 +41,12 @@ export default function StudentClassDetail() {
     const t = setInterval(fetchClass, 8000);
     return () => clearInterval(t);
   }, [cls]);
+
+  // Khi mở lớp: lớp chưa dùng chương thì mở sẵn nhóm "Chưa phân chương", còn lại để thu gọn
+  useEffect(() => {
+    if (cls) setExpandedChapters(new Set((cls.chapters?.length || 0) === 0 ? ['orphan'] : []));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cls?.id]);
 
   const fetchClass = async () => {
     const { data } = await api.get(`/student/my-classes/${id}`);
@@ -85,29 +91,26 @@ export default function StudentClassDetail() {
   if (!cls) return <div style={{ padding: '2rem', textAlign: 'center', color: '#999' }}>Đang tải...</div>;
 
   const chapters: any[] = cls.chapters || [];
-  const hasChapters = chapters.length > 0;
 
-  // Nhóm theo chương (chương theo thứ tự, cuối là "Chưa phân chương")
-  const groupByChapter = (items: any[]) => {
-    const groups = chapters.map((ch) => ({ chapter: ch, items: items.filter((it) => it.chapter_id === ch.id) }));
-    const orphans = items.filter((it) => !it.chapter_id || !chapters.some((ch) => ch.id === it.chapter_id));
-    if (orphans.length || !hasChapters) groups.push({ chapter: null, items: orphans });
-    return groups;
-  };
+  // Nội dung lớp gom theo chương (theo thứ tự); cuối là nhóm "Chưa phân chương" nếu có bài lẻ
+  const lessonsAll: any[] = cls.lessons || [];
+  const homeworkAll: any[] = cls.homework || [];
+  const contentGroups: any[] = chapters.map((ch: any) => ({
+    key: String(ch.id), chapter: ch,
+    lessons: lessonsAll.filter((l: any) => l.chapter_id === ch.id),
+    homework: homeworkAll.filter((h: any) => h.chapter_id === ch.id),
+  }));
+  const orphanLessons = lessonsAll.filter((l: any) => !l.chapter_id || !chapters.some((c: any) => c.id === l.chapter_id));
+  const orphanHomework = homeworkAll.filter((h: any) => !h.chapter_id || !chapters.some((c: any) => c.id === h.chapter_id));
+  if (orphanLessons.length || orphanHomework.length) {
+    contentGroups.push({ key: 'orphan', chapter: null, lessons: orphanLessons, homework: orphanHomework });
+  }
 
-  const chapterLabel = (chapter: any) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0 10px' }}>
-      <Layers size={15} color={chapter ? '#1565C0' : '#999'} />
-      <span style={{ fontWeight: 700, fontSize: '0.92rem', color: chapter ? '#1A1A2E' : '#999' }}>
-        {chapter ? chapter.title : 'Chưa phân chương'}
-      </span>
-    </div>
-  );
-
-  const tabs = [
-    { key: 'lessons', label: `Bài giảng (${cls.lessons?.length || 0})`, icon: BookOpen },
-    { key: 'homework', label: `Bài tập (${cls.homework?.length || 0})`, icon: ClipboardList },
-  ];
+  const toggleChapter = (key: string) => setExpandedChapters((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
 
   const renderLessonCard = (l: any, i: number) => (
     <div key={l.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '1rem 1.25rem' }}>
@@ -225,6 +228,42 @@ export default function StudentClassDetail() {
     );
   };
 
+  // Một chương dạng accordion: bấm để mở/đóng, mở ra mới thấy bài giảng & bài tập
+  const renderChapterAccordion = (group: any, idx: number) => {
+    const open = expandedChapters.has(group.key);
+    const lc = group.lessons.length, hc = group.homework.length;
+    return (
+      <div key={group.key} className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div onClick={() => toggleChapter(group.key)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '1rem 1.25rem', cursor: 'pointer' }}>
+          {open ? <ChevronDown size={18} color="#888" /> : <ChevronRight size={18} color="#888" />}
+          <div style={{ width: 36, height: 36, background: group.chapter ? '#E3F2FD' : '#F5F5F5', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            {group.chapter ? <span style={{ fontWeight: 700, color: '#1565C0', fontSize: '0.9rem' }}>{idx + 1}</span> : <Layers size={16} color="#999" />}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: '0.95rem', color: group.chapter ? '#1A1A2E' : '#777' }}>{group.chapter ? group.chapter.title : 'Chưa phân chương'}</div>
+            <div style={{ fontSize: '0.78rem', color: '#888', marginTop: 2 }}>{lc} bài giảng · {hc} bài tập</div>
+          </div>
+        </div>
+        {open && (
+          <div style={{ padding: '0 1.25rem 1.25rem', display: 'flex', flexDirection: 'column', gap: 16, borderTop: '1px solid #F0F0F0' }}>
+            <div style={{ marginTop: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}><BookOpen size={14} color="#1565C0" /><span style={{ fontWeight: 700, fontSize: '0.85rem' }}>Bài giảng ({lc})</span></div>
+              {lc === 0 ? <div style={{ fontSize: '0.8rem', color: '#aaa' }}>Chưa có bài giảng</div> : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{group.lessons.map((l: any, i: number) => renderLessonCard(l, i))}</div>
+              )}
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}><ClipboardList size={14} color="#6A1B9A" /><span style={{ fontWeight: 700, fontSize: '0.85rem' }}>Bài tập ({hc})</span></div>
+              {hc === 0 ? <div style={{ fontSize: '0.8rem', color: '#aaa' }}>Chưa có bài tập</div> : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{group.homework.map((hw: any) => renderHomeworkCard(hw))}</div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="fade-in">
       {/* Header */}
@@ -241,54 +280,13 @@ export default function StudentClassDetail() {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: 4, background: '#F5F5F5', padding: 4, borderRadius: 10, marginBottom: '1.5rem', width: isMobile ? '100%' : 'fit-content', flexWrap: 'wrap' }}>
-        {tabs.map(({ key, label, icon: Icon }) => (
-          <button key={key} onClick={() => setActiveTab(key as any)} className="btn"
-            style={{ background: activeTab === key ? 'white' : 'transparent', boxShadow: activeTab === key ? '0 2px 6px rgba(0,0,0,0.08)' : 'none', color: activeTab === key ? '#C62828' : '#888', border: 'none', gap: 6 }}>
-            <Icon size={15} />{label}
-          </button>
-        ))}
-      </div>
-
-      {/* Lessons */}
-      {activeTab === 'lessons' && (
-        (!cls.lessons || cls.lessons.length === 0) ? (
-          <div style={{ textAlign: 'center', color: '#999', padding: '2rem', background: 'white', borderRadius: 12 }}>Chưa có bài giảng</div>
-        ) : (
-          <div>
-            {groupByChapter(cls.lessons).map(({ chapter, items }) => (
-              items.length === 0 ? null : (
-                <div key={chapter?.id || 'none'} style={{ marginBottom: 18 }}>
-                  {hasChapters && chapterLabel(chapter)}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {items.map((l: any, i: number) => renderLessonCard(l, i))}
-                  </div>
-                </div>
-              )
-            ))}
-          </div>
-        )
-      )}
-
-      {/* Homework */}
-      {activeTab === 'homework' && (
-        (!cls.homework || cls.homework.length === 0) ? (
-          <div style={{ textAlign: 'center', color: '#999', padding: '2rem', background: 'white', borderRadius: 12 }}>Chưa có bài tập</div>
-        ) : (
-          <div>
-            {groupByChapter(cls.homework).map(({ chapter, items }) => (
-              items.length === 0 ? null : (
-                <div key={chapter?.id || 'none'} style={{ marginBottom: 18 }}>
-                  {hasChapters && chapterLabel(chapter)}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {items.map((hw: any) => renderHomeworkCard(hw))}
-                  </div>
-                </div>
-              )
-            ))}
-          </div>
-        )
+      {/* Danh sách chương → mở chương ra mới thấy bài giảng & bài tập */}
+      {contentGroups.length === 0 ? (
+        <div style={{ textAlign: 'center', color: '#999', padding: '2rem', background: 'white', borderRadius: 12 }}>Chưa có nội dung</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {contentGroups.map((g, i) => renderChapterAccordion(g, i))}
+        </div>
       )}
 
       {/* View Lesson Modal */}
