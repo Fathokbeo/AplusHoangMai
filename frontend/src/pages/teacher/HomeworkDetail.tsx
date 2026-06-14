@@ -5,7 +5,8 @@ import Modal from '../../components/Modal';
 import GradingDetails from '../../components/GradingDetails';
 import FileViewer from '../../components/FileViewer';
 import { toast } from '../../components/Toast';
-import { ChevronLeft, Users, CheckCircle, Clock, Bot, Star, Eye } from 'lucide-react';
+import { sortByVietnameseName } from '../../lib/vietnameseName';
+import { ChevronLeft, Users, CheckCircle, Clock, Bot, Star, Eye, Download } from 'lucide-react';
 
 // Danh sách URL file của một bài nộp (hỗ trợ cũ: 1 file, mới: nhiều file dạng JSON)
 function submissionFileUrls(s: any): string[] {
@@ -26,6 +27,14 @@ export default function HomeworkDetail() {
   const [viewFiles, setViewFiles] = useState<string[] | null>(null);
 
   useEffect(() => { fetchHw(); }, [id]);
+
+  // Tự làm mới khi còn bài đang được AI chấm nền, để cập nhật điểm
+  useEffect(() => {
+    const pending = hw?.submissions?.some((s: any) => s.grading_status === 'pending' || s.grading_status === 'grading');
+    if (!pending) return;
+    const t = setInterval(fetchHw, 8000);
+    return () => clearInterval(t);
+  }, [hw]);
 
   const fetchHw = async () => {
     const { data } = await api.get(`/homework/${id}`);
@@ -73,10 +82,46 @@ export default function HomeworkDetail() {
     return { bg: '#FFEBEE', color: '#C62828' };
   };
 
+  // Xuất bảng điểm ra file Excel (.xlsx): STT, Họ và tên, Điểm, Nhận xét
+  const exportExcel = async () => {
+    const subs = sortByVietnameseName(hw.submissions || [], (s: any) => s.full_name || '');
+    if (subs.length === 0) { toast.error('Chưa có bài nộp để xuất'); return; }
+    const XLSX = await import('xlsx');
+
+    const header = ['STT', 'Họ và tên', 'Điểm', 'Nhận xét'];
+    const rows = subs.map((s: any, i: number) => [
+      i + 1,
+      s.full_name || '',
+      s.score !== null && s.score !== undefined ? s.score : 'Chưa chấm',
+      s.feedback || '',
+    ]);
+    const aoa = [
+      [hw.title],
+      [`Lớp: ${hw.class_title || ''}    Thang điểm: ${hw.max_score}`],
+      [],
+      header,
+      ...rows,
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 8 }, { wch: 60 }];
+    ws['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 3 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 3 } },
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Bảng điểm');
+    const safeTitle = (hw.title || 'bai-tap').replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 80);
+    XLSX.writeFile(wb, `Bang diem - ${safeTitle}.xlsx`);
+    toast.success('Đã xuất file Excel');
+  };
+
   if (!hw) return <div style={{ padding: '2rem', color: '#999', textAlign: 'center' }}>Đang tải...</div>;
 
   const graded = hw.submissions?.filter((s: any) => s.score !== null).length || 0;
   const total = hw.submissions?.length || 0;
+  const sortedSubmissions = sortByVietnameseName(hw.submissions || [], (s: any) => s.full_name || '');
 
   return (
     <div className="fade-in">
@@ -142,8 +187,13 @@ export default function HomeworkDetail() {
       )}
 
       {/* Submissions table */}
-      <h2 className="section-title">Danh sách nộp bài</h2>
-      <div className="table-wrap">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <h2 className="section-title" style={{ margin: 0 }}>Danh sách nộp bài</h2>
+        <button className="btn btn-success btn-sm" onClick={exportExcel} disabled={total === 0} title="Xuất bảng điểm ra Excel">
+          <Download size={14} /> Xuất Excel
+        </button>
+      </div>
+      <div className="table-wrap" style={{ marginTop: 12 }}>
         <table>
           <thead>
             <tr>
@@ -156,7 +206,7 @@ export default function HomeworkDetail() {
             </tr>
           </thead>
           <tbody>
-            {hw.submissions?.map((s: any) => {
+            {sortedSubmissions.map((s: any) => {
               const sc = s.score !== null ? scoreColor(s.score, hw.max_score) : null;
               const fileUrls = submissionFileUrls(s);
               return (
@@ -175,6 +225,12 @@ export default function HomeworkDetail() {
                       <span style={{ background: sc?.bg, color: sc?.color, padding: '3px 10px', borderRadius: 99, fontWeight: 700, fontSize: '0.88rem' }}>
                         {s.score}/{hw.max_score}
                       </span>
+                    ) : (s.grading_status === 'pending' || s.grading_status === 'grading') ? (
+                      <span style={{ color: '#1565C0', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <Bot size={12} /> Đang chấm...
+                      </span>
+                    ) : s.grading_status === 'failed' ? (
+                      <span style={{ color: '#C62828', fontSize: '0.82rem' }}>Chấm lỗi</span>
                     ) : <span style={{ color: '#ccc' }}>Chưa chấm</span>}
                   </td>
                   <td>

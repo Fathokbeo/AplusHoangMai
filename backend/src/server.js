@@ -27,6 +27,9 @@ app.use('/api', require('./routes/homework'));
 // Initialize DB (creates tables + default admin)
 require('./db/database').getDb();
 
+// Bật hàng đợi chấm bài AI nền (phục hồi bài còn dở + thử lại khi lỗi)
+require('./services/gradingQueue').startGradingWorker();
+
 // Serve frontend build (single-service deploy). Nếu đã build frontend, phục vụ luôn.
 const frontendDist = path.join(__dirname, '../../frontend/dist');
 if (fs.existsSync(frontendDist)) {

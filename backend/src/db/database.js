@@ -230,6 +230,14 @@ function initSchema() {
   if (!subCols.some(c => c.name === 'files')) {
     db.exec('ALTER TABLE submissions ADD COLUMN files TEXT');
   }
+  // Migration: trạng thái chấm tự động (hàng đợi nền) + số lần đã thử chấm
+  // grading_status: 'pending' | 'grading' | 'done' | 'failed' | NULL (không cần chấm AI)
+  if (!subCols.some(c => c.name === 'grading_status')) {
+    db.exec('ALTER TABLE submissions ADD COLUMN grading_status TEXT');
+  }
+  if (!subCols.some(c => c.name === 'grading_attempts')) {
+    db.exec('ALTER TABLE submissions ADD COLUMN grading_attempts INTEGER DEFAULT 0');
+  }
   // Migration: chương cho bài giảng & bài tập
   const lessonCols = db.prepare("PRAGMA table_info(lessons)").all();
   if (!lessonCols.some(c => c.name === 'chapter_id')) {

@@ -5,9 +5,10 @@ import Modal from '../../components/Modal';
 import VideoPlayer from '../../components/VideoPlayer';
 import useIsMobile from '../../lib/useIsMobile';
 import { toast } from '../../components/Toast';
+import { sortByVietnameseName, matchesNameSearch } from '../../lib/vietnameseName';
 import {
   Users, BookOpen, ClipboardList, Plus, Edit, Trash2,
-  UserPlus, UserMinus, Play, File, ChevronLeft, Upload, Clock, Eye, Bot, Layers, Video
+  UserPlus, UserMinus, Play, File, ChevronLeft, Upload, Clock, Eye, Bot, Layers, Video, Search
 } from 'lucide-react';
 
 export default function ClassDetail() {
@@ -29,6 +30,7 @@ export default function ClassDetail() {
   const [hwForm, setHwForm] = useState({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '', chapter_id: '', solution_video_url: '' });
   const [hwFiles, setHwFiles] = useState<{ pdf?: File; answer?: File }>({});
   const [chapterForm, setChapterForm] = useState({ title: '', chapter_order: '0' });
+  const [studentSearch, setStudentSearch] = useState('');
   const [selectedStudent, setSelectedStudent] = useState('');
   const [addMode, setAddMode] = useState<'new' | 'existing'>('new');
   const [newStudent, setNewStudent] = useState({ username: '', password: '', full_name: '', parent_phone: '' });
@@ -227,6 +229,10 @@ export default function ClassDetail() {
   const chapters: any[] = cls.chapters || [];
   const hasChapters = chapters.length > 0;
 
+  // Học sinh: tự xếp theo tên riêng (tiếng Việt) rồi lọc theo ô tìm kiếm
+  const sortedStudents = sortByVietnameseName(cls.students || [], (s: any) => s.full_name || '');
+  const visibleStudents = sortedStudents.filter((s: any) => matchesNameSearch(s.full_name || '', studentSearch));
+
   // Nhóm bài giảng / bài tập theo chương (chương theo thứ tự, cuối là "Chưa phân chương")
   const groupByChapter = (items: any[]) => {
     const groups = chapters.map((ch) => ({ chapter: ch, items: items.filter((it) => it.chapter_id === ch.id) }));
@@ -333,14 +339,24 @@ export default function ClassDetail() {
       {/* Students tab */}
       {activeTab === 'students' && (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+            <div style={{ position: 'relative', flex: 1, minWidth: 200, maxWidth: 360 }}>
+              <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#999' }} />
+              <input
+                className="input"
+                style={{ paddingLeft: 32 }}
+                placeholder="Tìm học sinh (tên đệm, tên riêng...)"
+                value={studentSearch}
+                onChange={(e) => setStudentSearch(e.target.value)}
+              />
+            </div>
             <button className="btn btn-primary" onClick={openAddStudent}><UserPlus size={15} /> Thêm học sinh</button>
           </div>
           <div className="table-wrap">
             <table>
               <thead><tr><th>#</th><th>Họ tên</th><th>Tên đăng nhập</th><th>SĐT Phụ huynh</th><th></th></tr></thead>
               <tbody>
-                {cls.students?.map((s: any, i: number) => (
+                {visibleStudents.map((s: any, i: number) => (
                   <tr key={s.id}>
                     <td style={{ color: '#999' }}>{i + 1}</td>
                     <td><strong>{s.full_name}</strong></td>
@@ -355,6 +371,9 @@ export default function ClassDetail() {
                 ))}
                 {(!cls.students || cls.students.length === 0) && (
                   <tr><td colSpan={5} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Chưa có học sinh</td></tr>
+                )}
+                {cls.students?.length > 0 && visibleStudents.length === 0 && (
+                  <tr><td colSpan={5} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Không tìm thấy học sinh phù hợp</td></tr>
                 )}
               </tbody>
             </table>

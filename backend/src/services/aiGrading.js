@@ -29,8 +29,15 @@ function buildInlinePart(filePath) {
   };
 }
 
-// Thứ tự ưu tiên model: flash trước (có free tier), pro làm dự phòng
+// Thứ tự ưu tiên model: flash trước (rẻ, có free tier), pro làm dự phòng
 const MODELS = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-pro'];
+
+// Giới hạn đầu ra để tiết kiệm token + ép trả JSON thuần (không markdown)
+const GENERATION_CONFIG = {
+  temperature: 0.7,
+  maxOutputTokens: 4096,
+  responseMimeType: 'application/json',
+};
 
 async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 10, gradingNote = '', attempts = 3) {
   if (!fs.existsSync(answerFilePath))   throw new Error('File đáp án không tồn tại');
@@ -49,18 +56,24 @@ async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 1
     ? `- Các tài liệu tiếp theo (${subPaths.length} tệp): BÀI LÀM CỦA HỌC SINH — gồm nhiều ảnh/trang, hãy xem xét TẤT CẢ như một bài làm liền mạch.`
     : `- Tài liệu thứ hai: BÀI LÀM CỦA HỌC SINH`;
 
-  const prompt = `Bạn là giáo viên chấm bài. Hãy chấm điểm bài làm của học sinh dựa trên đáp án.
+  const prompt = `Bạn là giáo viên chấm bài thi tự luận. Hãy chấm điểm bài làm của học sinh dựa trên đáp án.
 
 - Tài liệu thứ nhất: ĐÁP ÁN
 ${subDesc}
 ${noteBlock}
-Yêu cầu:
-- So sánh TỪNG câu/bài trong bài làm với đáp án.
+CÁCH ĐỌC BÀI LÀM (rất quan trọng):
+- Bài làm là ảnh chụp/scan CHỮ VIẾT TAY, có thể xấu, mờ, nghiêng, tẩy xóa. Hãy đọc thật kỹ TỪNG dòng.
+- Dựa vào ngữ cảnh toán học để nhận diện đúng con số, ký hiệu, biến, phân số, lũy thừa, dấu.
+- Với MỖI câu tự luận, xác định KẾT QUẢ / ĐÁP SỐ CUỐI CÙNG mà học sinh đưa ra (thường nằm ở cuối lời giải, sau dấu "=", sau chữ "Vậy", "KL", "Đáp số", hoặc được gạch chân/khoanh tròn).
+- Nếu chữ quá khó đọc, hãy suy luận hợp lý nhất thay vì bỏ qua; chỉ coi là sai khi thực sự sai.
+
+CÁCH CHẤM:
+- So sánh TỪNG câu/bài trong bài làm với đáp án, dựa trên kết quả cuối cùng VÀ các bước lập luận chính.
 - Với MỖI câu, xác định trạng thái: "correct" (đúng), "wrong" (sai), hoặc "partial" (đúng một phần) và giải thích NGẮN GỌN bằng tiếng Việt vì sao.
-- Tính điểm hợp lý trên thang ${maxScore} điểm.
+- Tính điểm hợp lý, công bằng trên thang ${maxScore} điểm.
 - Viết nhận xét tổng quan bằng tiếng Việt.
 
-Trả lời CHÍNH XÁC theo định dạng JSON sau (không thêm bất kỳ text nào khác, không markdown):
+Trả về JSON đúng định dạng sau (chỉ JSON, không kèm chữ nào khác):
 {
   "score": <số từ 0 đến ${maxScore}>,
   "feedback": "<nhận xét tổng quan>",
@@ -76,14 +89,21 @@ Trả lời CHÍNH XÁC theo định dạng JSON sau (không thêm bất kỳ te
   ];
 
   // Chấm nhiều lần (mặc định 3) rồi LẤY KẾT QUẢ CÓ ĐIỂM CAO NHẤT.
-  // Chạy song song cho nhanh; dùng allSettled để 1-2 lần lỗi vẫn lấy được lần thành công.
+  // Chạy TUẦN TỰ (không song song) để: tránh lỗi quota 429 do bắn nhiều request cùng lúc,
+  // và để Gemini tái dùng phần dữ liệu giống nhau ở các lần sau (tiết kiệm token).
   const n = Math.max(1, attempts);
-  const runs = await Promise.allSettled(
-    Array.from({ length: n }, () => callModelOnce(parts, maxScore))
-  );
-  const results = runs.filter(r => r.status === 'fulfilled').map(r => r.value);
+  const results = [];
+  let lastErr;
+  for (let i = 0; i < n; i++) {
+    try {
+      results.push(await callModelOnce(parts, maxScore));
+    } catch (err) {
+      lastErr = err;
+      console.error(`[AI grading] lần ${i + 1}/${n} lỗi: ${err.message}`);
+    }
+  }
   if (results.length === 0) {
-    throw runs.find(r => r.status === 'rejected')?.reason || new Error('Chấm bài thất bại');
+    throw lastErr || new Error('Chấm bài thất bại');
   }
   results.sort((a, b) => b.score - a.score);
   console.log(`[AI grading] ${results.length}/${n} lần thành công, điểm: [${results.map(r => r.score).join(', ')}] → lấy cao nhất ${results[0].score}`);
@@ -96,7 +116,7 @@ async function callModelOnce(parts, maxScore) {
   let lastErr;
   for (const modelName of MODELS) {
     try {
-      const model = genAI.getGenerativeModel({ model: modelName });
+      const model = genAI.getGenerativeModel({ model: modelName, generationConfig: GENERATION_CONFIG });
       const result = await model.generateContent(parts);
       const text = result.response.text().trim();
       const jsonMatch = text.match(/\{[\s\S]*\}/);

@@ -5,7 +5,7 @@ const fs = require('fs');
 const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { uploadHomework, uploadSubmission } = require('../middleware/upload');
-const { gradeSubmission } = require('../services/aiGrading');
+const { enqueue, gradeOne } = require('../services/gradingQueue');
 
 router.use(authMiddleware);
 
@@ -161,32 +161,28 @@ router.post(
       });
     }
 
+    // Có đáp án → đưa vào hàng đợi chấm AI ('pending'); không có → để giáo viên chấm tay (NULL)
+    const initialStatus = hw.answer_file ? 'pending' : null;
+
     let submissionId;
     if (existing) {
-      db.prepare('UPDATE submissions SET file_path=?,files=?,submitted_at=?,score=NULL,feedback=NULL,grading_details=NULL,graded_at=NULL WHERE id=?')
-        .run(filenames[0], filesJson, now, existing.id);
+      db.prepare('UPDATE submissions SET file_path=?,files=?,submitted_at=?,score=NULL,feedback=NULL,grading_details=NULL,graded_at=NULL,graded_by_ai=0,grading_status=?,grading_attempts=0 WHERE id=?')
+        .run(filenames[0], filesJson, now, initialStatus, existing.id);
       submissionId = existing.id;
     } else {
-      const r = db.prepare('INSERT INTO submissions (homework_id,student_id,file_path,files,submitted_at) VALUES (?,?,?,?,?)')
-        .run(req.params.id, req.user.id, filenames[0], filesJson, now);
+      const r = db.prepare('INSERT INTO submissions (homework_id,student_id,file_path,files,submitted_at,grading_status,grading_attempts) VALUES (?,?,?,?,?,?,0)')
+        .run(req.params.id, req.user.id, filenames[0], filesJson, now, initialStatus);
       submissionId = r.lastInsertRowid;
     }
 
-    // Auto grade if answer file exists
-    if (hw.answer_file) {
-      try {
-        const answerPath = path.join(__dirname, '../../uploads/homework', hw.answer_file);
-        const subPaths = filenames.map(name => path.join(__dirname, '../../uploads/submissions', name));
-        const result = await gradeSubmission(answerPath, subPaths, hw.max_score, hw.grading_note);
-        db.prepare('UPDATE submissions SET score=?,feedback=?,grading_details=?,graded_at=?,graded_by_ai=1 WHERE id=?')
-          .run(result.score, result.feedback, JSON.stringify(result.details || []), now, submissionId);
-      } catch (err) {
-        console.error('AI grading error:', err.message);
-      }
-    }
+    // Nhận bài NGAY, không chờ chấm. Việc chấm AI chạy nền (có thử lại nếu lỗi).
+    if (hw.answer_file) enqueue(submissionId);
 
     const sub = db.prepare('SELECT * FROM submissions WHERE id=?').get(submissionId);
-    res.json({ message: 'Nộp bài thành công', submission: sub });
+    const message = hw.answer_file
+      ? 'Nộp bài thành công. Hệ thống đang tự động chấm, kết quả sẽ hiển thị sau ít phút.'
+      : 'Nộp bài thành công.';
+    res.json({ message, submission: sub });
   }
 );
 
@@ -199,21 +195,19 @@ router.put('/submissions/:id/grade', requireRole('teacher', 'admin'), (req, res)
   res.json({ message: 'Đã chấm điểm' });
 });
 
-// ── Re-grade with AI ────────────────────────────────────────────────────
+// ── Re-grade with AI (giáo viên bấm chấm lại — chờ kết quả ngay) ─────────
 router.post('/submissions/:id/regrade', requireRole('teacher', 'admin'), async (req, res) => {
   const db = getDb();
-  const sub = db.prepare('SELECT s.*,h.answer_file,h.max_score,h.grading_note FROM submissions s JOIN homework h ON s.homework_id=h.id WHERE s.id=?').get(req.params.id);
+  const sub = db.prepare('SELECT s.*,h.answer_file FROM submissions s JOIN homework h ON s.homework_id=h.id WHERE s.id=?').get(req.params.id);
   if (!sub) return res.status(404).json({ message: 'Không tìm thấy' });
   if (!sub.answer_file) return res.status(400).json({ message: 'Không có file đáp án' });
-  const subFiles = submissionFilenames(sub);
-  if (subFiles.length === 0) return res.status(400).json({ message: 'Học sinh chưa nộp bài' });
+  if (submissionFilenames(sub).length === 0) return res.status(400).json({ message: 'Học sinh chưa nộp bài' });
 
+  // Chấm lại từ đầu → reset số lần thử rồi chấm ngay (force), trả kết quả cho giáo viên
+  db.prepare('UPDATE submissions SET grading_attempts=0 WHERE id=?').run(req.params.id);
   try {
-    const answerPath = path.join(__dirname, '../../uploads/homework', sub.answer_file);
-    const subPaths = subFiles.map(name => path.join(__dirname, '../../uploads/submissions', name));
-    const result = await gradeSubmission(answerPath, subPaths, sub.max_score, sub.grading_note);
-    db.prepare('UPDATE submissions SET score=?,feedback=?,grading_details=?,graded_at=?,graded_by_ai=1 WHERE id=?')
-      .run(result.score, result.feedback, JSON.stringify(result.details || []), new Date().toISOString(), req.params.id);
+    const result = await gradeOne(Number(req.params.id), { force: true });
+    if (!result) return res.status(400).json({ message: 'Không thể chấm bài này' });
     res.json({ message: 'Đã chấm lại', score: result.score, feedback: result.feedback, details: result.details });
   } catch (err) {
     res.status(500).json({ message: 'Lỗi chấm bài: ' + err.message });

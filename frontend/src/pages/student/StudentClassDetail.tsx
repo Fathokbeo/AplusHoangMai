@@ -34,6 +34,14 @@ export default function StudentClassDetail() {
 
   useEffect(() => { fetchClass(); }, [id]);
 
+  // Tự làm mới khi có bài vừa nộp đang được AI chấm nền, để cập nhật điểm
+  useEffect(() => {
+    const pending = cls?.homework?.some((hw: any) => hw.submission_id && hw.score === null && (hw.grading_status === 'pending' || hw.grading_status === 'grading'));
+    if (!pending) return;
+    const t = setInterval(fetchClass, 8000);
+    return () => clearInterval(t);
+  }, [cls]);
+
   const fetchClass = async () => {
     const { data } = await api.get(`/student/my-classes/${id}`);
     setCls(data);
@@ -162,6 +170,18 @@ export default function StudentClassDetail() {
                   </div>
                 )}
                 <GradingDetails details={hw.grading_details} />
+              </div>
+            )}
+
+            {/* Đã nộp nhưng chưa có điểm: cho biết hệ thống đang chấm tự động */}
+            {isSubmitted && !hasGrade && (hw.grading_status === 'pending' || hw.grading_status === 'grading') && (
+              <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem', color: '#1565C0', background: '#E3F2FD', borderRadius: 8, padding: '0.6rem 0.8rem' }}>
+                <Bot size={15} /> Đã nhận bài — hệ thống đang tự động chấm, kết quả sẽ hiển thị sau ít phút.
+              </div>
+            )}
+            {isSubmitted && !hasGrade && hw.grading_status === 'failed' && (
+              <div style={{ marginTop: 12, fontSize: '0.82rem', color: '#888', background: '#F5F5F5', borderRadius: 8, padding: '0.6rem 0.8rem' }}>
+                Đã nhận bài. Giáo viên sẽ chấm và trả điểm sớm.
               </div>
             )}
           </div>
