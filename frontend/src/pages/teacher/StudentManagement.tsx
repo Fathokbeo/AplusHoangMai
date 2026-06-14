@@ -92,7 +92,7 @@ export default function StudentManagement() {
 
       <div className="table-wrap">
         <table>
-          <thead><tr><th>#</th><th>Họ tên</th><th>Tên đăng nhập</th><th>Lớp học</th><th>SĐT Phụ huynh</th><th>Thao tác</th></tr></thead>
+          <thead><tr><th>#</th><th>Họ tên</th><th>Tên đăng nhập</th><th>Lớp học</th><th>Số điện thoại</th><th>Thao tác</th></tr></thead>
           <tbody>
             {filtered.map((s, i) => (
               <tr key={s.id}>
@@ -147,7 +147,7 @@ export default function StudentManagement() {
           <input className="input" type="text" placeholder="Mật khẩu" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
         </div>
         <div className="form-group">
-          <label className="label">SĐT Phụ huynh</label>
+          <label className="label">Số điện thoại</label>
           <input className="input" type="tel" placeholder="vd: 0912 345 678" value={form.parent_phone} onChange={(e) => setForm({ ...form, parent_phone: e.target.value })} />
         </div>
       </Modal>

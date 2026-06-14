@@ -354,7 +354,7 @@ export default function ClassDetail() {
           </div>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>#</th><th>Họ tên</th><th>Tên đăng nhập</th><th>SĐT Phụ huynh</th><th></th></tr></thead>
+              <thead><tr><th>#</th><th>Họ tên</th><th>Tên đăng nhập</th><th>Số điện thoại</th><th></th></tr></thead>
               <tbody>
                 {visibleStudents.map((s: any, i: number) => (
                   <tr key={s.id}>
@@ -491,7 +491,7 @@ export default function ClassDetail() {
               <input className="input" type="text" placeholder="Mật khẩu" value={newStudent.password} onChange={(e) => setNewStudent({ ...newStudent, password: e.target.value })} />
             </div>
             <div className="form-group">
-              <label className="label">SĐT Phụ huynh</label>
+              <label className="label">Số điện thoại</label>
               <input className="input" type="tel" placeholder="vd: 0912 345 678 (tùy chọn)" value={newStudent.parent_phone} onChange={(e) => setNewStudent({ ...newStudent, parent_phone: e.target.value })} />
             </div>
           </>

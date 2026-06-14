@@ -187,7 +187,7 @@ export default function UserManagement() {
               <th>Họ tên</th>
               <th>Tên đăng nhập</th>
               <th>Mật khẩu</th>
-              <th>SĐT Phụ huynh</th>
+              <th>Số điện thoại</th>
               <th>Vai trò</th>
               <th>Trạng thái</th>
               <th>Thao tác</th>
@@ -268,7 +268,7 @@ export default function UserManagement() {
           <input className="input" type="text" placeholder="Mật khẩu" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
         </div>
         <div className="form-group">
-          <label className="label">SĐT Phụ huynh</label>
+          <label className="label">Số điện thoại</label>
           <input className="input" type="tel" placeholder="vd: 0912 345 678" value={form.parent_phone} onChange={(e) => setForm({ ...form, parent_phone: e.target.value })} />
         </div>
         {!editing && (
