@@ -62,6 +62,7 @@ async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 1
 ${subDesc}
 ${noteBlock}
 CÁCH ĐỌC BÀI LÀM (rất quan trọng):
+- Thứ tự các ảnh bài làm được gửi lên CÓ THỂ KHÔNG đúng với thứ tự thực tế (học sinh chụp ảnh và nộp có thể bị lộn trang). Trước khi chấm, hãy tự xác định thứ tự đọc hợp lý dựa vào: số thứ tự câu/trang ghi trên ảnh (nếu có), và tính liên tục của lời giải (câu/dòng sau nối tiếp logic với câu/dòng trước) — KHÔNG mặc định thứ tự ảnh được gửi là đúng.
 - Bài làm là ảnh chụp/scan CHỮ VIẾT TAY, có thể xấu, mờ, nghiêng, tẩy xóa. Hãy đọc thật kỹ TỪNG dòng.
 - Dựa vào ngữ cảnh toán học để nhận diện đúng con số, ký hiệu, biến, phân số, lũy thừa, dấu.
 - Với MỖI câu tự luận, xác định KẾT QUẢ / ĐÁP SỐ CUỐI CÙNG mà học sinh đưa ra (thường nằm ở cuối lời giải, sau dấu "=", sau chữ "Vậy", "KL", "Đáp số", hoặc được gạch chân/khoanh tròn).
