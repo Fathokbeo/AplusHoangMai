@@ -3,9 +3,11 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../../lib/api';
 import Modal from '../../components/Modal';
 import GradingDetails from '../../components/GradingDetails';
+import StructuredAnswerReview from '../../components/StructuredAnswerReview';
 import FileViewer from '../../components/FileViewer';
 import { toast } from '../../components/Toast';
 import { sortByVietnameseName } from '../../lib/vietnameseName';
+import { parsePartsConfig, hasObjectiveParts } from '../../lib/homeworkParts';
 import { ChevronLeft, Users, CheckCircle, Clock, Bot, Star, Eye, Download } from 'lucide-react';
 
 // Danh sách URL file của một bài nộp (hỗ trợ cũ: 1 file, mới: nhiều file dạng JSON)
@@ -122,6 +124,8 @@ export default function HomeworkDetail() {
   const graded = hw.submissions?.filter((s: any) => s.score !== null).length || 0;
   const total = hw.submissions?.length || 0;
   const sortedSubmissions = sortByVietnameseName(hw.submissions || [], (s: any) => s.full_name || '');
+  // Bài có thể AI chấm: có file đáp án tự luận hoặc có phần objective (có key)
+  const aiGradable = !!hw.answer_file || hasObjectiveParts(parsePartsConfig(hw.parts_config));
 
   return (
     <div className="fade-in">
@@ -214,11 +218,13 @@ export default function HomeworkDetail() {
                   <td><strong>{s.full_name}</strong><div style={{ fontSize: '0.78rem', color: '#999' }}>{s.username}</div></td>
                   <td style={{ fontSize: '0.82rem', color: '#888' }}>{new Date(s.submitted_at).toLocaleString('vi-VN')}</td>
                   <td>
-                    {fileUrls.length > 0 && (
+                    {fileUrls.length > 0 ? (
                       <button className="btn btn-ghost btn-sm" onClick={() => setViewFiles(fileUrls)}>
                         <Eye size={13} /> Xem{fileUrls.length > 1 ? ` (${fileUrls.length})` : ''}
                       </button>
-                    )}
+                    ) : s.structured_answers ? (
+                      <span style={{ fontSize: '0.78rem', color: '#6A1B9A' }}>Đã làm bài</span>
+                    ) : null}
                   </td>
                   <td>
                     {s.score !== null ? (
@@ -241,7 +247,7 @@ export default function HomeworkDetail() {
                       <button className="btn btn-secondary btn-sm" onClick={() => openGrade(s)}>
                         <Star size={13} /> {s.score !== null ? 'Sửa điểm' : 'Chấm'}
                       </button>
-                      {hw.answer_file && fileUrls.length > 0 && (
+                      {aiGradable && (fileUrls.length > 0 || s.structured_answers) && (
                         <button className="btn btn-ghost btn-sm" onClick={() => regrade(s.id)} disabled={regrading === s.id} title="Chấm lại bằng AI">
                           <Bot size={13} style={{ color: '#6A1B9A' }} />
                           {regrading === s.id ? '...' : 'AI'}
@@ -275,6 +281,7 @@ export default function HomeworkDetail() {
             <Eye size={13} /> Xem bài nộp{submissionFileUrls(grading).length > 1 ? ` (${submissionFileUrls(grading).length})` : ''}
           </button>
         )}
+        {grading?.structured_answers && <StructuredAnswerReview partsConfig={hw.parts_config} structuredAnswers={grading.structured_answers} />}
         {grading?.grading_details && <GradingDetails details={grading.grading_details} />}
       </Modal>
 

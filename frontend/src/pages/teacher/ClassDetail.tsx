@@ -3,14 +3,27 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../../lib/api';
 import Modal from '../../components/Modal';
 import VideoPlayer from '../../components/VideoPlayer';
+import PartsEditor from '../../components/PartsEditor';
 import useIsMobile from '../../lib/useIsMobile';
 import { toast } from '../../components/Toast';
 import { sortByVietnameseName, matchesNameSearch } from '../../lib/vietnameseName';
+import { emptyPartsConfig, normalizePartsConfig, computeMaxScore, anyPartEnabled, PartsConfig, PART_LABELS, PART_ORDER, PartKey } from '../../lib/homeworkParts';
 import {
   Users, BookOpen, ClipboardList, Edit, Trash2,
   UserPlus, UserMinus, Play, File, ChevronLeft, Upload, Clock, Eye, Bot, Layers, Video, Search,
   ChevronDown, ChevronRight
 } from 'lucide-react';
+
+// Badge hiển thị các phần đã bật của một bài tập (từ parts_config)
+function partBadges(raw: any) {
+  const cfg = normalizePartsConfig(raw);
+  const active = PART_ORDER.filter((k: PartKey) => (k === 'essay' ? cfg.essay.enabled : (cfg as any)[k].enabled));
+  if (active.length === 0) return null;
+  return active.map((k) => {
+    const count = k === 'essay' ? null : (cfg as any)[k].count;
+    return <span key={k} className="badge badge-purple">{PART_LABELS[k]}{count ? ` ×${count}` : ''}</span>;
+  });
+}
 
 export default function ClassDetail() {
   const { id } = useParams();
@@ -29,6 +42,7 @@ export default function ClassDetail() {
   const [loading, setLoading] = useState(false);
   const [lessonForm, setLessonForm] = useState({ title: '', description: '', video_url: '', video_type: 'youtube', lesson_order: '0', chapter_id: '' });
   const [hwForm, setHwForm] = useState({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '', chapter_id: '', solution_video_url: '' });
+  const [hwParts, setHwParts] = useState<PartsConfig>(emptyPartsConfig());
   const [hwFiles, setHwFiles] = useState<{ pdf?: File; answer?: File }>({});
   const [chapterForm, setChapterForm] = useState({ title: '', chapter_order: '0' });
   const [studentSearch, setStudentSearch] = useState('');
@@ -181,6 +195,7 @@ export default function ClassDetail() {
   const openCreateHw = () => {
     setEditingHw(null);
     setHwForm({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '', chapter_id: '', solution_video_url: '' });
+    setHwParts(emptyPartsConfig());
     setHwFiles({});
     setHwModal(true);
   };
@@ -196,6 +211,7 @@ export default function ClassDetail() {
       chapter_id: h.chapter_id ? String(h.chapter_id) : '',
       solution_video_url: h.solution_video_url || '',
     });
+    setHwParts(normalizePartsConfig(h.parts_config));
     setHwFiles({});
     setHwModal(true);
   };
@@ -205,7 +221,10 @@ export default function ClassDetail() {
     setLoading(true);
     try {
       const body = new FormData();
-      Object.entries(hwForm).forEach(([k, v]) => body.append(k, v));
+      // Nếu có cấu hình phần, thang điểm = tổng điểm các phần (tự tính)
+      const effectiveMax = anyPartEnabled(hwParts) ? String(computeMaxScore(hwParts)) : hwForm.max_score;
+      Object.entries({ ...hwForm, max_score: effectiveMax }).forEach(([k, v]) => body.append(k, v));
+      body.append('parts_config', JSON.stringify(hwParts));
       if (hwFiles.pdf) body.append('pdf_file', hwFiles.pdf);
       if (hwFiles.answer) body.append('answer_file', hwFiles.answer);
 
@@ -302,6 +321,7 @@ export default function ClassDetail() {
             {h.pdf_file && <span className="badge badge-orange"><File size={10} style={{ marginRight: 3 }} />Có đề</span>}
             {h.answer_file && <span className="badge badge-green"><Eye size={10} style={{ marginRight: 3 }} />Có đáp án</span>}
             {h.solution_video_url && <span className="badge badge-red"><Video size={10} style={{ marginRight: 3 }} />Video chữa</span>}
+            {partBadges(h.parts_config)}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
@@ -578,10 +598,23 @@ export default function ClassDetail() {
           <label className="label">Mô tả / Hướng dẫn</label>
           <textarea className="input" rows={3} value={hwForm.description} onChange={(e) => setHwForm({ ...hwForm, description: e.target.value })} />
         </div>
+        <div className="form-group">
+          <label className="label">Kiểu nộp bài</label>
+          <div style={{ fontSize: '0.75rem', color: '#888', margin: '2px 0 10px' }}>
+            Chọn các phần học sinh sẽ làm. Thứ tự khi làm bài: Trắc nghiệm → Đúng/Sai → Trả lời ngắn → Tự luận.
+            Trắc nghiệm/Đúng-Sai/Trả lời ngắn được <strong>chấm tự động</strong> theo đáp án &amp; điểm bạn đặt; phần tự luận do AI chấm theo file đáp án.
+          </div>
+          <PartsEditor value={hwParts} onChange={setHwParts} />
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
           <div className="form-group">
             <label className="label">Thang điểm</label>
-            <input className="input" type="number" min={1} value={hwForm.max_score} onChange={(e) => setHwForm({ ...hwForm, max_score: e.target.value })} />
+            <input className="input" type="number" min={1}
+              value={anyPartEnabled(hwParts) ? computeMaxScore(hwParts) : hwForm.max_score}
+              disabled={anyPartEnabled(hwParts)}
+              title={anyPartEnabled(hwParts) ? 'Tự tính theo tổng điểm các phần' : ''}
+              onChange={(e) => setHwForm({ ...hwForm, max_score: e.target.value })} />
+            {anyPartEnabled(hwParts) && <div style={{ fontSize: '0.72rem', color: '#888', marginTop: 4 }}>Tự tính = tổng điểm các phần.</div>}
           </div>
           <div className="form-group">
             <label className="label">Hạn nộp bài</label>

@@ -5,8 +5,10 @@ import VideoPlayer from '../../components/VideoPlayer';
 import Modal from '../../components/Modal';
 import GradingDetails from '../../components/GradingDetails';
 import FileViewer from '../../components/FileViewer';
+import PartsSolver, { StudentAnswers } from '../../components/PartsSolver';
 import useIsMobile from '../../lib/useIsMobile';
 import { toast } from '../../components/Toast';
+import { parsePartsConfig, hasObjectiveParts, hasEssay, emptyStudentAnswers, PART_LABELS, PART_ORDER, PartKey } from '../../lib/homeworkParts';
 import { ChevronLeft, Play, ClipboardList, BookOpen, Upload, CheckCircle, Clock, Eye, Bot, Lock, FileText, X, Plus, Layers, Video, ChevronDown, ChevronRight } from 'lucide-react';
 
 // Danh sách URL các file đã nộp (hỗ trợ cũ: 1 file, mới: nhiều file dạng JSON)
@@ -27,6 +29,7 @@ export default function StudentClassDetail() {
   const [submitModal, setSubmitModal] = useState(false);
   const [submitting, setSubmitting] = useState<any>(null);
   const [submitFiles, setSubmitFiles] = useState<File[]>([]);
+  const [studentAnswers, setStudentAnswers] = useState<StudentAnswers>({ multiple_choice: [], true_false: [], short_answer: [] });
   const [loading, setLoading] = useState(false);
   const [viewFiles, setViewFiles] = useState<string[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -56,6 +59,16 @@ export default function StudentClassDetail() {
   const openSubmit = (hw: any) => {
     setSubmitting(hw);
     setSubmitFiles([]);
+    const cfg = parsePartsConfig(hw.parts_config);
+    // Nạp lại đáp án đã nộp (nếu nộp lại) hoặc khởi tạo rỗng theo cấu hình bài
+    let prev: any = null;
+    if (hw.structured_answers) { try { prev = JSON.parse(hw.structured_answers); } catch { /* ignore */ } }
+    const empty = emptyStudentAnswers(cfg);
+    setStudentAnswers({
+      multiple_choice: prev?.multiple_choice || empty.multiple_choice,
+      true_false: prev?.true_false || empty.true_false,
+      short_answer: prev?.short_answer || empty.short_answer,
+    });
     setSubmitModal(true);
   };
 
@@ -72,11 +85,15 @@ export default function StudentClassDetail() {
   const removeFile = (idx: number) => setSubmitFiles((prev) => prev.filter((_, i) => i !== idx));
 
   const doSubmit = async () => {
-    if (submitFiles.length === 0) { toast.error('Chọn ít nhất một file bài làm'); return; }
+    const cfg = parsePartsConfig(submitting?.parts_config);
+    const objective = hasObjectiveParts(cfg);
+    // Phải có bài làm: đáp án objective đã điền HOẶC ít nhất một file (cho phần tự luận / bài cũ)
+    if (submitFiles.length === 0 && !objective) { toast.error('Chọn ít nhất một file bài làm'); return; }
     setLoading(true);
     try {
       const body = new FormData();
       submitFiles.forEach((f) => body.append('files', f));
+      if (objective) body.append('structured_answers', JSON.stringify(studentAnswers));
       const { data } = await api.post(`/homework/${submitting.id}/submit`, body);
       toast.success(data.message);
       setSubmitModal(false);
@@ -153,6 +170,20 @@ export default function StudentClassDetail() {
               <span>Thang điểm: {hw.max_score}</span>
               {hw.due_date && <span><Clock size={11} style={{ verticalAlign: 'middle' }} /> HH: {new Date(hw.due_date).toLocaleString('vi-VN')}</span>}
             </div>
+            {(() => {
+              const cfg = parsePartsConfig(hw.parts_config);
+              if (!cfg) return null;
+              const active = PART_ORDER.filter((k: PartKey) => (k === 'essay' ? cfg.essay.enabled : (cfg as any)[k].enabled));
+              if (active.length === 0) return null;
+              return (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                  {active.map((k) => {
+                    const count = k === 'essay' ? null : (cfg as any)[k].count;
+                    return <span key={k} className="badge badge-purple">{PART_LABELS[k]}{count ? ` ×${count}` : ''}</span>;
+                  })}
+                </div>
+              );
+            })()}
 
             {/* Grade display */}
             {hasGrade && (
@@ -264,6 +295,12 @@ export default function StudentClassDetail() {
     );
   };
 
+  // Cấu hình các phần của bài đang nộp (cho modal làm bài)
+  const submitCfg = parsePartsConfig(submitting?.parts_config);
+  const submitObjective = hasObjectiveParts(submitCfg);
+  const submitEssay = hasEssay(submitCfg) || !submitCfg; // bài cũ (không cfg) coi như chỉ tự luận
+  const canDoSubmit = submitObjective || submitFiles.length > 0;
+
   return (
     <div className="fade-in">
       {/* Header */}
@@ -305,13 +342,21 @@ export default function StudentClassDetail() {
       </Modal>
 
       {/* Submit Homework Modal */}
-      <Modal open={submitModal} onClose={() => setSubmitModal(false)} title={`Nộp bài: ${submitting?.title}`}
-        footer={<><button className="btn btn-ghost" onClick={() => setSubmitModal(false)}>Hủy</button><button className="btn btn-primary" onClick={doSubmit} disabled={loading || submitFiles.length === 0}>{loading ? 'Đang nộp...' : `Nộp bài${submitFiles.length > 0 ? ` (${submitFiles.length} file)` : ''}`}</button></>}>
+      <Modal open={submitModal} onClose={() => setSubmitModal(false)} title={`Làm bài: ${submitting?.title}`} size={submitObjective ? 'lg' : undefined}
+        footer={<><button className="btn btn-ghost" onClick={() => setSubmitModal(false)}>Hủy</button><button className="btn btn-primary" onClick={doSubmit} disabled={loading || !canDoSubmit}>{loading ? 'Đang nộp...' : `Nộp bài${submitFiles.length > 0 ? ` (${submitFiles.length} file)` : ''}`}</button></>}>
+        {submitObjective && (
+          <div style={{ marginBottom: '1.25rem' }}>
+            <PartsSolver cfg={submitCfg!} value={studentAnswers} onChange={setStudentAnswers} />
+          </div>
+        )}
         <div style={{ marginBottom: '1rem', padding: '0.75rem', background: '#F5F5F5', borderRadius: 8, fontSize: '0.82rem', color: '#666' }}>
-          Nộp bài dạng ảnh chụp (JPG, PNG) hoặc file PDF. Có thể chọn <strong>nhiều ảnh</strong> cho một bài. Hệ thống AI sẽ tự động chấm điểm và cho kết quả ngay sau khi nộp.
+          {submitObjective
+            ? <>Chọn/điền đáp án các phần ở trên{submitEssay ? ', rồi chụp ảnh phần TỰ LUẬN nộp bên dưới' : ''}. Hệ thống AI sẽ tự động chấm và cho kết quả ngay sau khi nộp.</>
+            : <>Nộp bài dạng ảnh chụp (JPG, PNG) hoặc file PDF. Có thể chọn <strong>nhiều ảnh</strong> cho một bài. Hệ thống AI sẽ tự động chấm điểm và cho kết quả ngay sau khi nộp.</>}
         </div>
+        {submitEssay && (
         <div className="form-group">
-          <label className="label">File bài làm (PDF hoặc ảnh) *</label>
+          <label className="label">{submitObjective ? 'Phần IV — Tự luận: ảnh bài làm (PDF hoặc ảnh) *' : 'File bài làm (PDF hoặc ảnh) *'}</label>
           <div className="dropzone" onClick={() => fileRef.current?.click()}
             onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }}
             onDragLeave={(e) => e.currentTarget.classList.remove('drag-over')}
@@ -347,6 +392,7 @@ export default function StudentClassDetail() {
             </div>
           )}
         </div>
+        )}
       </Modal>
 
       {/* File Viewer */}

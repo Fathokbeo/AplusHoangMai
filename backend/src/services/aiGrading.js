@@ -1,6 +1,7 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fs = require('fs');
 const path = require('path');
+const { parsePartsConfig, partEnabled, describeAnswerKey } = require('./homeworkParts');
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY);
 
@@ -39,39 +40,80 @@ const GENERATION_CONFIG = {
   responseMimeType: 'application/json',
 };
 
-async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 10, gradingNote = '', attempts = 3) {
-  if (!fs.existsSync(answerFilePath))   throw new Error('File đáp án không tồn tại');
+async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 10, gradingNote = '', attempts = 3, opts = {}) {
+  const { partsConfig = null, scope = null } = opts;
+  const cfg = parsePartsConfig(partsConfig);
+
+  // Phần nào AI cần chấm (scope do hàng đợi truyền vào). Bài cũ (không cfg) → chấm toàn bộ kiểu tự luận.
+  const gradePart = (k) => {
+    if (!cfg) return false;
+    if (k === 'essay') return scope ? !!scope.essay : partEnabled(cfg, 'essay');
+    return partEnabled(cfg, k) && (scope ? !!scope[k] : true);
+  };
+  const objOnly = { multiple_choice: gradePart('multiple_choice'), true_false: gradePart('true_false'), short_answer: gradePart('short_answer') };
+  const gradeObjective = objOnly.multiple_choice || objOnly.true_false || objOnly.short_answer;
+  const gradeEssay = cfg ? gradePart('essay') : true; // bài cũ: chấm toàn bộ như tự luận
+
+  // File đáp án tự luận (PDF) — có thể không có nếu chỉ chấm phần objective
+  const hasAnswerFile = !!answerFilePath && fs.existsSync(answerFilePath);
+
   // Học sinh có thể nộp nhiều file (nhiều ảnh / PDF) — chuẩn hóa về mảng
   const subPaths = (Array.isArray(submissionFilePaths) ? submissionFilePaths : [submissionFilePaths]).filter(Boolean);
-  if (subPaths.length === 0) throw new Error('Không có file bài nộp');
   for (const p of subPaths) {
     if (!fs.existsSync(p)) throw new Error('File bài nộp không tồn tại');
   }
+  if (subPaths.length === 0) throw new Error('Không có ảnh bài làm để AI chấm');
 
   const noteBlock = gradingNote && gradingNote.trim()
-    ? `\nHƯỚNG DẪN CHẤM CỦA GIÁO VIÊN (BẮT BUỘC tuân theo — chấm phần nào, chấm theo kiểu gì):\n"""${gradingNote.trim()}"""\n`
+    ? `\nHƯỚNG DẪN CHẤM CỦA GIÁO VIÊN (BẮT BUỘC tuân theo — chấm phần nào, chấm theo kiểu gì, chia điểm thế nào):\n"""${gradingNote.trim()}"""\n`
     : '';
 
-  const subDesc = subPaths.length > 1
-    ? `- Các tài liệu tiếp theo (${subPaths.length} tệp): BÀI LÀM CỦA HỌC SINH — gồm nhiều ảnh/trang, hãy xem xét TẤT CẢ như một bài làm liền mạch.`
-    : `- Tài liệu thứ hai: BÀI LÀM CỦA HỌC SINH`;
+  // Khối đáp án (key) của các phần objective AI phụ trách
+  const answerKeyBlock = gradeObjective
+    ? `\nĐÁP ÁN CÁC PHẦN (key chính thức — dùng để so chấm):\n${describeAnswerKey(cfg, objOnly)}\n`
+    : '';
 
-  const prompt = `Bạn là giáo viên chấm bài thi tự luận. Hãy chấm điểm bài làm của học sinh dựa trên đáp án.
+  // Mô tả các tài liệu đính kèm theo thứ tự để AI biết đâu là đáp án, đâu là bài làm
+  const docLines = [];
+  if (hasAnswerFile) docLines.push('- Tài liệu đầu tiên (PDF): ĐÁP ÁN phần tự luận.');
+  if (subPaths.length > 1) docLines.push(`- ${subPaths.length} tài liệu tiếp theo: BÀI LÀM CỦA HỌC SINH (nhiều ảnh/trang) — xem xét TẤT CẢ như một bài liền mạch.`);
+  else docLines.push('- Tài liệu tiếp theo: BÀI LÀM CỦA HỌC SINH (ảnh/PDF).');
+  const docBlock = `\nCÁC TÀI LIỆU ĐÍNH KÈM:\n${docLines.join('\n')}\n`;
 
-- Tài liệu thứ nhất: ĐÁP ÁN
-${subDesc}
-${noteBlock}
-CÁCH ĐỌC BÀI LÀM (rất quan trọng):
-- Thứ tự các ảnh bài làm được gửi lên CÓ THỂ KHÔNG đúng với thứ tự thực tế (học sinh chụp ảnh và nộp có thể bị lộn trang). Trước khi chấm, hãy tự xác định thứ tự đọc hợp lý dựa vào: số thứ tự câu/trang ghi trên ảnh (nếu có), và tính liên tục của lời giải (câu/dòng sau nối tiếp logic với câu/dòng trước) — KHÔNG mặc định thứ tự ảnh được gửi là đúng.
-- Bài làm là ảnh chụp/scan CHỮ VIẾT TAY, có thể xấu, mờ, nghiêng, tẩy xóa. Hãy đọc thật kỹ TỪNG dòng.
-- Dựa vào ngữ cảnh toán học để nhận diện đúng con số, ký hiệu, biến, phân số, lũy thừa, dấu.
-- Với MỖI câu tự luận, xác định KẾT QUẢ / ĐÁP SỐ CUỐI CÙNG mà học sinh đưa ra (thường nằm ở cuối lời giải, sau dấu "=", sau chữ "Vậy", "KL", "Đáp số", hoặc được gạch chân/khoanh tròn).
+  // Phạm vi chấm (chỉ những phần được giao)
+  const scopeNames = [];
+  if (objOnly.multiple_choice) scopeNames.push('TRẮC NGHIỆM');
+  if (objOnly.true_false) scopeNames.push('ĐÚNG/SAI');
+  if (objOnly.short_answer) scopeNames.push('TRẢ LỜI NGẮN');
+  if (gradeEssay) scopeNames.push('TỰ LUẬN');
+  const scopeBlock = cfg
+    ? `\nCHỈ CHẤM CÁC PHẦN SAU (các phần khác đã được hệ thống tự chấm, BỎ QUA): ${scopeNames.join(', ') || '(không có)'}\n`
+    : '';
+
+  // Luật chấm riêng cho từng phần được giao
+  const ruleLines = [];
+  if (objOnly.multiple_choice) ruleLines.push('- TRẮC NGHIỆM: mỗi câu so với đáp án đúng (A/B/C/D); đúng hay sai theo từng câu, không có điểm một phần.');
+  if (objOnly.true_false) ruleLines.push('- ĐÚNG/SAI (mỗi câu 4 ý a,b,c,d): chấm theo CHUẨN THPT — trong 1 câu: đúng 1 ý = 0.1, đúng 2 ý = 0.25, đúng 3 ý = 0.5, đúng cả 4 ý = 1.0 (TỈ LỆ trên điểm câu, quy đổi sang điểm thực tế).');
+  if (objOnly.short_answer) ruleLines.push('- TRẢ LỜI NGẮN: khớp LINH HOẠT, chấp nhận biến thể tương đương về mặt toán học (vd "1/2" = "0,5" = "0.5"; "2" = "2,0"; bỏ qua khác biệt khoảng trắng, dấu phẩy/chấm thập phân, hoa/thường).');
+  if (gradeEssay) ruleLines.push('- TỰ LUẬN: chấm như bài tự luận, so kết quả cuối cùng và các bước lập luận chính với đáp án; cho điểm một phần khi đúng một phần.');
+  const objectiveRules = ruleLines.length ? `\nLUẬT CHẤM TỪNG PHẦN:\n${ruleLines.join('\n')}\n` : '';
+
+  // Khi AI chấm phần objective: học sinh không điền giao diện → phải tự dò trong ảnh
+  const imageScanNote = gradeObjective
+    ? '\nLƯU Ý: Học sinh KHÔNG điền đáp án ở giao diện cho các phần khách quan cần chấm — hãy TỰ DÒ bài làm các phần đó ngay trong ẢNH rồi so với đáp án để chấm.\n'
+    : '';
+
+  const prompt = `Bạn là giáo viên chấm bài. Hãy chấm điểm bài làm của học sinh dựa trên đáp án, trên thang ${maxScore} điểm.
+${docBlock}${scopeBlock}${answerKeyBlock}${noteBlock}${objectiveRules}${imageScanNote}
+CÁCH ĐỌC BÀI LÀM (ảnh, nếu có):
+- Thứ tự các ảnh bài làm gửi lên CÓ THỂ KHÔNG đúng thứ tự thực tế (học sinh chụp có thể lộn trang). Hãy tự xác định thứ tự đọc hợp lý dựa vào số thứ tự câu/trang và tính liên tục của lời giải — KHÔNG mặc định thứ tự ảnh là đúng.
+- Bài làm là ảnh chụp/scan CHỮ VIẾT TAY, có thể xấu, mờ, nghiêng, tẩy xóa. Đọc thật kỹ TỪNG dòng; dựa vào ngữ cảnh toán học để nhận diện đúng con số, ký hiệu, biến, phân số, lũy thừa, dấu.
 - Nếu chữ quá khó đọc, hãy suy luận hợp lý nhất thay vì bỏ qua; chỉ coi là sai khi thực sự sai.
 
-CÁCH CHẤM:
-- So sánh TỪNG câu/bài trong bài làm với đáp án, dựa trên kết quả cuối cùng VÀ các bước lập luận chính.
-- Với MỖI câu, xác định trạng thái: "correct" (đúng), "wrong" (sai), hoặc "partial" (đúng một phần) và giải thích NGẮN GỌN bằng tiếng Việt vì sao.
-- Tính điểm hợp lý, công bằng trên thang ${maxScore} điểm.
+CÁCH CHẤM CHUNG:
+- CHỈ chấm các phần được giao ở trên. Tổng điểm các phần = điểm trả về, KHÔNG vượt quá ${maxScore}.
+- Phân chia điểm giữa các phần: theo HƯỚNG DẪN của giáo viên ở trên; nếu không nói rõ, hãy chia hợp lý.
+- Với MỖI câu, xác định trạng thái: "correct" (đúng), "wrong" (sai), hoặc "partial" (đúng một phần) kèm giải thích NGẮN GỌN bằng tiếng Việt.
 - Viết nhận xét tổng quan bằng tiếng Việt.
 
 Trả về JSON đúng định dạng sau (chỉ JSON, không kèm chữ nào khác):
@@ -79,13 +121,13 @@ Trả về JSON đúng định dạng sau (chỉ JSON, không kèm chữ nào kh
   "score": <số từ 0 đến ${maxScore}>,
   "feedback": "<nhận xét tổng quan>",
   "details": [
-    {"question": "<tên câu, vd: Câu 1>", "status": "correct|wrong|partial", "comment": "<giải thích ngắn gọn vì sao đúng/sai>"}
+    {"question": "<tên câu, vd: TN câu 1 / Đúng-Sai câu 2 / TLN câu 1 / Tự luận câu 1>", "status": "correct|wrong|partial", "comment": "<giải thích ngắn gọn>"}
   ]
 }`;
 
   const parts = [
     prompt,
-    buildInlinePart(answerFilePath),
+    ...(hasAnswerFile ? [buildInlinePart(answerFilePath)] : []),
     ...subPaths.map(buildInlinePart),
   ];
 

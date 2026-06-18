@@ -250,6 +250,14 @@ function initSchema() {
   if (!hwCols.some(c => c.name === 'solution_video_url')) {
     db.exec('ALTER TABLE homework ADD COLUMN solution_video_url TEXT');
   }
+  // Migration: cấu hình các kiểu nộp bài (JSON) — trắc nghiệm, đúng/sai, trả lời ngắn, tự luận + đáp án
+  if (!hwCols.some(c => c.name === 'parts_config')) {
+    db.exec('ALTER TABLE homework ADD COLUMN parts_config TEXT');
+  }
+  // Migration: đáp án có cấu trúc học sinh điền ở giao diện làm bài (JSON)
+  if (!subCols.some(c => c.name === 'structured_answers')) {
+    db.exec('ALTER TABLE submissions ADD COLUMN structured_answers TEXT');
+  }
 
   const admin = db.prepare("SELECT id FROM users WHERE role='admin' LIMIT 1").get();
   if (!admin) {
