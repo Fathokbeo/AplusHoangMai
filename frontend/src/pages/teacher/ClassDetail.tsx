@@ -7,7 +7,7 @@ import PartsEditor from '../../components/PartsEditor';
 import useIsMobile from '../../lib/useIsMobile';
 import { toast } from '../../components/Toast';
 import { sortByVietnameseName, matchesNameSearch } from '../../lib/vietnameseName';
-import { emptyPartsConfig, normalizePartsConfig, computeMaxScore, anyPartEnabled, PartsConfig, PART_LABELS, PART_ORDER, PartKey } from '../../lib/homeworkParts';
+import { emptyPartsConfig, normalizePartsConfig, computeMaxScore, anyPartEnabled, type PartsConfig, PART_LABELS, PART_ORDER, type PartKey } from '../../lib/homeworkParts';
 import {
   Users, BookOpen, ClipboardList, Edit, Trash2,
   UserPlus, UserMinus, Play, File, ChevronLeft, Upload, Clock, Eye, Bot, Layers, Video, Search,

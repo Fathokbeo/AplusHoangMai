@@ -5,10 +5,10 @@ import VideoPlayer from '../../components/VideoPlayer';
 import Modal from '../../components/Modal';
 import GradingDetails from '../../components/GradingDetails';
 import FileViewer from '../../components/FileViewer';
-import PartsSolver, { StudentAnswers } from '../../components/PartsSolver';
+import PartsSolver, { type StudentAnswers } from '../../components/PartsSolver';
 import useIsMobile from '../../lib/useIsMobile';
 import { toast } from '../../components/Toast';
-import { parsePartsConfig, hasObjectiveParts, hasEssay, emptyStudentAnswers, PART_LABELS, PART_ORDER, PartKey } from '../../lib/homeworkParts';
+import { parsePartsConfig, hasObjectiveParts, hasEssay, emptyStudentAnswers, PART_LABELS, PART_ORDER, type PartKey } from '../../lib/homeworkParts';
 import { ChevronLeft, Play, ClipboardList, BookOpen, Upload, CheckCircle, Clock, Eye, Bot, Lock, FileText, X, Plus, Layers, Video, ChevronDown, ChevronRight } from 'lucide-react';
 
 // Danh sách URL các file đã nộp (hỗ trợ cũ: 1 file, mới: nhiều file dạng JSON)

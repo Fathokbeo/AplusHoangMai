@@ -1,6 +1,6 @@
 // Giáo viên cấu hình 4 kiểu nộp bài + nhập đáp án (key) khi tạo/sửa bài tập.
 import {
-  PartsConfig, PartKey, MC_OPTIONS, TF_SUB_LABELS, resizeAnswers, resizePoints,
+  type PartsConfig, type PartKey, MC_OPTIONS, TF_SUB_LABELS, resizeAnswers, resizePoints,
   computeMaxScore, partTotalPoints, DEFAULT_POINTS,
 } from '../lib/homeworkParts';
 

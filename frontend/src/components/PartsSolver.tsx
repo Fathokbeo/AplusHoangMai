@@ -1,6 +1,6 @@
 // Giao diện "Làm bài" cho học sinh: trắc nghiệm, đúng/sai, trả lời ngắn.
 // Thứ tự cố định: Trắc nghiệm → Đúng/Sai → Trả lời ngắn. (Tự luận upload riêng ở ngoài.)
-import { PartsConfig, MC_OPTIONS, TF_SUB_LABELS } from '../lib/homeworkParts';
+import { type PartsConfig, MC_OPTIONS, TF_SUB_LABELS } from '../lib/homeworkParts';
 
 export interface StudentAnswers {
   multiple_choice: string[];
