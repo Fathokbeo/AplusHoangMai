@@ -1,6 +1,6 @@
 // Chấm điểm tự động (deterministic) cho các phần khách quan: trắc nghiệm, đúng/sai, trả lời ngắn.
 // Phần tự luận do AI chấm (xem aiGrading.js). Tệp này KHÔNG gọi AI.
-const { parsePartsConfig, partEnabled } = require('./homeworkParts');
+const { parsePartsConfig, partEnabled, keyIsSet } = require('./homeworkParts');
 
 // Tỉ lệ điểm Đúng/Sai theo số ý đúng (chuẩn THPT): 0,1,2,3,4 ý → 0, 0.1, 0.25, 0.5, 1.0 × điểm câu
 const TF_LADDER = [0, 0.1, 0.25, 0.5, 1.0];
@@ -75,9 +75,14 @@ function partAnswered(arr, kind) {
 
 // Chấm các phần objective dựa trên đáp án (key) + bài làm có cấu trúc của học sinh.
 // Trả về: { score, details[], gradedParts{set}, pendingAi[] (phần bật nhưng HS chưa điền) }
+// Detail báo "chưa có đáp án" (câu để trống mà cũng không đọc được từ file đáp án).
+function unresolvedDetail(label, i) {
+  return { question: `${label} câu ${i + 1}`, status: 'partial', comment: 'Chưa có đáp án để chấm — cần giáo viên kiểm tra' };
+}
+
 function scoreStructured(rawCfg, rawAns) {
   const cfg = parsePartsConfig(rawCfg);
-  const result = { score: 0, details: [], gradedParts: {}, pendingAi: [] };
+  const result = { score: 0, details: [], gradedParts: {}, pendingAi: [], unresolved: [] };
   if (!cfg) return result;
 
   let ans = rawAns;
@@ -92,6 +97,7 @@ function scoreStructured(rawCfg, rawAns) {
     if (partAnswered(stud, 'multiple_choice')) {
       result.gradedParts.multiple_choice = true;
       key.forEach((k, i) => {
+        if (!keyIsSet('multiple_choice', k)) { result.unresolved.push(['multiple_choice', i]); result.details.push(unresolvedDetail('Trắc nghiệm', i)); return; }
         const got = up1(stud[i]);
         const ok = got !== '' && got === up1(k);
         if (ok) result.score += pts[i];
@@ -112,6 +118,7 @@ function scoreStructured(rawCfg, rawAns) {
     if (partAnswered(stud, 'true_false')) {
       result.gradedParts.true_false = true;
       key.forEach((krow, i) => {
+        if (!keyIsSet('true_false', krow)) { result.unresolved.push(['true_false', i]); result.details.push(unresolvedDetail('Đúng/Sai', i)); return; }
         const srow = Array.isArray(stud[i]) ? stud[i] : [];
         const k = Array.isArray(krow) ? krow : [];
         let correct = 0;
@@ -143,6 +150,7 @@ function scoreStructured(rawCfg, rawAns) {
     if (partAnswered(stud, 'short_answer')) {
       result.gradedParts.short_answer = true;
       key.forEach((k, i) => {
+        if (!keyIsSet('short_answer', k)) { result.unresolved.push(['short_answer', i]); result.details.push(unresolvedDetail('Trả lời ngắn', i)); return; }
         const got = stud[i];
         const ok = saMatch(got, k);
         if (ok) result.score += pts[i];
@@ -159,6 +167,19 @@ function scoreStructured(rawCfg, rawAns) {
   return result;
 }
 
+// Tổng điểm THÔ (sum tất cả các câu + tự luận) của một cfg đã parse.
+function rawMaxScore(cfg) {
+  if (!cfg) return 0;
+  return round2(['multiple_choice', 'true_false', 'short_answer', 'essay'].reduce((s, k) => s + partMax(cfg, k), 0));
+}
+
+// Quy đổi điểm thô về thang giáo viên chọn: final = rawEarned / rawMax × scale.
+function scaleToTarget(rawEarned, rawMax, scale) {
+  const s = Number(scale);
+  if (!isFinite(s) || s <= 0 || !(rawMax > 0)) return round2(rawEarned);
+  return round2((Number(rawEarned) || 0) * s / rawMax);
+}
+
 module.exports = {
   TF_LADDER,
   DEFAULT_POINTS,
@@ -167,6 +188,8 @@ module.exports = {
   essayPoints,
   partMax,
   computeMaxScore,
+  rawMaxScore,
+  scaleToTarget,
   saMatch,
   scoreStructured,
 };

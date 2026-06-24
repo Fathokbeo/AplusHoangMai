@@ -43,6 +43,8 @@ export default function ClassDetail() {
   const [lessonForm, setLessonForm] = useState({ title: '', description: '', video_url: '', video_type: 'youtube', lesson_order: '0', chapter_id: '' });
   const [hwForm, setHwForm] = useState({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '', chapter_id: '', solution_video_url: '' });
   const [hwParts, setHwParts] = useState<PartsConfig>(emptyPartsConfig());
+  // Thang điểm đã được giáo viên chỉnh tay chưa (nếu chưa, tự bám theo tổng điểm các câu).
+  const [scaleTouched, setScaleTouched] = useState(false);
   const [hwFiles, setHwFiles] = useState<{ pdf?: File; answer?: File }>({});
   const [chapterForm, setChapterForm] = useState({ title: '', chapter_order: '0' });
   const [studentSearch, setStudentSearch] = useState('');
@@ -196,8 +198,18 @@ export default function ClassDetail() {
     setEditingHw(null);
     setHwForm({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '', chapter_id: '', solution_video_url: '' });
     setHwParts(emptyPartsConfig());
+    setScaleTouched(false);
     setHwFiles({});
     setHwModal(true);
+  };
+
+  // Cập nhật cấu hình các phần; nếu giáo viên chưa tự sửa thang điểm thì để thang bám theo tổng điểm các câu.
+  const updateHwParts = (next: PartsConfig) => {
+    setHwParts(next);
+    if (!scaleTouched && anyPartEnabled(next)) {
+      const m = computeMaxScore(next);
+      if (m > 0) setHwForm((f) => ({ ...f, max_score: String(m) }));
+    }
   };
 
   const openEditHw = (h: any) => {
@@ -212,6 +224,7 @@ export default function ClassDetail() {
       solution_video_url: h.solution_video_url || '',
     });
     setHwParts(normalizePartsConfig(h.parts_config));
+    setScaleTouched(true); // giữ nguyên thang điểm đã lưu của bài
     setHwFiles({});
     setHwModal(true);
   };
@@ -221,9 +234,8 @@ export default function ClassDetail() {
     setLoading(true);
     try {
       const body = new FormData();
-      // Nếu có cấu hình phần, thang điểm = tổng điểm các phần (tự tính)
-      const effectiveMax = anyPartEnabled(hwParts) ? String(computeMaxScore(hwParts)) : hwForm.max_score;
-      Object.entries({ ...hwForm, max_score: effectiveMax }).forEach(([k, v]) => body.append(k, v));
+      // Thang điểm = thang giáo viên chọn (để quy đổi). Mặc định đã bám theo tổng điểm các câu.
+      Object.entries(hwForm).forEach(([k, v]) => body.append(k, v));
       body.append('parts_config', JSON.stringify(hwParts));
       if (hwFiles.pdf) body.append('pdf_file', hwFiles.pdf);
       if (hwFiles.answer) body.append('answer_file', hwFiles.answer);
@@ -600,21 +612,30 @@ export default function ClassDetail() {
         </div>
         <div className="form-group">
           <label className="label">Kiểu nộp bài</label>
-          <div style={{ fontSize: '0.75rem', color: '#888', margin: '2px 0 10px' }}>
+          <div style={{ fontSize: '0.75rem', color: '#888', margin: '2px 0 10px', lineHeight: 1.6 }}>
             Chọn các phần học sinh sẽ làm. Thứ tự khi làm bài: Trắc nghiệm → Đúng/Sai → Trả lời ngắn → Tự luận.
-            Trắc nghiệm/Đúng-Sai/Trả lời ngắn được <strong>chấm tự động</strong> theo đáp án &amp; điểm bạn đặt; phần tự luận do AI chấm theo file đáp án.
+            Trắc nghiệm/Đúng-Sai/Trả lời ngắn được <strong>chấm tự động</strong> theo đáp án &amp; điểm bạn đặt.
+            Câu nào <strong>để trống đáp án</strong> → AI tự đọc từ <strong>File đáp án (PDF)</strong> bên dưới để chấm. Phần tự luận do AI chấm theo file đáp án.
           </div>
-          <PartsEditor value={hwParts} onChange={setHwParts} />
+          <PartsEditor value={hwParts} onChange={updateHwParts} />
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
           <div className="form-group">
-            <label className="label">Thang điểm</label>
-            <input className="input" type="number" min={1}
-              value={anyPartEnabled(hwParts) ? computeMaxScore(hwParts) : hwForm.max_score}
-              disabled={anyPartEnabled(hwParts)}
-              title={anyPartEnabled(hwParts) ? 'Tự tính theo tổng điểm các phần' : ''}
-              onChange={(e) => setHwForm({ ...hwForm, max_score: e.target.value })} />
-            {anyPartEnabled(hwParts) && <div style={{ fontSize: '0.72rem', color: '#888', marginTop: 4 }}>Tự tính = tổng điểm các phần.</div>}
+            <label className="label">Thang điểm{anyPartEnabled(hwParts) ? ' (quy đổi về)' : ''}</label>
+            <input className="input" type="number" min={1} step={0.5}
+              value={hwForm.max_score}
+              onChange={(e) => { setScaleTouched(true); setHwForm({ ...hwForm, max_score: e.target.value }); }} />
+            {anyPartEnabled(hwParts) && (
+              <div style={{ fontSize: '0.72rem', color: '#888', marginTop: 4, lineHeight: 1.5 }}>
+                Tổng điểm các câu: <strong>{computeMaxScore(hwParts)}</strong>. Điểm cuối = (điểm đạt ÷ tổng) × thang điểm.{' '}
+                {computeMaxScore(hwParts) > 0 && String(computeMaxScore(hwParts)) !== String(hwForm.max_score) && (
+                  <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '0 6px', height: 'auto' }}
+                    onClick={() => { setScaleTouched(true); setHwForm({ ...hwForm, max_score: String(computeMaxScore(hwParts)) }); }}>
+                    Đặt = {computeMaxScore(hwParts)} (không quy đổi)
+                  </button>
+                )}
+              </div>
+            )}
           </div>
           <div className="form-group">
             <label className="label">Hạn nộp bài</label>

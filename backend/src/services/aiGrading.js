@@ -40,6 +40,13 @@ const GENERATION_CONFIG = {
   responseMimeType: 'application/json',
 };
 
+// Đọc đáp án từ file: cần CHÍNH XÁC, ổn định → nhiệt độ thấp.
+const EXTRACT_CONFIG = {
+  temperature: 0.1,
+  maxOutputTokens: 2048,
+  responseMimeType: 'application/json',
+};
+
 async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 10, gradingNote = '', attempts = 3, opts = {}) {
   const { partsConfig = null, scope = null } = opts;
   const cfg = parsePartsConfig(partsConfig);
@@ -185,4 +192,73 @@ async function callModelOnce(parts, maxScore) {
   throw lastErr;
 }
 
-module.exports = { gradeSubmission };
+// ── Đọc FILE ĐÁP ÁN để trích đáp án (key) các câu objective giáo viên để trống ──────────
+// cfg: parts_config đã parse. missing: { multiple_choice:[idx], true_false:[idx], short_answer:[idx] }
+// Trả về { multiple_choice:['A',...], true_false:[['T','F','T','F'],...], short_answer:['12',...] }
+// theo thứ tự câu 1..n (chỉ các phần có câu để trống). Lỗi → ném để nơi gọi tự xử lý.
+async function extractAnswerKey(answerFilePath, cfg, missing) {
+  if (!answerFilePath || !fs.existsSync(answerFilePath)) throw new Error('Không có file đáp án để AI đọc');
+
+  const wants = [];
+  if (partEnabled(cfg, 'multiple_choice') && missing.multiple_choice && missing.multiple_choice.length) {
+    wants.push(`- "multiple_choice": mảng ${cfg.multiple_choice.count} phần tử, mỗi phần tử là 1 chữ "A"/"B"/"C"/"D" — đáp án đúng của câu 1..${cfg.multiple_choice.count} (đúng thứ tự).`);
+  }
+  if (partEnabled(cfg, 'true_false') && missing.true_false && missing.true_false.length) {
+    wants.push(`- "true_false": mảng ${cfg.true_false.count} phần tử, mỗi phần tử là mảng 4 giá trị "T"(Đúng)/"F"(Sai) cho 4 ý a,b,c,d của câu đó (đúng thứ tự câu 1..${cfg.true_false.count}).`);
+  }
+  if (partEnabled(cfg, 'short_answer') && missing.short_answer && missing.short_answer.length) {
+    wants.push(`- "short_answer": mảng ${cfg.short_answer.count} phần tử, mỗi phần tử là đáp án ngắn (chuỗi) của câu 1..${cfg.short_answer.count} (đúng thứ tự).`);
+  }
+  if (wants.length === 0) return {};
+
+  const prompt = `Đây là FILE ĐÁP ÁN của một đề kiểm tra. Hãy ĐỌC KỸ và trích ra ĐÁP ÁN ĐÚNG của các phần khách quan sau.
+Chỉ trả về JSON thuần (không kèm chữ nào khác), gồm đúng các khóa dưới đây:
+${wants.join('\n')}
+
+Yêu cầu:
+- Tuyệt đối giữ ĐÚNG THỨ TỰ câu (phần tử 0 = câu 1).
+- Nếu một câu không tìm thấy đáp án trong file, để giá trị null tại vị trí đó.
+- Trắc nghiệm: chỉ 1 chữ in hoa A/B/C/D. Đúng/Sai: "T" cho Đúng, "F" cho Sai.`;
+
+  const parts = [prompt, buildInlinePart(answerFilePath)];
+  let lastErr;
+  for (const modelName of MODELS) {
+    try {
+      const model = genAI.getGenerativeModel({ model: modelName, generationConfig: EXTRACT_CONFIG });
+      const result = await model.generateContent(parts);
+      const text = result.response.text().trim();
+      const m = text.match(/\{[\s\S]*\}/);
+      if (!m) throw new Error('AI không trả về JSON đáp án hợp lệ');
+      const parsed = JSON.parse(m[0]);
+      return normalizeExtractedKey(parsed, cfg);
+    } catch (err) {
+      lastErr = err;
+      if (!String(err.message).includes('429') && !String(err.message).includes('quota')) throw err;
+    }
+  }
+  throw lastErr;
+}
+
+// Chuẩn hóa kết quả AI trả về → đúng kiểu mong đợi cho từng phần.
+function normalizeExtractedKey(parsed, cfg) {
+  const out = {};
+  if (partEnabled(cfg, 'multiple_choice') && Array.isArray(parsed.multiple_choice)) {
+    out.multiple_choice = parsed.multiple_choice.map((v) => {
+      const c = String(v == null ? '' : v).trim().toUpperCase().charAt(0);
+      return /[ABCD]/.test(c) ? c : null;
+    });
+  }
+  if (partEnabled(cfg, 'true_false') && Array.isArray(parsed.true_false)) {
+    out.true_false = parsed.true_false.map((row) => {
+      if (!Array.isArray(row)) return null;
+      const r = row.slice(0, 4).map((v) => (String(v == null ? '' : v).trim().toUpperCase().startsWith('T') ? 'T' : (String(v).trim().toUpperCase().startsWith('F') ? 'F' : null)));
+      return r.length === 4 && r.every((x) => x) ? r : null;
+    });
+  }
+  if (partEnabled(cfg, 'short_answer') && Array.isArray(parsed.short_answer)) {
+    out.short_answer = parsed.short_answer.map((v) => (v == null ? null : String(v).trim()));
+  }
+  return out;
+}
+
+module.exports = { gradeSubmission, extractAnswerKey };

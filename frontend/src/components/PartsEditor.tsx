@@ -1,7 +1,9 @@
 // Giáo viên cấu hình 4 kiểu nộp bài + nhập đáp án (key) khi tạo/sửa bài tập.
+// Đáp án để TRỐNG nghĩa là: AI tự đọc từ File đáp án (PDF) khi chấm.
 import {
-  type PartsConfig, type PartKey, MC_OPTIONS, TF_SUB_LABELS, resizeAnswers, resizePoints,
-  computeMaxScore, partTotalPoints, DEFAULT_POINTS,
+  type PartsConfig, type PartKey, MC_OPTIONS, TF_SUB_LABELS,
+  resizeAnswers, resizeNotes, uniformPoints, pointPerOf, keyIsSet,
+  computeMaxScore, partTotalPoints,
 } from '../lib/homeworkParts';
 
 interface Props {
@@ -11,7 +13,7 @@ interface Props {
 
 const PART_TITLES: Record<string, string> = {
   multiple_choice: 'Trắc nghiệm (chọn A/B/C/D)',
-  true_false: 'Đúng / Sai (mỗi câu 4 ý a–d)',
+  true_false: 'Đúng / Sai (mỗi câu 4 ý a–d, kiểu đề THPT)',
   short_answer: 'Trả lời ngắn (điền đáp án)',
   essay: 'Tự luận (nộp ảnh, AI chấm theo file đáp án)',
 };
@@ -27,13 +29,32 @@ export default function PartsEditor({ value, onChange }: Props) {
     if (cur.enabled) setPart(key, { enabled: false });
     else {
       const count = cur.count > 0 ? cur.count : 1;
-      setPart(key, { enabled: true, count, answers: resizeAnswers(key, cur.answers, count), points: resizePoints(key, cur.points, count) });
+      const per = pointPerOf(key, cur.points);
+      setPart(key, {
+        enabled: true, count,
+        answers: resizeAnswers(key, cur.answers, count),
+        points: uniformPoints(per, count),
+        ...(key === 'short_answer' ? { notes: resizeNotes(cur.notes, count) } : {}),
+      });
     }
   };
 
   const setCount = (key: PartKey, raw: string) => {
     const count = Math.max(0, Math.min(50, parseInt(raw) || 0));
-    setPart(key, { count, answers: resizeAnswers(key, (value as any)[key].answers, count), points: resizePoints(key, (value as any)[key].points, count) });
+    const per = pointPerOf(key, (value as any)[key].points);
+    setPart(key, {
+      count,
+      answers: resizeAnswers(key, (value as any)[key].answers, count),
+      points: uniformPoints(per, count),
+      ...(key === 'short_answer' ? { notes: resizeNotes((value as any)[key].notes, count) } : {}),
+    });
+  };
+
+  // Một ô "điểm mỗi câu" áp cho cả phần
+  const setPointPer = (key: PartKey, raw: string) => {
+    const num = parseFloat(String(raw).replace(',', '.'));
+    const per = isFinite(num) && num >= 0 ? num : 0;
+    setPart(key, { points: uniformPoints(per, (value as any)[key].count) });
   };
 
   const setAnswer = (key: PartKey, idx: number, val: any) => {
@@ -42,12 +63,10 @@ export default function PartsEditor({ value, onChange }: Props) {
     setPart(key, { answers });
   };
 
-  // Cập nhật điểm 1 câu (chuỗi → số; rỗng để tạm 0). Cho phép số thập phân với dấu , hoặc .
-  const setPoint = (key: PartKey, idx: number, raw: string) => {
-    const num = parseFloat(String(raw).replace(',', '.'));
-    const points = [...(value as any)[key].points];
-    points[idx] = isFinite(num) && num >= 0 ? num : 0;
-    setPart(key, { points });
+  const setNote = (idx: number, val: string) => {
+    const notes = [...((value.short_answer.notes as string[]) || [])];
+    notes[idx] = val;
+    setPart('short_answer', { notes });
   };
 
   const setEssayPoints = (raw: string) => {
@@ -55,12 +74,20 @@ export default function PartsEditor({ value, onChange }: Props) {
     setPart('essay', { points: isFinite(num) && num >= 0 ? num : 0 });
   };
 
-  // Ô nhập điểm cho 1 câu
-  const pointInput = (key: PartKey, i: number) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto' }}>
-      <input className="input" type="number" min={0} step={0.05} style={{ width: 72, padding: '4px 6px', textAlign: 'right' }}
-        value={(value as any)[key].points[i] ?? DEFAULT_POINTS[key]} onChange={(e) => setPoint(key, i, e.target.value)} />
-      <span style={{ fontSize: '0.78rem', color: '#888' }}>đ</span>
+  // Hàng "Số câu + Điểm mỗi câu" của một phần
+  const countPointRow = (pk: PartKey) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14, margin: '4px 0 12px', flexWrap: 'wrap' }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: '0.8rem', color: '#666' }}>Số câu:</span>
+        <input className="input" type="number" min={1} max={50} style={{ width: 78, padding: '4px 8px' }}
+          value={(value as any)[pk].count} onChange={(e) => setCount(pk, e.target.value)} />
+      </label>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: '0.8rem', color: '#666' }}>Điểm mỗi câu:</span>
+        <input className="input" type="number" min={0} step={0.05} style={{ width: 78, padding: '4px 8px', textAlign: 'right' }}
+          value={pointPerOf(pk, (value as any)[pk].points)} onChange={(e) => setPointPer(pk, e.target.value)} />
+        <span style={{ fontSize: '0.78rem', color: '#888' }}>đ</span>
+      </label>
     </div>
   );
 
@@ -75,14 +102,6 @@ export default function PartsEditor({ value, onChange }: Props) {
     );
   };
 
-  const countRow = (pk: PartKey) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0 10px' }}>
-      <span style={{ fontSize: '0.8rem', color: '#666' }}>Số câu:</span>
-      <input className="input" type="number" min={1} max={50} style={{ width: 80, padding: '4px 8px' }}
-        value={(value as any)[pk].count} onChange={(e) => setCount(pk, e.target.value)} />
-    </div>
-  );
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {/* Trắc nghiệm */}
@@ -90,57 +109,61 @@ export default function PartsEditor({ value, onChange }: Props) {
         {partToggle('multiple_choice')}
         {value.multiple_choice.enabled && (
           <div style={{ marginTop: 8 }}>
-            {countRow('multiple_choice')}
+            {countPointRow('multiple_choice')}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {value.multiple_choice.answers.map((ans: string, i: number) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={qLabel}>Câu {i + 1}</span>
                   <div style={{ display: 'flex', gap: 4 }}>
                     {MC_OPTIONS.map((opt) => (
-                      <button key={opt} type="button" onClick={() => setAnswer('multiple_choice', i, opt)}
+                      <button key={opt} type="button"
+                        onClick={() => setAnswer('multiple_choice', i, ans === opt ? '' : opt)}
                         style={chip(ans === opt)}>{opt}</button>
                     ))}
                   </div>
-                  {pointInput('multiple_choice', i)}
+                  {!ans && <span style={unsetHint}>để trống → AI đọc file</span>}
                 </div>
               ))}
             </div>
+            {keyHint('multiple_choice')}
             {partTotalRow('multiple_choice')}
           </div>
         )}
       </div>
 
-      {/* Đúng / Sai */}
+      {/* Đúng / Sai — bảng kiểu đề thi THPT (câu xếp ngang, ý a–d xếp dọc) */}
       <div style={partBox}>
         {partToggle('true_false')}
         {value.true_false.enabled && (
           <div style={{ marginTop: 8 }}>
-            {countRow('true_false')}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {countPointRow('true_false')}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
               {value.true_false.answers.map((row: string[], i: number) => (
-                <div key={i} style={{ background: '#FAFAFA', borderRadius: 8, padding: '8px 10px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                    <span style={qLabel}>Câu {i + 1}</span>
-                    {pointInput('true_false', i)}
+                <div key={i} style={tfCard}>
+                  <div style={tfCardHead}>Câu {i + 1}</div>
+                  <div style={tfGridHead}>
+                    <span />
+                    <span style={tfColHead('#2E7D32')}>Đúng</span>
+                    <span style={tfColHead('#C62828')}>Sai</span>
                   </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                    {TF_SUB_LABELS.map((sub, j) => {
-                      const v = (row || [])[j] || 'T';
-                      return (
-                        <div key={sub} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#555' }}>{sub})</span>
-                          <button type="button" onClick={() => { const r = [...(row || ['T', 'T', 'T', 'T'])]; r[j] = 'T'; setAnswer('true_false', i, r); }} style={chip(v === 'T', '#2E7D32')}>Đúng</button>
-                          <button type="button" onClick={() => { const r = [...(row || ['T', 'T', 'T', 'T'])]; r[j] = 'F'; setAnswer('true_false', i, r); }} style={chip(v === 'F', '#C62828')}>Sai</button>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  {TF_SUB_LABELS.map((sub, j) => {
+                    const v = (row || [])[j] || '';
+                    const set = (val: string) => { const r = [...(row || ['', '', '', ''])]; r[j] = r[j] === val ? '' : val; setAnswer('true_false', i, r); };
+                    return (
+                      <div key={sub} style={tfGridRow}>
+                        <span style={tfSub}>{sub})</span>
+                        <span style={tfCell} onClick={() => set('T')}>{radio(v === 'T', '#2E7D32')}</span>
+                        <span style={tfCell} onClick={() => set('F')}>{radio(v === 'F', '#C62828')}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               ))}
             </div>
-            <div style={{ fontSize: '0.74rem', color: '#888', marginTop: 6 }}>
+            <div style={{ fontSize: '0.74rem', color: '#888', marginTop: 8 }}>
               Điểm câu = điểm khi đúng cả 4 ý. Đúng 1 ý = 10%, 2 ý = 25%, 3 ý = 50%, 4 ý = 100% điểm câu (chuẩn THPT).
             </div>
+            {keyHint('true_false')}
             {partTotalRow('true_false')}
           </div>
         )}
@@ -151,17 +174,22 @@ export default function PartsEditor({ value, onChange }: Props) {
         {partToggle('short_answer')}
         {value.short_answer.enabled && (
           <div style={{ marginTop: 8 }}>
-            {countRow('short_answer')}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {countPointRow('short_answer')}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {value.short_answer.answers.map((ans: string, i: number) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={qLabel}>Câu {i + 1}</span>
-                  <input className="input" style={{ flex: 1, minWidth: 0, padding: '5px 9px' }} placeholder="Đáp án đúng (vd: 12; 1/2; x=3)"
-                    value={ans} onChange={(e) => setAnswer('short_answer', i, e.target.value)} />
-                  {pointInput('short_answer', i)}
+                <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={qLabel}>Câu {i + 1}</span>
+                    <input className="input" style={{ flex: 1, minWidth: 0, padding: '5px 9px' }} placeholder="Đáp án đúng (để trống → AI đọc file). Vd: 12; 1/2; x=3"
+                      value={ans} onChange={(e) => setAnswer('short_answer', i, e.target.value)} />
+                  </div>
+                  <input className="input" style={{ marginLeft: 56, padding: '4px 9px', fontSize: '0.82rem', background: '#FFFDF5' }}
+                    placeholder="Ghi chú cho học sinh cách điền (vd: làm tròn 2 chữ số; ghi dạng a/b)"
+                    value={(value.short_answer.notes as string[])?.[i] || ''} onChange={(e) => setNote(i, e.target.value)} />
                 </div>
               ))}
             </div>
+            {keyHint('short_answer')}
             {partTotalRow('short_answer')}
           </div>
         )}
@@ -185,9 +213,9 @@ export default function PartsEditor({ value, onChange }: Props) {
         )}
       </div>
 
-      {/* Tổng điểm */}
+      {/* Tổng điểm thô */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: '#F3E9FF', borderRadius: 10 }}>
-        <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#6A1B9A' }}>Tổng điểm tối đa (thang điểm bài)</span>
+        <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#6A1B9A' }}>Tổng điểm tất cả các câu</span>
         <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#6A1B9A' }}>{computeMaxScore(value)} điểm</span>
       </div>
     </div>
@@ -197,8 +225,20 @@ export default function PartsEditor({ value, onChange }: Props) {
     const total = partTotalPoints(value, key);
     const n = (value as any)[key].count || 0;
     return (
-      <div style={{ fontSize: '0.78rem', color: '#6A1B9A', fontWeight: 600, marginTop: 6, textAlign: 'right' }}>
+      <div style={{ fontSize: '0.78rem', color: '#6A1B9A', fontWeight: 600, marginTop: 8, textAlign: 'right' }}>
         Tổng phần này: {Math.round(total * 100) / 100} điểm ({n} câu)
+      </div>
+    );
+  }
+
+  // Nhắc: nếu để trống đáp án thì cần có File đáp án (PDF) để AI đọc.
+  function keyHint(key: PartKey) {
+    const p = (value as any)[key];
+    const some = (p.answers || []).slice(0, p.count).some((a: any) => !keyIsSet(key, a));
+    if (!some) return null;
+    return (
+      <div style={{ fontSize: '0.74rem', color: '#B26A00', background: '#FFF8E1', borderRadius: 6, padding: '5px 8px', marginTop: 8 }}>
+        Có câu chưa đặt đáp án → khi chấm, AI sẽ tự đọc đáp án các câu đó từ <strong>File đáp án (PDF)</strong>. Hãy nhớ tải file đáp án bên dưới.
       </div>
     );
   }
@@ -206,6 +246,18 @@ export default function PartsEditor({ value, onChange }: Props) {
 
 const partBox: React.CSSProperties = { border: '1px solid #ECECEC', borderRadius: 10, padding: '10px 12px' };
 const qLabel: React.CSSProperties = { fontSize: '0.8rem', fontWeight: 700, color: '#1A1A2E', minWidth: 48 };
+const unsetHint: React.CSSProperties = { fontSize: '0.72rem', color: '#B26A00', fontStyle: 'italic', marginLeft: 4 };
+
+// Thẻ 1 câu Đúng/Sai (kiểu THPT)
+const tfCard: React.CSSProperties = { border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 10px', background: '#FAFAFA', minWidth: 150 };
+const tfCardHead: React.CSSProperties = { fontSize: '0.8rem', fontWeight: 800, color: '#1A1A2E', textAlign: 'center', marginBottom: 6 };
+const tfGridHead: React.CSSProperties = { display: 'grid', gridTemplateColumns: '26px 1fr 1fr', alignItems: 'center', marginBottom: 2 };
+const tfGridRow: React.CSSProperties = { display: 'grid', gridTemplateColumns: '26px 1fr 1fr', alignItems: 'center', padding: '2px 0' };
+const tfSub: React.CSSProperties = { fontSize: '0.8rem', fontWeight: 700, color: '#555' };
+const tfCell: React.CSSProperties = { display: 'flex', justifyContent: 'center', cursor: 'pointer' };
+function tfColHead(color: string): React.CSSProperties {
+  return { fontSize: '0.72rem', fontWeight: 700, color, textAlign: 'center' };
+}
 
 function chip(active: boolean, activeColor = '#C62828'): React.CSSProperties {
   return {
@@ -214,4 +266,15 @@ function chip(active: boolean, activeColor = '#C62828'): React.CSSProperties {
     color: active ? 'white' : '#666',
     borderRadius: 7, padding: '3px 10px', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer', minWidth: 32,
   };
+}
+
+// Ô tròn (radio) — đặc khi được chọn
+function radio(active: boolean, color: string, disabled = false): React.ReactNode {
+  return (
+    <span style={{
+      width: 19, height: 19, borderRadius: '50%', border: `2px solid ${active ? color : '#BBB'}`,
+      background: active ? color : 'white', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      boxShadow: active ? `inset 0 0 0 2px white` : 'none', opacity: disabled ? 0.5 : 1,
+    }} />
+  );
 }

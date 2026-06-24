@@ -1,5 +1,5 @@
 // Đối chiếu đáp án học sinh đã điền với đáp án đúng (key) — dùng cho giáo viên xem bài nộp.
-import { parsePartsConfig } from '../lib/homeworkParts';
+import { parsePartsConfig, keyIsSet } from '../lib/homeworkParts';
 
 interface Props {
   partsConfig: any;       // parts_config đầy đủ (có answers/key)
@@ -31,6 +31,7 @@ export default function StructuredAnswerReview({ partsConfig, structuredAnswers 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {(cfg.multiple_choice.answers || []).map((key: string, i: number) => {
               const got = ans.multiple_choice[i] || '—';
+              if (!keyIsSet('multiple_choice', key)) return <span key={i} style={neutral}>Câu {i + 1}: {got} (AI chấm)</span>;
               const ok = String(got).toUpperCase() === String(key).toUpperCase();
               return <span key={i} style={cell(ok)}>Câu {i + 1}: {got}{ok ? '' : ` (đáp án ${key})`}</span>;
             })}
@@ -42,16 +43,21 @@ export default function StructuredAnswerReview({ partsConfig, structuredAnswers 
         <div style={{ marginTop: 8 }}>
           <div style={subTitle}>Đúng / Sai</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {(cfg.true_false.answers || []).map((keyRow: string[], i: number) => (
-              <div key={i} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-                <span style={{ fontSize: '0.78rem', fontWeight: 700, minWidth: 50 }}>Câu {i + 1}</span>
-                {TF.map((sub, j) => {
-                  const got = (ans.true_false[i] || [])[j];
-                  const ok = got && String(got).toUpperCase()[0] === String(keyRow[j]).toUpperCase()[0];
-                  return <span key={sub} style={cell(!!ok)}>{sub}) {conv(got)}{ok ? '' : ` (${conv(keyRow[j])})`}</span>;
-                })}
-              </div>
-            ))}
+            {(cfg.true_false.answers || []).map((keyRow: string[], i: number) => {
+              const unset = !keyIsSet('true_false', keyRow);
+              return (
+                <div key={i} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.78rem', fontWeight: 700, minWidth: 50 }}>Câu {i + 1}</span>
+                  {TF.map((sub, j) => {
+                    const got = (ans.true_false[i] || [])[j];
+                    if (unset) return <span key={sub} style={neutral}>{sub}) {conv(got)}</span>;
+                    const ok = got && String(got).toUpperCase()[0] === String(keyRow[j]).toUpperCase()[0];
+                    return <span key={sub} style={cell(!!ok)}>{sub}) {conv(got)}{ok ? '' : ` (${conv(keyRow[j])})`}</span>;
+                  })}
+                  {unset && <span style={{ fontSize: '0.72rem', color: '#888' }}>(AI chấm)</span>}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -64,7 +70,10 @@ export default function StructuredAnswerReview({ partsConfig, structuredAnswers 
               const got = ans.short_answer[i] || '—';
               return (
                 <div key={i} style={{ fontSize: '0.8rem' }}>
-                  <strong>Câu {i + 1}:</strong> HS trả lời "<span style={{ color: '#1565C0' }}>{got}</span>" — đáp án: "<span style={{ color: '#2E7D32' }}>{key}</span>"
+                  <strong>Câu {i + 1}:</strong> HS trả lời "<span style={{ color: '#1565C0' }}>{got}</span>"
+                  {keyIsSet('short_answer', key)
+                    ? <> — đáp án: "<span style={{ color: '#2E7D32' }}>{key}</span>"</>
+                    : <span style={{ color: '#888' }}> — (AI chấm theo file đáp án)</span>}
                 </div>
               );
             })}
@@ -76,3 +85,4 @@ export default function StructuredAnswerReview({ partsConfig, structuredAnswers 
 }
 
 const subTitle: React.CSSProperties = { fontSize: '0.78rem', fontWeight: 700, color: '#6A1B9A', margin: '2px 0 4px' };
+const neutral: React.CSSProperties = { padding: '2px 8px', borderRadius: 6, fontWeight: 700, fontSize: '0.78rem', background: '#EDE7F6', color: '#5E35B1' };

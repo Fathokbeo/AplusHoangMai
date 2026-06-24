@@ -2,9 +2,9 @@
 // việc chấm AI chạy nền tuần tự, có thử lại khi lỗi và tự phục hồi sau khi server khởi động lại.
 const path = require('path');
 const { getDb } = require('../db/database');
-const { gradeSubmission } = require('./aiGrading');
-const { needsAiGrading, hasAnswerKey, parsePartsConfig, partEnabled } = require('./homeworkParts');
-const { scoreStructured, partMax, round2 } = require('./homeworkScoring');
+const { gradeSubmission, extractAnswerKey } = require('./aiGrading');
+const { needsAiGrading, hasAnswerKey, parsePartsConfig, partEnabled, missingKeyIndices, applyExtractedKeys } = require('./homeworkParts');
+const { scoreStructured, partMax, round2, rawMaxScore, scaleToTarget } = require('./homeworkScoring');
 
 const MAX_ATTEMPTS = 5;            // số lần thử chấm tối đa trước khi đánh dấu thất bại
 const RETRY_DELAY_MS = 30_000;     // chờ trước khi thử lại một bài bị lỗi
@@ -13,6 +13,10 @@ const SWEEP_INTERVAL_MS = 60_000;  // quét định kỳ để gom các bài cò
 const queue = [];          // FIFO các submission id chờ chấm
 const inQueue = new Set();
 let running = false;
+
+// Cache đáp án AI đọc được từ file đáp án, theo (homework_id : tên file đáp án).
+// Nhờ đó nhiều học sinh cùng bài chỉ tốn 1 lần đọc file; file đổi (tên mới) → tự đọc lại.
+const answerKeyCache = new Map();
 
 // Lấy danh sách tên file của một bài nộp (hỗ trợ cũ: file_path đơn, mới: files JSON)
 function submissionFilenames(sub) {
@@ -85,9 +89,35 @@ async function gradeOne(submissionId, { force = false } = {}) {
   const hasImages = subPaths.length > 0;
 
   try {
-    // 1) Chấm tự động (deterministic) các phần khách quan học sinh đã điền ở giao diện
-    const det = scoreStructured(sub.parts_config, sub.structured_answers);
-    const cfg = parsePartsConfig(sub.parts_config);
+    let cfg = parsePartsConfig(sub.parts_config);
+
+    // 0) Câu objective giáo viên ĐỂ TRỐNG đáp án → nhờ AI đọc từ FILE ĐÁP ÁN rồi ghép vào cfg.
+    //    (đáp án giáo viên nhập tay luôn được ưu tiên; chỉ điền vào câu còn trống)
+    if (cfg && answerPath) {
+      const missing = {
+        multiple_choice: missingKeyIndices(cfg, 'multiple_choice'),
+        true_false: missingKeyIndices(cfg, 'true_false'),
+        short_answer: missingKeyIndices(cfg, 'short_answer'),
+      };
+      if (missing.multiple_choice.length || missing.true_false.length || missing.short_answer.length) {
+        const cacheKey = `${sub.hw_id}:${sub.answer_file}`;
+        let extracted = answerKeyCache.get(cacheKey);
+        if (extracted === undefined) {
+          try {
+            extracted = await extractAnswerKey(answerPath, cfg, missing);
+            answerKeyCache.set(cacheKey, extracted);
+            console.log(`[grading-queue] 📖 Đã đọc đáp án từ file cho bài #${sub.hw_id}`);
+          } catch (e) {
+            console.error(`[grading-queue] đọc đáp án từ file lỗi (#${submissionId}): ${e.message}`);
+            extracted = null; // không cache lỗi để lần sau thử lại
+          }
+        }
+        if (extracted) cfg = applyExtractedKeys(cfg, extracted);
+      }
+    }
+
+    // 1) Chấm tự động (deterministic) các phần khách quan học sinh đã điền (cfg đã ghép đáp án)
+    const det = scoreStructured(cfg || sub.parts_config, sub.structured_answers);
 
     // 2) Xác định phần cần AI chấm:
     //    - phần khách quan HS không điền giao diện nhưng có làm trong ảnh (det.pendingAi)
@@ -102,7 +132,7 @@ async function gradeOne(submissionId, { force = false } = {}) {
     let aiDetails = [];
     let aiFeedback = '';
     if (needAi) {
-      // Thang điểm phần AI phụ trách
+      // Thang điểm THÔ phần AI phụ trách
       let aiMax;
       if (!cfg) {
         aiMax = sub.max_score; // bài cũ: AI chấm toàn bộ trên thang điểm bài
@@ -120,7 +150,7 @@ async function gradeOne(submissionId, { force = false } = {}) {
       } : null;
 
       const aiResult = await gradeSubmission(answerPath, subPaths, aiMax || sub.max_score, sub.grading_note, 3, {
-        partsConfig: sub.parts_config,
+        partsConfig: cfg || sub.parts_config, // cfg đã ghép đáp án để AI có sẵn key
         scope,
       });
       aiScore = aiResult.score || 0;
@@ -128,8 +158,9 @@ async function gradeOne(submissionId, { force = false } = {}) {
       aiFeedback = aiResult.feedback || '';
     }
 
-    // 3) Gộp điểm + chi tiết
-    let total = round2(det.score + aiScore);
+    // 3) Gộp điểm THÔ (tổng các câu) rồi QUY ĐỔI về thang giáo viên chọn (sub.max_score)
+    const rawEarned = round2(det.score + aiScore);
+    let total = cfg ? scaleToTarget(rawEarned, rawMaxScore(cfg), sub.max_score) : rawEarned;
     if (sub.max_score != null) total = Math.max(0, Math.min(sub.max_score, total));
     const details = [...det.details, ...aiDetails];
     const feedback = needAi

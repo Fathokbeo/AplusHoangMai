@@ -19,11 +19,13 @@ export const MC_OPTIONS = ['A', 'B', 'C', 'D'] as const;
 export const TF_SUB_LABELS = ['a', 'b', 'c', 'd'] as const;
 
 // Một phần objective (TN / ĐS / TLN). answers kiểu khác nhau tùy phần.
+// Đáp án "để trống" ('' với TN/TLN, '' từng ý với ĐS) nghĩa là: AI tự đọc từ File đáp án khi chấm.
 export interface PartConfig {
   enabled: boolean;
   count: number;
-  answers: any[];   // MC: string[] ('A'..'D'); TF: string[][] ('T'|'F' x4); SA: string[]
-  points: number[]; // MC/SA: điểm mỗi câu; TF: điểm tối đa mỗi câu (4 ý đúng = điểm này)
+  answers: any[];   // MC: string ('' | 'A'..'D'); TF: string[] ('' | 'T' | 'F' × 4); SA: string
+  points: number[]; // điểm mỗi câu (hệ thống đặt tất cả bằng "điểm mỗi câu" của phần)
+  notes?: string[]; // gợi ý cách điền cho từng câu (chủ yếu dùng cho Trả lời ngắn)
 }
 
 export interface PartsConfig {
@@ -43,16 +45,15 @@ export function emptyPartsConfig(): PartsConfig {
   return {
     multiple_choice: { enabled: false, count: 0, answers: [], points: [] },
     true_false: { enabled: false, count: 0, answers: [], points: [] },
-    short_answer: { enabled: false, count: 0, answers: [], points: [] },
+    short_answer: { enabled: false, count: 0, answers: [], points: [], notes: [] },
     essay: { enabled: false, points: DEFAULT_ESSAY_POINTS },
   };
 }
 
-// Giá trị mặc định cho 1 đáp án mới theo từng phần
+// Giá trị mặc định cho 1 đáp án mới theo từng phần ('' = chưa đặt → AI đọc từ file đáp án)
 function defaultAnswer(part: PartKey): any {
-  if (part === 'multiple_choice') return 'A';
-  if (part === 'true_false') return ['T', 'T', 'T', 'T'];
-  return ''; // short_answer
+  if (part === 'true_false') return ['', '', '', ''];
+  return ''; // multiple_choice / short_answer
 }
 
 // Cắt/đệm mảng answers cho khớp số câu (count) khi giáo viên đổi số lượng.
@@ -63,13 +64,44 @@ export function resizeAnswers(part: PartKey, answers: any[], count: number): any
   return next;
 }
 
-// Cắt/đệm mảng điểm cho khớp số câu; giá trị thiếu/không hợp lệ dùng điểm mặc định của phần.
-export function resizePoints(part: PartKey, points: any[], count: number): number[] {
+// Cắt/đệm mảng ghi chú (gợi ý cách điền) cho khớp số câu.
+export function resizeNotes(notes: any[], count: number): string[] {
   const n = Math.max(0, Math.min(50, Math.floor(count) || 0));
-  const def = DEFAULT_POINTS[part] ?? 0;
-  const next = (points || []).slice(0, n).map((v) => (typeof v === 'number' && v >= 0 ? v : def));
-  while (next.length < n) next.push(def);
+  const next = (notes || []).slice(0, n).map((v) => (typeof v === 'string' ? v : ''));
+  while (next.length < n) next.push('');
   return next;
+}
+
+// "Điểm mỗi câu" của một phần (lấy phần tử đầu, hoặc mặc định của phần).
+export function pointPerOf(part: PartKey, points: any[]): number {
+  const v = Array.isArray(points) ? points.find((x) => typeof x === 'number' && x >= 0) : undefined;
+  return typeof v === 'number' && v >= 0 ? v : (DEFAULT_POINTS[part] ?? 0);
+}
+
+// Tạo mảng điểm khớp số câu, tất cả bằng "điểm mỗi câu".
+export function uniformPoints(per: number, count: number): number[] {
+  const n = Math.max(0, Math.min(50, Math.floor(count) || 0));
+  const p = typeof per === 'number' && per >= 0 ? per : 0;
+  return Array(n).fill(p);
+}
+
+// Một câu objective đã có đáp án (key) chưa? '' = chưa đặt (sẽ để AI đọc file đáp án).
+export function keyIsSet(part: PartKey, val: any): boolean {
+  if (part === 'multiple_choice') return typeof val === 'string' && /^[ABCD]$/i.test(val.trim());
+  if (part === 'true_false') return Array.isArray(val) && val.length >= 4 && val.slice(0, 4).every((v) => v === 'T' || v === 'F');
+  return typeof val === 'string' && val.trim() !== ''; // short_answer
+}
+
+// Phần objective có câu nào chưa đặt đáp án (sẽ nhờ AI đọc từ file đáp án)?
+export function hasUnsetKey(cfg: PartsConfig | null, key: PartKey): boolean {
+  const p = cfg && (cfg as any)[key];
+  if (!p || !p.enabled) return false;
+  for (let i = 0; i < (p.count || 0); i++) if (!keyIsSet(key, (p.answers || [])[i])) return true;
+  return false;
+}
+
+export function anyUnsetKey(cfg: PartsConfig | null): boolean {
+  return (['multiple_choice', 'true_false', 'short_answer'] as PartKey[]).some((k) => hasUnsetKey(cfg, k));
 }
 
 // Chuẩn hóa parts_config nhận từ server (có thể null / chuỗi JSON / thiếu trường) về dạng đầy đủ.
@@ -83,11 +115,13 @@ export function normalizePartsConfig(raw: any): PartsConfig {
     const p = raw[k];
     if (p && p.enabled) {
       const count = Math.max(0, Math.floor(p.count) || 0);
+      const per = pointPerOf(k, Array.isArray(p.points) ? p.points : []);
       (base as any)[k] = {
         enabled: true,
         count,
         answers: resizeAnswers(k, Array.isArray(p.answers) ? p.answers : [], count),
-        points: resizePoints(k, Array.isArray(p.points) ? p.points : [], count),
+        points: uniformPoints(per, count),
+        ...(k === 'short_answer' ? { notes: resizeNotes(Array.isArray(p.notes) ? p.notes : [], count) } : {}),
       };
     }
   });
@@ -105,7 +139,7 @@ export function partTotalPoints(cfg: PartsConfig, key: PartKey): number {
   return (p.points || []).reduce((a, b) => a + (Number(b) || 0), 0);
 }
 
-// Tổng điểm tối đa của cả bài (TN + ĐS + TLN + tự luận)
+// Tổng điểm THÔ của cả bài (tổng điểm tất cả các câu + tự luận). Đây là cơ sở để quy đổi về thang chọn.
 export function computeMaxScore(cfg: PartsConfig | null): number {
   if (!cfg) return 0;
   let total = 0;

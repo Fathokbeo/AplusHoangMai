@@ -30,6 +30,13 @@ function sanitizePartsConfig(raw) {
       const rawPts = Array.isArray(p.points) ? p.points : [];
       for (let i = 0; i < count; i++) points.push(typeof rawPts[i] === 'number' && rawPts[i] >= 0 ? rawPts[i] : def);
       out[k] = { enabled: true, count, answers, points };
+      // Ghi chú cách điền cho học sinh (chủ yếu phần Trả lời ngắn)
+      if (k === 'short_answer') {
+        const rawNotes = Array.isArray(p.notes) ? p.notes : [];
+        const notes = [];
+        for (let i = 0; i < count; i++) notes.push(String(rawNotes[i] == null ? '' : rawNotes[i]));
+        out[k].notes = notes;
+      }
     }
   });
   if (obj.essay && obj.essay.enabled) {
@@ -61,9 +68,10 @@ router.post(
     if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
 
     const partsJson = sanitizePartsConfig(parts_config);
-    // Có cấu hình phần → thang điểm = tổng điểm các phần (tự tính), bỏ qua max_score gửi lên.
-    const computedMax = computeMaxScore(partsJson);
-    const finalMax = computedMax != null ? computedMax : (parseInt(max_score) || 10);
+    // Thang điểm = thang giáo viên chọn (để quy đổi). Nếu không nhập → mặc định = tổng điểm thô các câu.
+    const rawSum = computeMaxScore(partsJson);
+    const provided = parseFloat(max_score);
+    const finalMax = isFinite(provided) && provided > 0 ? provided : (rawSum != null ? rawSum : 10);
 
     const result = db.prepare(`
       INSERT INTO homework (class_id,title,description,pdf_file,answer_file,due_date,answer_visible_date,max_score,grading_note,chapter_id,solution_video_url,parts_config)
@@ -101,15 +109,17 @@ router.put(
     if (chapter_id !== undefined) { sets.push('chapter_id=?'); vals.push(chapter_id || null); }
     if (solution_video_url !== undefined) { sets.push('solution_video_url=?'); vals.push(solution_video_url || null); }
 
-    // parts_config + max_score: nếu có cấu hình phần thì thang điểm = tổng điểm các phần (tự tính).
-    let computedMax = null;
+    // parts_config + max_score: thang điểm = thang giáo viên chọn (để quy đổi),
+    // mặc định = tổng điểm thô các câu nếu giáo viên không nhập.
+    let rawSum = null;
     if (parts_config !== undefined) {
       const partsJson = sanitizePartsConfig(parts_config);
       sets.push('parts_config=?'); vals.push(partsJson);
-      computedMax = computeMaxScore(partsJson);
+      rawSum = computeMaxScore(partsJson);
     }
-    if (computedMax != null) { sets.push('max_score=?'); vals.push(computedMax); }
-    else if (max_score) { sets.push('max_score=?'); vals.push(parseFloat(max_score) || 10); }
+    const provided = parseFloat(max_score);
+    if (isFinite(provided) && provided > 0) { sets.push('max_score=?'); vals.push(provided); }
+    else if (rawSum != null) { sets.push('max_score=?'); vals.push(rawSum); }
 
     if (req.files?.pdf_file?.[0]) { sets.push('pdf_file=?'); vals.push(req.files.pdf_file[0].filename); }
     if (req.files?.answer_file?.[0]) { sets.push('answer_file=?'); vals.push(req.files.answer_file[0].filename); }
