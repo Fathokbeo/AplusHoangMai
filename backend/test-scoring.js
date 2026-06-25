@@ -131,6 +131,24 @@ eq('saMatch rỗng', saMatch('', '5'), false);
   eq('thang không hợp lệ → giữ nguyên', scaleToTarget(2, 4, 0), 2);
 }
 
+// ── 11. Cả phần CHƯA có đáp án + HS đã điền → đưa cho AI (aiKeyless), không tự cộng/sai oan ──
+{
+  const cfg = { multiple_choice: { enabled: true, count: 2, answers: ['', ''], points: [0.25, 0.25] } };
+  const r = scoreStructured(cfg, { multiple_choice: ['A', 'B'] }); // HS có điền, GV chưa đặt đáp án nào
+  eq('Cả phần chưa có đáp án + HS điền → aiKeyless', r.aiKeyless.includes('multiple_choice'), true);
+  eq('aiKeyless không tự cộng điểm', r.score, 0);
+  eq('aiKeyless không tạo unresolved', r.unresolved.length, 0);
+  eq('aiKeyless không vào pendingAi', r.pendingAi.includes('multiple_choice'), false);
+}
+
+// ── 12. Chưa có đáp án nhưng HS KHÔNG điền → pendingAi (AI dò ảnh), không phải aiKeyless ──
+{
+  const cfg = { multiple_choice: { enabled: true, count: 2, answers: ['', ''], points: [0.25, 0.25] } };
+  const r = scoreStructured(cfg, {});
+  eq('Chưa điền + chưa có đáp án → pendingAi', r.pendingAi.includes('multiple_choice'), true);
+  eq('... không vào aiKeyless', r.aiKeyless.includes('multiple_choice'), false);
+}
+
 console.log(out.join('\n'));
 console.log(`\n═══ ${pass + fail} test | ✅ ${pass} PASS | ❌ ${fail} FAIL ═══\n`);
 process.exit(fail > 0 ? 1 : 0);

@@ -80,9 +80,15 @@ function unresolvedDetail(label, i) {
   return { question: `${label} câu ${i + 1}`, status: 'partial', comment: 'Chưa có đáp án để chấm — cần giáo viên kiểm tra' };
 }
 
+// Số câu của một phần đã có đáp án (key) sẵn
+function setKeyCount(key, arr) {
+  return (Array.isArray(arr) ? arr : []).filter((v) => keyIsSet(key, v)).length;
+}
+
 function scoreStructured(rawCfg, rawAns) {
   const cfg = parsePartsConfig(rawCfg);
-  const result = { score: 0, details: [], gradedParts: {}, pendingAi: [], unresolved: [] };
+  // pendingAi: HS không điền giao diện (AI dò ảnh). aiKeyless: HS có điền nhưng cả phần CHƯA có đáp án (AI đọc file đáp án + đáp án HS điền).
+  const result = { score: 0, details: [], gradedParts: {}, pendingAi: [], aiKeyless: [], unresolved: [] };
   if (!cfg) return result;
 
   let ans = rawAns;
@@ -94,7 +100,9 @@ function scoreStructured(rawCfg, rawAns) {
     const key = cfg.multiple_choice.answers || [];
     const pts = partPoints(cfg, 'multiple_choice');
     const stud = ans.multiple_choice;
-    if (partAnswered(stud, 'multiple_choice')) {
+    if (!partAnswered(stud, 'multiple_choice')) { result.pendingAi.push('multiple_choice'); }
+    else if (setKeyCount('multiple_choice', key) === 0) { result.aiKeyless.push('multiple_choice'); }
+    else {
       result.gradedParts.multiple_choice = true;
       key.forEach((k, i) => {
         if (!keyIsSet('multiple_choice', k)) { result.unresolved.push(['multiple_choice', i]); result.details.push(unresolvedDetail('Trắc nghiệm', i)); return; }
@@ -107,7 +115,7 @@ function scoreStructured(rawCfg, rawAns) {
           comment: ok ? `Đúng (+${round2(pts[i])}đ)` : `Chọn ${up1(stud[i]) || '—'}, đáp án đúng ${String(k).toUpperCase()}`,
         });
       });
-    } else result.pendingAi.push('multiple_choice');
+    }
   }
 
   // Đúng / Sai
@@ -115,7 +123,9 @@ function scoreStructured(rawCfg, rawAns) {
     const key = cfg.true_false.answers || [];
     const pts = partPoints(cfg, 'true_false');
     const stud = ans.true_false;
-    if (partAnswered(stud, 'true_false')) {
+    if (!partAnswered(stud, 'true_false')) { result.pendingAi.push('true_false'); }
+    else if (setKeyCount('true_false', key) === 0) { result.aiKeyless.push('true_false'); }
+    else {
       result.gradedParts.true_false = true;
       key.forEach((krow, i) => {
         if (!keyIsSet('true_false', krow)) { result.unresolved.push(['true_false', i]); result.details.push(unresolvedDetail('Đúng/Sai', i)); return; }
@@ -139,7 +149,7 @@ function scoreStructured(rawCfg, rawAns) {
           comment: `Đúng ${correct}/4 ý (+${earned}đ) — ${subTxt.join(' ')}`,
         });
       });
-    } else result.pendingAi.push('true_false');
+    }
   }
 
   // Trả lời ngắn
@@ -147,7 +157,9 @@ function scoreStructured(rawCfg, rawAns) {
     const key = cfg.short_answer.answers || [];
     const pts = partPoints(cfg, 'short_answer');
     const stud = ans.short_answer;
-    if (partAnswered(stud, 'short_answer')) {
+    if (!partAnswered(stud, 'short_answer')) { result.pendingAi.push('short_answer'); }
+    else if (setKeyCount('short_answer', key) === 0) { result.aiKeyless.push('short_answer'); }
+    else {
       result.gradedParts.short_answer = true;
       key.forEach((k, i) => {
         if (!keyIsSet('short_answer', k)) { result.unresolved.push(['short_answer', i]); result.details.push(unresolvedDetail('Trả lời ngắn', i)); return; }
@@ -160,7 +172,7 @@ function scoreStructured(rawCfg, rawAns) {
           comment: ok ? `Đúng (+${round2(pts[i])}đ)` : `Trả lời "${String(got == null ? '' : got).trim() || '—'}", đáp án "${k}"`,
         });
       });
-    } else result.pendingAi.push('short_answer');
+    }
   }
 
   result.score = round2(result.score);

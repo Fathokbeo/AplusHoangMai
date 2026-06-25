@@ -1,7 +1,7 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fs = require('fs');
 const path = require('path');
-const { parsePartsConfig, partEnabled, describeAnswerKey } = require('./homeworkParts');
+const { parsePartsConfig, partEnabled, describeAnswerKey, describeStudentAnswers } = require('./homeworkParts');
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY);
 
@@ -48,7 +48,7 @@ const EXTRACT_CONFIG = {
 };
 
 async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 10, gradingNote = '', attempts = 3, opts = {}) {
-  const { partsConfig = null, scope = null } = opts;
+  const { partsConfig = null, scope = null, studentAnswers = null } = opts;
   const cfg = parsePartsConfig(partsConfig);
 
   // Phần nào AI cần chấm (scope do hàng đợi truyền vào). Bài cũ (không cfg) → chấm toàn bộ kiểu tự luận.
@@ -64,12 +64,16 @@ async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 1
   // File đáp án tự luận (PDF) — có thể không có nếu chỉ chấm phần objective
   const hasAnswerFile = !!answerFilePath && fs.existsSync(answerFilePath);
 
+  // Đáp án học sinh đã điền ở giao diện (cho phần khách quan) — dùng thay cho việc dò trong ảnh.
+  const studentText = (cfg && gradeObjective && studentAnswers) ? describeStudentAnswers(cfg, studentAnswers) : '';
+
   // Học sinh có thể nộp nhiều file (nhiều ảnh / PDF) — chuẩn hóa về mảng
   const subPaths = (Array.isArray(submissionFilePaths) ? submissionFilePaths : [submissionFilePaths]).filter(Boolean);
   for (const p of subPaths) {
     if (!fs.existsSync(p)) throw new Error('File bài nộp không tồn tại');
   }
-  if (subPaths.length === 0) throw new Error('Không có ảnh bài làm để AI chấm');
+  // Phải có ÍT NHẤT một nguồn bài làm: ảnh, hoặc đáp án học sinh đã điền sẵn.
+  if (subPaths.length === 0 && !studentText) throw new Error('Không có bài làm để AI chấm');
 
   const noteBlock = gradingNote && gradingNote.trim()
     ? `\nHƯỚNG DẪN CHẤM CỦA GIÁO VIÊN (BẮT BUỘC tuân theo — chấm phần nào, chấm theo kiểu gì, chia điểm thế nào):\n"""${gradingNote.trim()}"""\n`
@@ -82,10 +86,16 @@ async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 1
 
   // Mô tả các tài liệu đính kèm theo thứ tự để AI biết đâu là đáp án, đâu là bài làm
   const docLines = [];
-  if (hasAnswerFile) docLines.push('- Tài liệu đầu tiên (PDF): ĐÁP ÁN phần tự luận.');
+  if (hasAnswerFile) docLines.push('- Tài liệu đầu tiên (PDF): ĐÁP ÁN chính thức — dùng để lấy đáp án đúng cho MỌI phần (kể cả các câu khách quan chưa có đáp án sẵn).');
   if (subPaths.length > 1) docLines.push(`- ${subPaths.length} tài liệu tiếp theo: BÀI LÀM CỦA HỌC SINH (nhiều ảnh/trang) — xem xét TẤT CẢ như một bài liền mạch.`);
-  else docLines.push('- Tài liệu tiếp theo: BÀI LÀM CỦA HỌC SINH (ảnh/PDF).');
+  else if (subPaths.length === 1) docLines.push('- Tài liệu tiếp theo: BÀI LÀM CỦA HỌC SINH (ảnh/PDF).');
+  else docLines.push('- (Không có ảnh bài làm — học sinh điền đáp án khách quan ở giao diện, xem mục ĐÁP ÁN HỌC SINH ĐÃ ĐIỀN.)');
   const docBlock = `\nCÁC TÀI LIỆU ĐÍNH KÈM:\n${docLines.join('\n')}\n`;
+
+  // Đáp án học sinh đã điền sẵn ở giao diện (nếu có) — dùng làm bài làm cho phần khách quan.
+  const studentBlock = studentText
+    ? `\nĐÁP ÁN HỌC SINH ĐÃ ĐIỀN Ở GIAO DIỆN (dùng CHÍNH cái này làm bài làm của học sinh cho các phần khách quan, KHÔNG cần dò trong ảnh):\n${studentText}\n`
+    : '';
 
   // Phạm vi chấm (chỉ những phần được giao)
   const scopeNames = [];
@@ -105,13 +115,15 @@ async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 1
   if (gradeEssay) ruleLines.push('- TỰ LUẬN: chấm như bài tự luận, so kết quả cuối cùng và các bước lập luận chính với đáp án; cho điểm một phần khi đúng một phần.');
   const objectiveRules = ruleLines.length ? `\nLUẬT CHẤM TỪNG PHẦN:\n${ruleLines.join('\n')}\n` : '';
 
-  // Khi AI chấm phần objective: học sinh không điền giao diện → phải tự dò trong ảnh
+  // Hướng dẫn AI lấy bài làm khách quan từ đâu: từ đáp án đã điền sẵn, hay tự dò trong ảnh.
   const imageScanNote = gradeObjective
-    ? '\nLƯU Ý: Học sinh KHÔNG điền đáp án ở giao diện cho các phần khách quan cần chấm — hãy TỰ DÒ bài làm các phần đó ngay trong ẢNH rồi so với đáp án để chấm.\n'
+    ? (studentText
+        ? '\nLƯU Ý: Học sinh ĐÃ điền sẵn đáp án các phần khách quan ở giao diện (mục ĐÁP ÁN HỌC SINH ĐÃ ĐIỀN). Hãy dùng CHÍNH các đáp án đó để chấm. Câu nào chưa có đáp án đúng sẵn (ghi "ĐỌC TỪ FILE ĐÁP ÁN") thì TÌM đáp án đúng trong FILE ĐÁP ÁN (PDF) rồi so chấm.\n'
+        : '\nLƯU Ý: Học sinh KHÔNG điền đáp án ở giao diện cho các phần khách quan cần chấm — hãy TỰ DÒ bài làm các phần đó ngay trong ẢNH rồi so với đáp án để chấm. Câu nào chưa có đáp án đúng sẵn thì TÌM trong FILE ĐÁP ÁN.\n')
     : '';
 
   const prompt = `Bạn là giáo viên chấm bài. Hãy chấm điểm bài làm của học sinh dựa trên đáp án, trên thang ${maxScore} điểm.
-${docBlock}${scopeBlock}${answerKeyBlock}${noteBlock}${objectiveRules}${imageScanNote}
+${docBlock}${scopeBlock}${answerKeyBlock}${studentBlock}${noteBlock}${objectiveRules}${imageScanNote}
 CÁCH ĐỌC BÀI LÀM (ảnh, nếu có):
 - Thứ tự các ảnh bài làm gửi lên CÓ THỂ KHÔNG đúng thứ tự thực tế (học sinh chụp có thể lộn trang). Hãy tự xác định thứ tự đọc hợp lý dựa vào số thứ tự câu/trang và tính liên tục của lời giải — KHÔNG mặc định thứ tự ảnh là đúng.
 - Bài làm là ảnh chụp/scan CHỮ VIẾT TAY, có thể xấu, mờ, nghiêng, tẩy xóa. Đọc thật kỹ TỪNG dòng; dựa vào ngữ cảnh toán học để nhận diện đúng con số, ký hiệu, biến, phân số, lũy thừa, dấu.
@@ -211,14 +223,18 @@ async function extractAnswerKey(answerFilePath, cfg, missing) {
   }
   if (wants.length === 0) return {};
 
-  const prompt = `Đây là FILE ĐÁP ÁN của một đề kiểm tra. Hãy ĐỌC KỸ và trích ra ĐÁP ÁN ĐÚNG của các phần khách quan sau.
-Chỉ trả về JSON thuần (không kèm chữ nào khác), gồm đúng các khóa dưới đây:
+  const prompt = `Đây là FILE ĐÁP ÁN (có thể là bảng đáp án, hoặc bài giải đầy đủ) của một đề kiểm tra.
+Hãy ĐỌC THẬT KỸ toàn bộ tài liệu và TRÍCH ra ĐÁP ÁN ĐÚNG CUỐI CÙNG của các phần khách quan sau.
+Chỉ trả về JSON THUẦN (không kèm giải thích, không markdown), gồm ĐÚNG các khóa dưới đây:
 ${wants.join('\n')}
 
-Yêu cầu:
-- Tuyệt đối giữ ĐÚNG THỨ TỰ câu (phần tử 0 = câu 1).
-- Nếu một câu không tìm thấy đáp án trong file, để giá trị null tại vị trí đó.
-- Trắc nghiệm: chỉ 1 chữ in hoa A/B/C/D. Đúng/Sai: "T" cho Đúng, "F" cho Sai.`;
+Yêu cầu BẮT BUỘC:
+- Đáp án có thể nằm trong bảng tô đậm, ô đáp án, dòng "Đáp án:", hoặc suy ra từ lời giải — hãy tìm cho ra.
+- Giữ ĐÚNG THỨ TỰ câu: phần tử thứ 0 = câu 1, thứ 1 = câu 2, ...
+- Trắc nghiệm: mỗi câu chỉ 1 chữ in hoa "A"/"B"/"C"/"D".
+- Đúng/Sai: mỗi câu là mảng 4 phần tử cho ý a,b,c,d; dùng "T" nếu ý đó ĐÚNG, "F" nếu ý đó SAI.
+- Trả lời ngắn: ghi đúng đáp án (số/biểu thức) như trong file.
+- Câu nào THỰC SỰ không tìm thấy đáp án thì để null tại vị trí đó (đừng đoán bừa).`;
 
   const parts = [prompt, buildInlinePart(answerFilePath)];
   let lastErr;
@@ -230,7 +246,10 @@ Yêu cầu:
       const m = text.match(/\{[\s\S]*\}/);
       if (!m) throw new Error('AI không trả về JSON đáp án hợp lệ');
       const parsed = JSON.parse(m[0]);
-      return normalizeExtractedKey(parsed, cfg);
+      const out = normalizeExtractedKey(parsed, cfg);
+      const cnt = (a) => (Array.isArray(a) ? a.filter((x) => x != null).length : 0);
+      console.log(`[aiGrading] Trích đáp án từ file (${modelName}): TN=${cnt(out.multiple_choice)} ĐS=${cnt(out.true_false)} TLN=${cnt(out.short_answer)}`);
+      return out;
     } catch (err) {
       lastErr = err;
       if (!String(err.message).includes('429') && !String(err.message).includes('quota')) throw err;

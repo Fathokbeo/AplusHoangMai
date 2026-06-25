@@ -3,7 +3,7 @@
 const path = require('path');
 const { getDb } = require('../db/database');
 const { gradeSubmission, extractAnswerKey } = require('./aiGrading');
-const { needsAiGrading, hasAnswerKey, parsePartsConfig, partEnabled, missingKeyIndices, applyExtractedKeys } = require('./homeworkParts');
+const { needsAiGrading, hasAnswerKey, parsePartsConfig, partEnabled, missingKeyIndices, applyExtractedKeys, PART_LABELS } = require('./homeworkParts');
 const { scoreStructured, partMax, round2, rawMaxScore, scaleToTarget } = require('./homeworkScoring');
 
 const MAX_ATTEMPTS = 5;            // số lần thử chấm tối đa trước khi đánh dấu thất bại
@@ -120,13 +120,20 @@ async function gradeOne(submissionId, { force = false } = {}) {
     const det = scoreStructured(cfg || sub.parts_config, sub.structured_answers);
 
     // 2) Xác định phần cần AI chấm:
-    //    - phần khách quan HS không điền giao diện nhưng có làm trong ảnh (det.pendingAi)
-    //    - phần tự luận (nếu bật, và có ảnh bài làm)
-    //    - bài cũ (không cfg) nhưng có file đáp án → AI chấm toàn bộ từ ảnh
-    const aiObjective = hasImages ? det.pendingAi : [];
+    //    - pendingAi: HS KHÔNG điền giao diện → AI dò trong ẢNH (cần có ảnh)
+    //    - aiKeyless: HS CÓ điền nhưng cả phần chưa có đáp án → AI đọc FILE ĐÁP ÁN + đáp án HS điền (cần file đáp án)
+    //    - tự luận (nếu bật, và có ảnh bài làm); bài cũ (không cfg) có file đáp án → AI chấm toàn bộ từ ảnh
+    const aiFromImages = hasImages ? (det.pendingAi || []) : [];
+    const aiFromAnswers = answerPath ? (det.aiKeyless || []) : [];
+    const aiObjective = [...new Set([...aiFromImages, ...aiFromAnswers])];
     const essayEnabled = cfg ? partEnabled(cfg, 'essay') : !!sub.answer_file;
     const aiEssay = hasImages && essayEnabled;
     const needAi = aiObjective.length > 0 || aiEssay;
+
+    // Phần chưa có đáp án mà KHÔNG có file đáp án (và không có ảnh) → không thể chấm tự động/AI
+    const cannotGrade = (cfg ? (det.aiKeyless || []) : []).filter((k) => !aiObjective.includes(k));
+
+    console.log(`[grading-queue] #${submissionId} det=${det.score} pendingAi=[${det.pendingAi}] aiKeyless=[${det.aiKeyless}] unresolved=${(det.unresolved || []).length} hasImages=${hasImages} answerFile=${!!answerPath}`);
 
     let aiScore = 0;
     let aiDetails = [];
@@ -152,11 +159,18 @@ async function gradeOne(submissionId, { force = false } = {}) {
       const aiResult = await gradeSubmission(answerPath, subPaths, aiMax || sub.max_score, sub.grading_note, 3, {
         partsConfig: cfg || sub.parts_config, // cfg đã ghép đáp án để AI có sẵn key
         scope,
+        studentAnswers: sub.structured_answers, // để AI chấm phần khách quan từ đáp án HS điền (không cần ảnh)
       });
       aiScore = aiResult.score || 0;
       aiDetails = aiResult.details || [];
       aiFeedback = aiResult.feedback || '';
     }
+
+    // Phần không thể chấm (chưa có đáp án & không có file đáp án) → ghi chú để giáo viên xử lý
+    cannotGrade.forEach((k) => aiDetails.push({
+      question: PART_LABELS[k] || k, status: 'partial',
+      comment: 'Chưa có đáp án để chấm — hãy nhập đáp án các câu này hoặc tải File đáp án (PDF) để AI tự đọc.',
+    }));
 
     // 3) Gộp điểm THÔ (tổng các câu) rồi QUY ĐỔI về thang giáo viên chọn (sub.max_score)
     const rawEarned = round2(det.score + aiScore);
