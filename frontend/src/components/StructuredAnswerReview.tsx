@@ -15,7 +15,7 @@ export default function StructuredAnswerReview({ partsConfig, structuredAnswers 
   if (typeof ans === 'string') { try { ans = JSON.parse(ans); } catch { ans = null; } }
   if (!cfg || !ans) return null;
 
-  const enabled = (k: string) => cfg[k] && cfg[k].enabled;
+  const enabled = (k: string) => (cfg as any)[k] && (cfg as any)[k].enabled;
   const cell = (ok: boolean): React.CSSProperties => ({
     padding: '2px 8px', borderRadius: 6, fontWeight: 700, fontSize: '0.78rem',
     background: ok ? '#E8F5E9' : '#FFEBEE', color: ok ? '#2E7D32' : '#C62828',

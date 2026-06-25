@@ -45,7 +45,7 @@ export default function PartsSolver({ cfg, value, onChange, readOnly = false }: 
                     const active = value.multiple_choice[i] === opt;
                     return (
                       <button key={opt} type="button" disabled={readOnly} onClick={() => setMC(i, active ? '' : opt)}
-                        style={mcOption(active, readOnly)}>
+                        style={mcOption(readOnly)}>
                         {radio(active, '#1565C0')}
                         <span style={{ fontWeight: 700, fontSize: '0.9rem', color: active ? '#1565C0' : '#444' }}>{opt}</span>
                       </button>
@@ -112,7 +112,7 @@ export default function PartsSolver({ cfg, value, onChange, readOnly = false }: 
 const sectionTitle: React.CSSProperties = { fontWeight: 800, fontSize: '0.9rem', color: '#C62828', marginBottom: 8 };
 const qLabel: React.CSSProperties = { fontSize: '0.85rem', fontWeight: 700, color: '#1A1A2E', minWidth: 52 };
 
-function mcOption(active: boolean, readOnly: boolean): React.CSSProperties {
+function mcOption(readOnly: boolean): React.CSSProperties {
   return {
     display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: 'none',
     padding: '2px 4px', cursor: readOnly ? 'default' : 'pointer',
