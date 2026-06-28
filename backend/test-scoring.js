@@ -42,6 +42,26 @@ console.log('\n═══ TEST CHẤM ĐIỂM TỰ ĐỘNG ═══\n');
   eq('ĐS câu1 status partial', r.details[0].status, 'partial');
 }
 
+// ── 2b. Đúng/Sai CHIA ĐỀU (tfMode 'even'): mỗi ý đúng = 25% điểm câu ──
+{
+  const cfg = { true_false: { enabled: true, count: 4, tfMode: 'even', answers: [
+    ['T', 'F', 'T', 'F'], ['T', 'F', 'T', 'F'], ['T', 'F', 'T', 'F'], ['T', 'F', 'T', 'F'],
+  ], points: [1, 1, 1, 1] } };
+  // Câu1: đúng 1 ý → 0.25; Câu2: đúng 2 ý → 0.5; Câu3: đúng 3 ý → 0.75; Câu4: đúng 4 ý → 1.0
+  const stud = { true_false: [
+    ['T', 'T', 'F', 'T'], // đúng a → 1 ý
+    ['T', 'F', 'F', 'T'], // đúng a,b → 2 ý
+    ['T', 'F', 'T', 'T'], // đúng a,b,c → 3 ý
+    ['T', 'F', 'T', 'F'], // đúng cả 4
+  ] };
+  const r = scoreStructured(cfg, stud);
+  eq('ĐS even tổng (0.25+0.5+0.75+1.0)', r.score, 2.5);
+  eq('ĐS even câu1 = 0.25', Number(r.details[0].comment.match(/\+([\d.]+)đ/)[1]), 0.25);
+  eq('ĐS even câu2 = 0.5', Number(r.details[1].comment.match(/\+([\d.]+)đ/)[1]), 0.5);
+  eq('ĐS even câu3 = 0.75', Number(r.details[2].comment.match(/\+([\d.]+)đ/)[1]), 0.75);
+  eq('ĐS even câu4 = 1.0', Number(r.details[3].comment.match(/\+([\d.]+)đ/)[1]), 1);
+}
+
 // ── 3. Trả lời ngắn: 0.5đ/câu + khớp linh hoạt ──────────────────────
 {
   const cfg = { short_answer: { enabled: true, count: 3, answers: ['1/2', '2', '12'], points: [0.5, 0.5, 0.5] } };

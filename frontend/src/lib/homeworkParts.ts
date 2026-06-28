@@ -26,6 +26,7 @@ export interface PartConfig {
   answers: any[];   // MC: string ('' | 'A'..'D'); TF: string[] ('' | 'T' | 'F' × 4); SA: string
   points: number[]; // điểm mỗi câu (hệ thống đặt tất cả bằng "điểm mỗi câu" của phần)
   notes?: string[]; // gợi ý cách điền cho từng câu (chủ yếu dùng cho Trả lời ngắn)
+  tfMode?: TfMode;  // cách chia điểm phần Đúng/Sai (chỉ dùng cho true_false)
 }
 
 export interface PartsConfig {
@@ -38,13 +39,30 @@ export interface PartsConfig {
 // Điểm mặc định mỗi câu theo từng phần (yêu cầu: TN 0.25, ĐS 1.0/câu, TLN 0.5)
 export const DEFAULT_POINTS: Record<string, number> = { multiple_choice: 0.25, true_false: 1, short_answer: 0.5 };
 export const DEFAULT_ESSAY_POINTS = 4;
+
+// Cách chia điểm phần Đúng/Sai theo số ý đúng (TỈ LỆ trên "điểm mỗi câu").
+//   'thpt' (chuẩn THPT): 1 ý 10%, 2 ý 25%, 3 ý 50%, 4 ý 100% → với câu 1đ: 0.1/0.25/0.5/1.0
+//   'even' (đều nhau):   mỗi ý đúng = 25% điểm câu          → với câu 1đ: 0.25/0.5/0.75/1.0
+export type TfMode = 'thpt' | 'even';
+export const TF_MODE_DEFAULT: TfMode = 'thpt';
 // Tỉ lệ điểm Đúng/Sai theo số ý đúng (chuẩn THPT): 0,1,2,3,4 ý → 0, 0.1, 0.25, 0.5, 1.0 × điểm câu
 export const TF_LADDER = [0, 0.1, 0.25, 0.5, 1.0];
+// Tỉ lệ điểm Đúng/Sai khi chia đều: mỗi ý đúng = 25% điểm câu
+export const TF_LADDER_EVEN = [0, 0.25, 0.5, 0.75, 1.0];
+
+// Chuẩn hóa giá trị tfMode (mặc định 'thpt' để tương thích bài cũ).
+export function tfModeOf(val: any): TfMode {
+  return val === 'even' ? 'even' : 'thpt';
+}
+// Mảng tỉ lệ điểm tương ứng cách chia điểm đã chọn.
+export function tfLadderOf(mode: any): number[] {
+  return tfModeOf(mode) === 'even' ? TF_LADDER_EVEN : TF_LADDER;
+}
 
 export function emptyPartsConfig(): PartsConfig {
   return {
     multiple_choice: { enabled: false, count: 0, answers: [], points: [] },
-    true_false: { enabled: false, count: 0, answers: [], points: [] },
+    true_false: { enabled: false, count: 0, answers: [], points: [], tfMode: TF_MODE_DEFAULT },
     short_answer: { enabled: false, count: 0, answers: [], points: [], notes: [] },
     essay: { enabled: false, points: DEFAULT_ESSAY_POINTS },
   };
@@ -122,6 +140,7 @@ export function normalizePartsConfig(raw: any): PartsConfig {
         answers: resizeAnswers(k, Array.isArray(p.answers) ? p.answers : [], count),
         points: uniformPoints(per, count),
         ...(k === 'short_answer' ? { notes: resizeNotes(Array.isArray(p.notes) ? p.notes : [], count) } : {}),
+        ...(k === 'true_false' ? { tfMode: tfModeOf(p.tfMode) } : {}),
       };
     }
   });

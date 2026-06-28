@@ -30,6 +30,8 @@ function sanitizePartsConfig(raw) {
       const rawPts = Array.isArray(p.points) ? p.points : [];
       for (let i = 0; i < count; i++) points.push(typeof rawPts[i] === 'number' && rawPts[i] >= 0 ? rawPts[i] : def);
       out[k] = { enabled: true, count, answers, points };
+      // Cách chia điểm phần Đúng/Sai khi đúng một phần ('thpt' theo bậc, 'even' chia đều mỗi ý)
+      if (k === 'true_false') out[k].tfMode = p.tfMode === 'even' ? 'even' : 'thpt';
       // Ghi chú cách điền cho học sinh (chủ yếu phần Trả lời ngắn)
       if (k === 'short_answer') {
         const rawNotes = Array.isArray(p.notes) ? p.notes : [];

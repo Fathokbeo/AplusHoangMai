@@ -110,7 +110,12 @@ async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 1
   // Luật chấm riêng cho từng phần được giao
   const ruleLines = [];
   if (objOnly.multiple_choice) ruleLines.push('- TRẮC NGHIỆM: mỗi câu so với đáp án đúng (A/B/C/D); đúng hay sai theo từng câu, không có điểm một phần.');
-  if (objOnly.true_false) ruleLines.push('- ĐÚNG/SAI (mỗi câu 4 ý a,b,c,d): chấm theo CHUẨN THPT — trong 1 câu: đúng 1 ý = 0.1, đúng 2 ý = 0.25, đúng 3 ý = 0.5, đúng cả 4 ý = 1.0 (TỈ LỆ trên điểm câu, quy đổi sang điểm thực tế).');
+  if (objOnly.true_false) {
+    const tfEven = !!(cfg && cfg.true_false && cfg.true_false.tfMode === 'even');
+    ruleLines.push(tfEven
+      ? '- ĐÚNG/SAI (mỗi câu 4 ý a,b,c,d): chia ĐỀU — mỗi ý đúng = 25% điểm câu (đúng 1 ý = 0.25, 2 ý = 0.5, 3 ý = 0.75, cả 4 ý = 1.0; TỈ LỆ trên điểm câu, quy đổi sang điểm thực tế).'
+      : '- ĐÚNG/SAI (mỗi câu 4 ý a,b,c,d): chấm theo CHUẨN THPT — trong 1 câu: đúng 1 ý = 0.1, đúng 2 ý = 0.25, đúng 3 ý = 0.5, đúng cả 4 ý = 1.0 (TỈ LỆ trên điểm câu, quy đổi sang điểm thực tế).');
+  }
   if (objOnly.short_answer) ruleLines.push('- TRẢ LỜI NGẮN: khớp LINH HOẠT, chấp nhận biến thể tương đương về mặt toán học (vd "1/2" = "0,5" = "0.5"; "2" = "2,0"; bỏ qua khác biệt khoảng trắng, dấu phẩy/chấm thập phân, hoa/thường).');
   if (gradeEssay) ruleLines.push('- TỰ LUẬN: chấm như bài tự luận, so kết quả cuối cùng và các bước lập luận chính với đáp án; cho điểm một phần khi đúng một phần.');
   const objectiveRules = ruleLines.length ? `\nLUẬT CHẤM TỪNG PHẦN:\n${ruleLines.join('\n')}\n` : '';

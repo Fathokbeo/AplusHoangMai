@@ -1,9 +1,9 @@
 // Giáo viên cấu hình 4 kiểu nộp bài + nhập đáp án (key) khi tạo/sửa bài tập.
 // Đáp án để TRỐNG nghĩa là: AI tự đọc từ File đáp án (PDF) khi chấm.
 import {
-  type PartsConfig, type PartKey, MC_OPTIONS, TF_SUB_LABELS,
+  type PartsConfig, type PartKey, type TfMode, MC_OPTIONS, TF_SUB_LABELS,
   resizeAnswers, resizeNotes, uniformPoints, pointPerOf, keyIsSet,
-  computeMaxScore, partTotalPoints,
+  computeMaxScore, partTotalPoints, tfModeOf, tfLadderOf,
 } from '../lib/homeworkParts';
 
 interface Props {
@@ -73,6 +73,9 @@ export default function PartsEditor({ value, onChange }: Props) {
     const num = parseFloat(String(raw).replace(',', '.'));
     setPart('essay', { points: isFinite(num) && num >= 0 ? num : 0 });
   };
+
+  // Chọn cách chia điểm phần Đúng/Sai (chuẩn THPT theo bậc, hoặc chia đều mỗi ý)
+  const setTfMode = (mode: TfMode) => setPart('true_false', { tfMode: mode });
 
   // Hàng "Số câu + Điểm mỗi câu" của một phần
   const countPointRow = (pk: PartKey) => (
@@ -160,9 +163,7 @@ export default function PartsEditor({ value, onChange }: Props) {
                 </div>
               ))}
             </div>
-            <div style={{ fontSize: '0.74rem', color: '#888', marginTop: 8 }}>
-              Điểm câu = điểm khi đúng cả 4 ý. Đúng 1 ý = 10%, 2 ý = 25%, 3 ý = 50%, 4 ý = 100% điểm câu (chuẩn THPT).
-            </div>
+            {tfModeRow()}
             {keyHint('true_false')}
             {partTotalRow('true_false')}
           </div>
@@ -227,6 +228,45 @@ export default function PartsEditor({ value, onChange }: Props) {
     return (
       <div style={{ fontSize: '0.78rem', color: '#6A1B9A', fontWeight: 600, marginTop: 8, textAlign: 'right' }}>
         Tổng phần này: {Math.round(total * 100) / 100} điểm ({n} câu)
+      </div>
+    );
+  }
+
+  // Chọn cách chia điểm phần Đúng/Sai + xem trước số điểm thực tế theo "điểm mỗi câu".
+  function tfModeRow() {
+    const mode = tfModeOf(value.true_false.tfMode);
+    const per = pointPerOf('true_false', value.true_false.points);
+    const r = (n: number) => Math.round(n * 100) / 100;
+    const example = (m: TfMode) => {
+      const l = tfLadderOf(m);
+      return `1 ý ${r(per * l[1])}đ · 2 ý ${r(per * l[2])}đ · 3 ý ${r(per * l[3])}đ · 4 ý ${r(per * l[4])}đ`;
+    };
+    const opts: { key: TfMode; title: string }[] = [
+      { key: 'thpt', title: 'Chuẩn THPT (theo bậc)' },
+      { key: 'even', title: 'Chia đều mỗi ý' },
+    ];
+    return (
+      <div style={{ marginTop: 10 }}>
+        <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#444', marginBottom: 6 }}>Cách chia điểm khi đúng một phần:</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {opts.map((o) => {
+            const active = mode === o.key;
+            return (
+              <button key={o.key} type="button" onClick={() => setTfMode(o.key)}
+                style={{
+                  textAlign: 'left', flex: '1 1 220px', minWidth: 200, cursor: 'pointer',
+                  border: `1.5px solid ${active ? '#C62828' : '#DDD'}`, background: active ? '#FFF4F4' : 'white',
+                  borderRadius: 9, padding: '8px 10px',
+                }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                  {radio(active, '#C62828')}
+                  <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#1A1A2E' }}>{o.title}</span>
+                </div>
+                <div style={{ fontSize: '0.74rem', color: '#777', marginTop: 5 }}>{example(o.key)}</div>
+              </button>
+            );
+          })}
+        </div>
       </div>
     );
   }

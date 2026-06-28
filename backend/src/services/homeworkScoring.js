@@ -2,8 +2,16 @@
 // Phần tự luận do AI chấm (xem aiGrading.js). Tệp này KHÔNG gọi AI.
 const { parsePartsConfig, partEnabled, keyIsSet } = require('./homeworkParts');
 
-// Tỉ lệ điểm Đúng/Sai theo số ý đúng (chuẩn THPT): 0,1,2,3,4 ý → 0, 0.1, 0.25, 0.5, 1.0 × điểm câu
+// Cách chia điểm phần Đúng/Sai theo số ý đúng (TỈ LỆ trên điểm câu):
+//   'thpt' (chuẩn THPT): 0,1,2,3,4 ý → 0, 0.1, 0.25, 0.5, 1.0
+//   'even' (chia đều):   mỗi ý đúng = 25% điểm câu → 0, 0.25, 0.5, 0.75, 1.0
 const TF_LADDER = [0, 0.1, 0.25, 0.5, 1.0];
+const TF_LADDER_EVEN = [0, 0.25, 0.5, 0.75, 1.0];
+// Mảng tỉ lệ điểm Đúng/Sai theo cách chia điểm giáo viên chọn (mặc định 'thpt').
+function tfLadder(cfg) {
+  const mode = cfg && cfg.true_false && cfg.true_false.tfMode;
+  return mode === 'even' ? TF_LADDER_EVEN : TF_LADDER;
+}
 const DEFAULT_POINTS = { multiple_choice: 0.25, true_false: 1, short_answer: 0.5 };
 const DEFAULT_ESSAY_POINTS = 4;
 
@@ -127,6 +135,7 @@ function scoreStructured(rawCfg, rawAns) {
     else if (setKeyCount('true_false', key) === 0) { result.aiKeyless.push('true_false'); }
     else {
       result.gradedParts.true_false = true;
+      const ladder = tfLadder(cfg);
       key.forEach((krow, i) => {
         if (!keyIsSet('true_false', krow)) { result.unresolved.push(['true_false', i]); result.details.push(unresolvedDetail('Đúng/Sai', i)); return; }
         const srow = Array.isArray(stud[i]) ? stud[i] : [];
@@ -140,7 +149,7 @@ function scoreStructured(rawCfg, rawAns) {
           if (ok) correct++;
           subTxt.push(`${'abcd'[j]}:${sv === 'T' ? 'Đ' : sv === 'F' ? 'S' : '—'}${ok ? '✓' : '✗'}`);
         }
-        const earned = round2((pts[i] || 0) * TF_LADDER[correct]);
+        const earned = round2((pts[i] || 0) * ladder[correct]);
         result.score += earned;
         const status = correct === 4 ? 'correct' : correct === 0 ? 'wrong' : 'partial';
         result.details.push({
@@ -194,6 +203,8 @@ function scaleToTarget(rawEarned, rawMax, scale) {
 
 module.exports = {
   TF_LADDER,
+  TF_LADDER_EVEN,
+  tfLadder,
   DEFAULT_POINTS,
   round2,
   partPoints,
