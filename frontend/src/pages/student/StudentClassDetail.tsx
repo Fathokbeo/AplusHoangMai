@@ -198,12 +198,23 @@ export default function StudentClassDetail() {
                   </div>
                   {hw.graded_by_ai && <span className="badge badge-purple" style={{ marginLeft: 'auto' }}><Bot size={10} style={{ marginRight: 4 }} />AI chấm</span>}
                 </div>
-                {hw.feedback && (
-                  <div style={{ fontSize: '0.83rem', color: '#555', lineHeight: 1.6, borderTop: '1px solid #EEE', paddingTop: 8, marginTop: 8 }}>
-                    <strong>Nhận xét:</strong> {hw.feedback}
+                {/* Nhận xét + chi tiết sai câu nào: chỉ hiện sau khi mở đáp án (theo "Thời gian xem đáp án") */}
+                {hw.can_see_answer ? (
+                  <>
+                    {hw.feedback && (
+                      <div style={{ fontSize: '0.83rem', color: '#555', lineHeight: 1.6, borderTop: '1px solid #EEE', paddingTop: 8, marginTop: 8 }}>
+                        <strong>Nhận xét:</strong> {hw.feedback}
+                      </div>
+                    )}
+                    <GradingDetails details={hw.grading_details} />
+                  </>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', color: '#999', borderTop: '1px solid #EEE', paddingTop: 8, marginTop: 8 }}>
+                    <Lock size={12} />
+                    Nhận xét &amp; chi tiết từng câu sẽ hiển thị cùng lúc với đáp án
+                    {hw.answer_visible_date ? ` (lúc ${new Date(hw.answer_visible_date).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })})` : ''}.
                   </div>
                 )}
-                <GradingDetails details={hw.grading_details} />
               </div>
             )}
 

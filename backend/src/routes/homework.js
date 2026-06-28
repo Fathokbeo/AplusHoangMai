@@ -163,12 +163,16 @@ router.get('/homework/:id', (req, res) => {
   if (req.user.role === 'student') {
     const submission = db.prepare('SELECT * FROM submissions WHERE homework_id=? AND student_id=?').get(req.params.id, req.user.id);
     const { grading_note, ...hwPublic } = hw; // ẩn ghi chú chấm của giáo viên
+    // Nhận xét + chi tiết từng câu chỉ hiện cùng lúc với đáp án (theo "Thời gian xem đáp án").
+    const safeSubmission = submission
+      ? { ...submission, feedback: canSeeAnswer ? submission.feedback : null, grading_details: canSeeAnswer ? submission.grading_details : null }
+      : null;
     return res.json({
       ...hwPublic,
       parts_config: stripAnswers(hw.parts_config), // ẩn đáp án (key) khỏi học sinh
       answer_file: canSeeAnswer ? hw.answer_file : null,
       solution_video_url: canSeeAnswer ? hw.solution_video_url : null,
-      submission: submission || null,
+      submission: safeSubmission,
       can_submit: !hw.due_date || now <= hw.due_date,
       can_see_answer: canSeeAnswer,
     });

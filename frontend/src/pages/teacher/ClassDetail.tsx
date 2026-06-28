@@ -14,6 +14,22 @@ import {
   ChevronDown, ChevronRight
 } from 'lucide-react';
 
+// Giờ nhập ở ô datetime-local là GIỜ ĐỊA PHƯƠNG. Lưu dạng ISO (UTC) để khi so "đến hạn"
+// (đáp án/video mở, hạn nộp) khớp đúng múi giờ, không bị lệch.
+function localInputToISO(v: string): string {
+  if (!v) return '';
+  const d = new Date(v); // chuỗi datetime-local được hiểu theo giờ địa phương trình duyệt
+  return isNaN(d.getTime()) ? v : d.toISOString();
+}
+// Đổi ngược giá trị đã lưu (ISO mới, hoặc chuỗi giờ-địa-phương cũ) về giá trị cho ô datetime-local.
+function isoToLocalInput(v: string | null | undefined): string {
+  if (!v) return '';
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return String(v).slice(0, 16);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 // Badge hiển thị các phần đã bật của một bài tập (từ parts_config)
 function partBadges(raw: any) {
   const cfg = normalizePartsConfig(raw);
@@ -113,10 +129,14 @@ export default function ClassDetail() {
     fetchClass();
   };
 
+  // Số thứ tự mặc định kế tiếp: chương/bài đầu = 1, sau đó nối tiếp tăng dần (vẫn sửa tay được).
+  const nextOrder = (items: any[] | undefined, field: string) =>
+    ((items && items.length) ? Math.max(0, ...items.map((x: any) => Number(x[field]) || 0)) : 0) + 1;
+
   // Chapter CRUD
   const openCreateChapter = () => {
     setEditingChapter(null);
-    setChapterForm({ title: '', chapter_order: String(cls?.chapters?.length || 0) });
+    setChapterForm({ title: '', chapter_order: String(nextOrder(cls?.chapters, 'chapter_order')) });
     setChapterModal(true);
   };
 
@@ -156,7 +176,7 @@ export default function ClassDetail() {
   // Lesson CRUD
   const openCreateLesson = () => {
     setEditingLesson(null);
-    setLessonForm({ title: '', description: '', video_url: '', video_type: 'youtube', lesson_order: String(cls?.lessons?.length || 0), chapter_id: '' });
+    setLessonForm({ title: '', description: '', video_url: '', video_type: 'youtube', lesson_order: String(nextOrder(cls?.lessons, 'lesson_order')), chapter_id: '' });
     setLessonModal(true);
   };
 
@@ -216,8 +236,8 @@ export default function ClassDetail() {
     setEditingHw(h);
     setHwForm({
       title: h.title, description: h.description || '',
-      due_date: h.due_date ? h.due_date.slice(0, 16) : '',
-      answer_visible_date: h.answer_visible_date ? h.answer_visible_date.slice(0, 16) : '',
+      due_date: isoToLocalInput(h.due_date),
+      answer_visible_date: isoToLocalInput(h.answer_visible_date),
       max_score: String(h.max_score),
       grading_note: h.grading_note || '',
       chapter_id: h.chapter_id ? String(h.chapter_id) : '',
@@ -235,7 +255,9 @@ export default function ClassDetail() {
     try {
       const body = new FormData();
       // Thang điểm = thang giáo viên chọn (để quy đổi). Mặc định đã bám theo tổng điểm các câu.
-      Object.entries(hwForm).forEach(([k, v]) => body.append(k, v));
+      // Mốc thời gian: đổi giờ địa phương -> ISO để so "đến hạn" đúng múi giờ.
+      Object.entries(hwForm).forEach(([k, v]) =>
+        body.append(k, (k === 'due_date' || k === 'answer_visible_date') ? localInputToISO(v) : v));
       body.append('parts_config', JSON.stringify(hwParts));
       if (hwFiles.pdf) body.append('pdf_file', hwFiles.pdf);
       if (hwFiles.answer) body.append('answer_file', hwFiles.answer);

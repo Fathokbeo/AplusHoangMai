@@ -50,6 +50,9 @@ router.get('/my-classes/:id', (req, res) => {
       can_see_answer: canSeeAnswer,
       answer_file: canSeeAnswer ? hw.answer_file : null,
       solution_video_url: canSeeAnswer ? hw.solution_video_url : null,
+      // Nhận xét + chi tiết từng câu (sai câu nào) chỉ hiện cùng lúc với đáp án (theo "Thời gian xem đáp án").
+      feedback: canSeeAnswer ? hw.feedback : null,
+      grading_details: canSeeAnswer ? hw.grading_details : null,
     };
   });
 
