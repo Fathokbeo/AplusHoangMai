@@ -3,6 +3,7 @@ const router = express.Router();
 const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { stripAnswers } = require('../services/homeworkParts');
+const { classRanking, studentOverallAverage } = require('../services/classRanking');
 
 router.use(authMiddleware, requireRole('student'));
 
@@ -17,7 +18,12 @@ router.get('/my-classes', (req, res) => {
     LEFT JOIN courses co ON cl.course_id=co.id LEFT JOIN users u ON cl.teacher_id=u.id
     WHERE cs.student_id=? AND cl.active=1 ORDER BY cl.created_at DESC
   `).all(req.user.id, req.user.id);
-  res.json(classes);
+  // Điểm TB + xếp hạng của học sinh trong mỗi lớp (quá hạn chưa nộp = 0 điểm)
+  const withRank = classes.map((c) => {
+    const mine = classRanking(db, c.id).get(req.user.id) || {};
+    return { ...c, my_avg: mine.avg ?? null, my_rank: mine.rank ?? null, rank_total: mine.total ?? 0 };
+  });
+  res.json(withRank);
 });
 
 router.get('/my-classes/:id', (req, res) => {
@@ -56,7 +62,9 @@ router.get('/my-classes/:id', (req, res) => {
     };
   });
 
-  res.json({ ...cls, chapters, lessons, homework });
+  // Điểm TB + xếp hạng của học sinh trong lớp này (quá hạn chưa nộp = 0 điểm)
+  const mine = classRanking(db, req.params.id).get(req.user.id) || {};
+  res.json({ ...cls, chapters, lessons, homework, my_avg: mine.avg ?? null, my_rank: mine.rank ?? null, rank_total: mine.total ?? 0 });
 });
 
 // Student's profile/stats
@@ -65,8 +73,9 @@ router.get('/stats', (req, res) => {
   const classCount = db.prepare('SELECT COUNT(*) c FROM class_students WHERE student_id=?').get(req.user.id).c;
   const submittedCount = db.prepare('SELECT COUNT(*) c FROM submissions WHERE student_id=?').get(req.user.id).c;
   const gradedCount = db.prepare('SELECT COUNT(*) c FROM submissions WHERE student_id=? AND score IS NOT NULL').get(req.user.id).c;
-  const avgScore = db.prepare('SELECT AVG(score) avg FROM submissions WHERE student_id=? AND score IS NOT NULL').get(req.user.id).avg;
-  res.json({ classCount, submittedCount, gradedCount, avgScore: avgScore ? parseFloat(avgScore.toFixed(1)) : null });
+  // Điểm TB (thang 10): bài đã quá hạn mà chưa nộp được tính 0 điểm.
+  const avgScore = studentOverallAverage(db, req.user.id);
+  res.json({ classCount, submittedCount, gradedCount, avgScore });
 });
 
 module.exports = router;

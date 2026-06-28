@@ -9,7 +9,7 @@ import PartsSolver, { type StudentAnswers } from '../../components/PartsSolver';
 import useIsMobile from '../../lib/useIsMobile';
 import { toast } from '../../components/Toast';
 import { parsePartsConfig, hasObjectiveParts, hasEssay, emptyStudentAnswers, PART_LABELS, PART_ORDER, type PartKey } from '../../lib/homeworkParts';
-import { ChevronLeft, Play, ClipboardList, BookOpen, Upload, CheckCircle, Clock, Eye, Bot, Lock, FileText, X, Plus, Layers, Video, ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronLeft, Play, ClipboardList, BookOpen, Upload, CheckCircle, Clock, Eye, Bot, Lock, FileText, X, Plus, Layers, Video, ChevronDown, ChevronRight, Trophy, Star } from 'lucide-react';
 
 // Danh sách URL các file đã nộp (hỗ trợ cũ: 1 file, mới: nhiều file dạng JSON)
 function submittedFileUrls(hw: any): string[] {
@@ -229,6 +229,12 @@ export default function StudentClassDetail() {
                 Đã nhận bài. Giáo viên sẽ chấm và trả điểm sớm.
               </div>
             )}
+            {/* Quá hạn mà chưa nộp → tính 0 điểm vào điểm trung bình */}
+            {!isSubmitted && !canSubmit && (
+              <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem', color: '#C62828', background: '#FFEBEE', borderRadius: 8, padding: '0.6rem 0.8rem' }}>
+                <Lock size={14} /> Quá hạn, không nộp bài — tính <strong>0 điểm</strong> vào điểm trung bình.
+              </div>
+            )}
           </div>
           </div>
 
@@ -325,6 +331,30 @@ export default function StudentClassDetail() {
           </div>
           <h1 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 800 }}>{cls.title}</h1>
           <p style={{ color: '#888', margin: '4px 0 0', fontSize: '0.88rem' }}>Giáo viên: <strong>{cls.teacher_name}</strong></p>
+        </div>
+      </div>
+
+      {/* Điểm TB lớp này + xếp hạng (bài quá hạn chưa nộp tính 0 điểm) */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+        <div className="card" style={{ flex: '1 1 180px', display: 'flex', alignItems: 'center', gap: 12, padding: '0.9rem 1.1rem' }}>
+          <div style={{ width: 42, height: 42, borderRadius: 10, background: '#FFF3E0', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Star size={20} color="#E65100" />
+          </div>
+          <div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#E65100', lineHeight: 1.1 }}>{cls.my_avg ?? '—'}<span style={{ fontSize: '0.8rem', color: '#bbb', fontWeight: 600 }}>/10</span></div>
+            <div style={{ fontSize: '0.76rem', color: '#888' }}>Điểm TB lớp này</div>
+          </div>
+        </div>
+        <div className="card" style={{ flex: '1 1 180px', display: 'flex', alignItems: 'center', gap: 12, padding: '0.9rem 1.1rem' }}>
+          <div style={{ width: 42, height: 42, borderRadius: 10, background: '#F3E5F5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Trophy size={20} color="#6A1B9A" />
+          </div>
+          <div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#6A1B9A', lineHeight: 1.1 }}>
+              {cls.my_rank ? <>Hạng {cls.my_rank}<span style={{ fontSize: '0.8rem', color: '#bbb', fontWeight: 600 }}>/{cls.rank_total}</span></> : '—'}
+            </div>
+            <div style={{ fontSize: '0.76rem', color: '#888' }}>Xếp hạng trong lớp</div>
+          </div>
         </div>
       </div>
 
