@@ -36,7 +36,7 @@ export default function StudentDashboard() {
             { label: 'Lớp học', value: stats.classCount, icon: School, color: '#C62828', bg: '#FFEBEE' },
             { label: 'Bài đã nộp', value: stats.submittedCount, icon: ClipboardList, color: '#1565C0', bg: '#E3F2FD' },
             { label: 'Bài đã chấm', value: stats.gradedCount, icon: CheckCircle, color: '#2E7D32', bg: '#E8F5E9' },
-            { label: 'Điểm TB', value: stats.avgScore ?? '—', icon: Star, color: '#E65100', bg: '#FFF3E0' },
+            { label: 'Điểm TB tháng', value: stats.avgScore ?? '—', icon: Star, color: '#E65100', bg: '#FFF3E0' },
           ].map(({ label, value, icon: Icon, color, bg }) => (
             <div key={label} className="stat-card">
               <div className="stat-icon" style={{ background: bg }}>
@@ -73,7 +73,7 @@ export default function StudentDashboard() {
                 </div>
                 <h3 style={{ margin: '0 0 4px', fontSize: '0.95rem', fontWeight: 700, color: '#1A1A2E' }}>{c.title}</h3>
                 <p style={{ margin: '0 0 12px', fontSize: '0.82rem', color: '#888' }}>GV: {c.teacher_name}</p>
-                {/* Điểm TB + xếp hạng trong lớp (quá hạn chưa nộp tính 0 điểm) */}
+                {/* Điểm TB + xếp hạng tháng này trong lớp (reset theo tháng; quá hạn chưa nộp tính 0 điểm) */}
                 {c.my_rank ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.78rem', fontWeight: 700, padding: '3px 9px', borderRadius: 99, ...rankStyle(c.my_rank) }}>
@@ -82,7 +82,7 @@ export default function StudentDashboard() {
                     <span style={{ fontSize: '0.78rem', color: '#E65100', fontWeight: 700 }}>Điểm TB: {c.my_avg ?? '—'}</span>
                   </div>
                 ) : (
-                  <div style={{ fontSize: '0.74rem', color: '#bbb', marginBottom: 10 }}>Chưa có điểm để xếp hạng</div>
+                  <div style={{ fontSize: '0.74rem', color: '#bbb', marginBottom: 10 }}>Chưa có điểm tháng này</div>
                 )}
                 <div style={{ display: 'flex', gap: 12, fontSize: '0.78rem', color: '#888', borderTop: '1px solid #F5F5F5', paddingTop: 10 }}>
                   <span>{c.lesson_count} bài giảng</span>

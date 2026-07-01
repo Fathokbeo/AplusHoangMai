@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { uploadVideo, uploadCourseThumbnail } = require('../middleware/upload');
-const { hardDeleteCourse, hardDeleteClass } = require('../services/cascade');
+const { hardDeleteCourse, hardDeleteClass, hardDeleteStudent } = require('../services/cascade');
 
 router.use(authMiddleware, requireRole('teacher', 'admin'));
 
@@ -248,6 +248,30 @@ router.delete('/classes/:id/students/:studentId', (req, res) => {
   const db = getDb();
   db.prepare('DELETE FROM class_students WHERE class_id=? AND student_id=?').run(req.params.id, req.params.studentId);
   res.json({ message: 'Đã xóa' });
+});
+
+// Xóa hàng loạt học sinh khỏi lớp + xóa hẳn dữ liệu (tiết kiệm dữ liệu).
+// HS còn học lớp khác → chỉ gỡ khỏi lớp này; HS chỉ thuộc lớp này → xóa hẳn tài khoản & dữ liệu.
+router.post('/classes/:id/students/bulk-delete', (req, res) => {
+  const { student_ids } = req.body;
+  if (!Array.isArray(student_ids) || student_ids.length === 0) {
+    return res.status(400).json({ message: 'Chưa chọn học sinh nào' });
+  }
+  const db = getDb();
+  const cls = db.prepare('SELECT * FROM classes WHERE id=?').get(req.params.id);
+  if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp' });
+  if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+
+  const ids = student_ids.map(Number).filter(Boolean);
+  let purged = 0, kept = 0;
+  db.transaction(() => {
+    for (const sid of ids) {
+      db.prepare('DELETE FROM class_students WHERE class_id=? AND student_id=?').run(req.params.id, sid);
+      const stillEnrolled = db.prepare('SELECT 1 FROM class_students WHERE student_id=? LIMIT 1').get(sid);
+      if (!stillEnrolled) { hardDeleteStudent(db, sid); purged++; } else { kept++; }
+    }
+  })();
+  res.json({ message: `Đã xử lý ${ids.length} học sinh`, purged, kept });
 });
 
 // ── Chapters (chương: nhóm bài giảng & bài tập) ───────────────────────

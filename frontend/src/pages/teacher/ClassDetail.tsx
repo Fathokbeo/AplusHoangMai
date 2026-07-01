@@ -64,6 +64,7 @@ export default function ClassDetail() {
   const [hwFiles, setHwFiles] = useState<{ pdf?: File; answer?: File }>({});
   const [chapterForm, setChapterForm] = useState({ title: '', chapter_order: '0' });
   const [studentSearch, setStudentSearch] = useState('');
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
   const [selectedStudent, setSelectedStudent] = useState('');
   const [addMode, setAddMode] = useState<'new' | 'existing'>('new');
@@ -82,6 +83,7 @@ export default function ClassDetail() {
   const fetchClass = async () => {
     const { data } = await api.get(`/teacher/classes/${id}`);
     setCls(data);
+    setSelectedIds(new Set()); // bỏ chọn sau mỗi lần tải lại
   };
 
   const fetchAllStudents = async () => {
@@ -127,6 +129,30 @@ export default function ClassDetail() {
     await api.delete(`/teacher/classes/${id}/students/${studentId}`);
     toast.success('Đã xóa học sinh');
     fetchClass();
+  };
+
+  const toggleStudentSelect = (sid: number) => setSelectedIds((prev) => {
+    const next = new Set(prev);
+    next.has(sid) ? next.delete(sid) : next.add(sid);
+    return next;
+  });
+
+  // Xóa hàng loạt: HS chỉ thuộc lớp này bị xóa hẳn (tài khoản + dữ liệu); HS còn lớp khác chỉ gỡ khỏi lớp.
+  const bulkDeleteStudents = async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    if (!confirm(
+      `Xóa ${ids.length} học sinh đã chọn khỏi lớp?\n\n` +
+      `• Học sinh CHỈ thuộc lớp này sẽ bị XÓA VĨNH VIỄN: tài khoản + toàn bộ bài nộp/dữ liệu (để tiết kiệm dữ liệu).\n` +
+      `• Học sinh còn học lớp khác chỉ bị gỡ khỏi lớp này.\n\nKhông thể khôi phục.`
+    )) return;
+    try {
+      const { data } = await api.post(`/teacher/classes/${id}/students/bulk-delete`, { student_ids: ids });
+      toast.success(data.message || 'Đã xóa');
+      fetchClass();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Lỗi');
+    }
   };
 
   // Số thứ tự mặc định kế tiếp: chương/bài đầu = 1, sau đó nối tiếp tăng dần (vẫn sửa tay được).
@@ -292,6 +318,8 @@ export default function ClassDetail() {
   // Học sinh: tự xếp theo tên riêng (tiếng Việt) rồi lọc theo ô tìm kiếm
   const sortedStudents = sortByVietnameseName(cls.students || [], (s: any) => s.full_name || '');
   const visibleStudents = sortedStudents.filter((s: any) => matchesNameSearch(s.full_name || '', studentSearch));
+  const allVisibleSelected = visibleStudents.length > 0 && visibleStudents.every((s: any) => selectedIds.has(s.id));
+  const toggleSelectAllStudents = () => setSelectedIds(allVisibleSelected ? new Set() : new Set(visibleStudents.map((s: any) => s.id)));
 
   // Nội dung lớp gom theo chương (theo thứ tự); cuối là nhóm "Chưa phân chương" nếu có bài lẻ
   const lessonsAll: any[] = cls.lessons || [];
@@ -456,28 +484,50 @@ export default function ClassDetail() {
             </div>
             <button className="btn btn-primary" onClick={openAddStudent}><UserPlus size={15} /> Thêm học sinh</button>
           </div>
+
+          {/* Thanh thao tác hàng loạt */}
+          {selectedIds.size > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#FFEBEE', border: '1px solid #FFCDD2', borderRadius: 10, padding: '0.6rem 1rem', marginBottom: 12 }}>
+              <span style={{ fontSize: '0.88rem', color: '#C62828', fontWeight: 600 }}>Đã chọn {selectedIds.size} học sinh</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-ghost btn-sm" onClick={() => setSelectedIds(new Set())}>Bỏ chọn</button>
+                <button className="btn btn-primary btn-sm" style={{ background: '#C62828' }} onClick={bulkDeleteStudents}>
+                  <Trash2 size={14} /> Xóa {selectedIds.size} học sinh
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="table-wrap">
             <table>
-              <thead><tr><th>#</th><th>Họ tên</th><th>Tên đăng nhập</th><th>Số điện thoại</th><th></th></tr></thead>
+              <thead><tr>
+                <th style={{ width: 40 }}>
+                  <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllStudents} style={{ cursor: 'pointer', width: 16, height: 16 }} />
+                </th>
+                <th>#</th><th>Họ tên</th><th>Tên đăng nhập</th><th>Số điện thoại</th><th></th>
+              </tr></thead>
               <tbody>
                 {visibleStudents.map((s: any, i: number) => (
-                  <tr key={s.id}>
+                  <tr key={s.id} style={selectedIds.has(s.id) ? { background: '#FFF8F8' } : undefined}>
+                    <td>
+                      <input type="checkbox" checked={selectedIds.has(s.id)} onChange={() => toggleStudentSelect(s.id)} style={{ cursor: 'pointer', width: 16, height: 16 }} />
+                    </td>
                     <td style={{ color: '#999' }}>{i + 1}</td>
                     <td><strong>{s.full_name}</strong></td>
                     <td style={{ color: '#888', fontFamily: 'monospace' }}>{s.username}</td>
                     <td style={{ color: '#888' }}>{s.parent_phone || '—'}</td>
                     <td>
-                      <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} onClick={() => removeStudent(s.id, s.full_name)}>
+                      <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} title="Gỡ khỏi lớp" onClick={() => removeStudent(s.id, s.full_name)}>
                         <UserMinus size={14} />
                       </button>
                     </td>
                   </tr>
                 ))}
                 {(!cls.students || cls.students.length === 0) && (
-                  <tr><td colSpan={5} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Chưa có học sinh</td></tr>
+                  <tr><td colSpan={6} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Chưa có học sinh</td></tr>
                 )}
                 {cls.students?.length > 0 && visibleStudents.length === 0 && (
-                  <tr><td colSpan={5} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Không tìm thấy học sinh phù hợp</td></tr>
+                  <tr><td colSpan={6} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Không tìm thấy học sinh phù hợp</td></tr>
                 )}
               </tbody>
             </table>

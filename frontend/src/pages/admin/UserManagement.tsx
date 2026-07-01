@@ -5,6 +5,7 @@ import { toast } from '../../components/Toast';
 import { Plus, Edit, Trash2, Search, UserCheck, UserX, Eye, EyeOff } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 
+interface ClassRef { id: number; title: string; course_title: string | null; }
 interface User {
   id: number;
   username: string;
@@ -14,13 +15,16 @@ interface User {
   active: number;
   created_at: string;
   plain_password: string | null;
+  classes?: ClassRef[];
 }
 
 export default function UserManagement() {
   const [users, setUsers] = useState<User[]>([]);
   const [filtered, setFiltered] = useState<User[]>([]);
+  const [classes, setClasses] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
+  const [classFilter, setClassFilter] = useState('all');
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
   const [loading, setLoading] = useState(false);
@@ -34,15 +38,23 @@ export default function UserManagement() {
     const r = searchParams.get('role');
     if (r) setRoleFilter(r);
     fetchUsers();
+    api.get('/admin/classes').then((r) => setClasses(r.data)).catch(() => {});
   }, []);
 
   useEffect(() => {
     let f = users;
     if (roleFilter !== 'all') f = f.filter((u) => u.role === roleFilter);
+    // Chia học sinh theo lớp: chọn 1 lớp → chỉ hiện học sinh của lớp đó (thuận tiện xóa/thao tác hàng loạt)
+    if (classFilter !== 'all') f = f.filter((u) => u.classes?.some((c) => String(c.id) === classFilter));
     if (search) f = f.filter((u) => u.full_name.toLowerCase().includes(search.toLowerCase()) || u.username.toLowerCase().includes(search.toLowerCase()));
     setFiltered(f);
     setSelected(new Set()); // reset selection khi đổi filter
-  }, [users, search, roleFilter]);
+  }, [users, search, roleFilter, classFilter]);
+
+  // Lọc theo lớp chỉ áp dụng cho học sinh → khi chọn lớp, tự bỏ lọc vai trò khác học sinh
+  useEffect(() => {
+    if (classFilter !== 'all' && roleFilter === 'teacher') setRoleFilter('all');
+  }, [classFilter]);
 
   const fetchUsers = async () => {
     const { data } = await api.get('/admin/users');
@@ -155,9 +167,15 @@ export default function UserManagement() {
           <input className="input" style={{ paddingLeft: 32 }} placeholder="Tìm kiếm..." value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
         <select className="input" style={{ width: 'auto', minWidth: 140 }} value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
-          <option value="all">Tất cả</option>
+          <option value="all">Tất cả vai trò</option>
           <option value="teacher">Giáo viên</option>
           <option value="student">Học sinh</option>
+        </select>
+        <select className="input" style={{ width: 'auto', minWidth: 160, maxWidth: 260 }} value={classFilter} onChange={(e) => setClassFilter(e.target.value)} title="Lọc học sinh theo lớp">
+          <option value="all">Tất cả lớp</option>
+          {classes.map((c) => (
+            <option key={c.id} value={c.id}>{c.course_title ? `${c.course_title} · ` : ''}{c.title}</option>
+          ))}
         </select>
         <button className="btn btn-outline btn-sm" onClick={() => setShowPw(!showPw)} title={showPw ? 'Ẩn tất cả mật khẩu' : 'Hiện tất cả mật khẩu'}>
           {showPw ? <EyeOff size={15} /> : <Eye size={15} />} {showPw ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
@@ -201,7 +219,18 @@ export default function UserManagement() {
                 <td>
                   <input type="checkbox" checked={selected.has(u.id)} onChange={() => toggleSelect(u.id)} style={{ cursor: 'pointer', width: 16, height: 16 }} />
                 </td>
-                <td><strong>{u.full_name}</strong></td>
+                <td>
+                  <strong>{u.full_name}</strong>
+                  {u.role === 'student' && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                      {u.classes && u.classes.length > 0 ? u.classes.map((c) => (
+                        <span key={c.id} className="badge badge-blue" style={{ fontSize: '0.68rem' }}>
+                          {c.course_title ? `${c.course_title} · ` : ''}{c.title}
+                        </span>
+                      )) : <span className="badge badge-gray" style={{ fontSize: '0.68rem' }}>Chưa có lớp</span>}
+                    </div>
+                  )}
+                </td>
                 <td style={{ color: '#888', fontFamily: 'monospace' }}>{u.username}</td>
                 <td style={{ fontFamily: 'monospace', color: '#555' }}>
                   {u.plain_password ? (

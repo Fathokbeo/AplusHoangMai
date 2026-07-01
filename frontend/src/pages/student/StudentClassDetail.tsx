@@ -334,7 +334,7 @@ export default function StudentClassDetail() {
         </div>
       </div>
 
-      {/* Điểm TB lớp này + xếp hạng (bài quá hạn chưa nộp tính 0 điểm) */}
+      {/* Điểm TB + xếp hạng THÁNG NÀY (reset theo tháng; bài quá hạn chưa nộp tính 0 điểm) */}
       <div style={{ display: 'flex', gap: 12, marginBottom: '1.5rem', flexWrap: 'wrap' }}>
         <div className="card" style={{ flex: '1 1 180px', display: 'flex', alignItems: 'center', gap: 12, padding: '0.9rem 1.1rem' }}>
           <div style={{ width: 42, height: 42, borderRadius: 10, background: '#FFF3E0', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -342,7 +342,7 @@ export default function StudentClassDetail() {
           </div>
           <div>
             <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#E65100', lineHeight: 1.1 }}>{cls.my_avg ?? '—'}<span style={{ fontSize: '0.8rem', color: '#bbb', fontWeight: 600 }}>/10</span></div>
-            <div style={{ fontSize: '0.76rem', color: '#888' }}>Điểm TB lớp này</div>
+            <div style={{ fontSize: '0.76rem', color: '#888' }}>Điểm TB tháng này</div>
           </div>
         </div>
         <div className="card" style={{ flex: '1 1 180px', display: 'flex', alignItems: 'center', gap: 12, padding: '0.9rem 1.1rem' }}>
@@ -353,7 +353,7 @@ export default function StudentClassDetail() {
             <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#6A1B9A', lineHeight: 1.1 }}>
               {cls.my_rank ? <>Hạng {cls.my_rank}<span style={{ fontSize: '0.8rem', color: '#bbb', fontWeight: 600 }}>/{cls.rank_total}</span></> : '—'}
             </div>
-            <div style={{ fontSize: '0.76rem', color: '#888' }}>Xếp hạng trong lớp</div>
+            <div style={{ fontSize: '0.76rem', color: '#888' }}>Xếp hạng tháng này</div>
           </div>
         </div>
       </div>

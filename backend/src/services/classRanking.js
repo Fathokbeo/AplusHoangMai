@@ -1,6 +1,9 @@
 // Tính điểm trung bình + xếp hạng (rank) của học sinh trong một lớp.
 // Quy tắc: bài tập đã QUÁ HẠN mà học sinh chưa nộp (hoặc nộp nhưng chưa có điểm) → tính 0 điểm.
 // Điểm mỗi bài quy về tỉ lệ 0..1 (score/max_score) rồi lấy trung bình, hiển thị trên thang 10 cho dễ so sánh.
+//
+// XẾP HẠNG RESET THEO THÁNG: chỉ tính các bài thuộc THÁNG HIỆN TẠI (theo HẠN NỘP của bài;
+// bài không đặt hạn thì xét theo ngày tạo). Sang tháng mới, điểm TB & thứ hạng tự reset.
 
 const round1 = (n) => Math.round(n * 10) / 10;
 
@@ -9,12 +12,29 @@ function isOverdue(dueDate, nowIso) {
   return dueDate ? nowIso > dueDate : false;
 }
 
+// Mốc thời gian "thuộc tháng nào" của một bài tập: ưu tiên hạn nộp, không có thì ngày tạo.
+function monthAnchor(hw) {
+  return hw.due_date || hw.created_at || null;
+}
+
+// Bài có thuộc cùng tháng (theo lịch địa phương) với mốc tham chiếu không?
+function inSameMonth(anchorIso, ref) {
+  if (!anchorIso) return false;
+  const d = new Date(anchorIso);
+  if (isNaN(d.getTime())) return false;
+  return d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth();
+}
+
 // Điểm TB (thang 10) + số bài đã tính của TỪNG học sinh trong lớp.
 // Trả về Map: studentId -> { avg: number|null, counted, graded }
 function classAverages(db, classId, nowIso) {
   const now = nowIso || new Date().toISOString();
+  const ref = new Date(now);
   const students = db.prepare('SELECT student_id FROM class_students WHERE class_id=?').all(classId);
-  const homeworks = db.prepare('SELECT id,due_date,max_score FROM homework WHERE class_id=?').all(classId);
+  // Chỉ lấy bài tập thuộc THÁNG HIỆN TẠI (theo hạn nộp / ngày tạo) → xếp hạng reset theo tháng.
+  const homeworks = db.prepare('SELECT id,due_date,max_score,created_at FROM homework WHERE class_id=?')
+    .all(classId)
+    .filter((hw) => inSameMonth(monthAnchor(hw), ref));
   const subs = db.prepare(`
     SELECT s.homework_id,s.student_id,s.score
     FROM submissions s JOIN homework h ON s.homework_id=h.id
@@ -70,12 +90,14 @@ function classRanking(db, classId, nowIso) {
 // Điểm TB tổng (thang 10) của 1 học sinh trên TẤT CẢ các lớp đang học (cùng quy tắc quá hạn = 0).
 function studentOverallAverage(db, studentId, nowIso) {
   const now = nowIso || new Date().toISOString();
+  const ref = new Date(now);
   const rows = db.prepare(`
-    SELECT h.due_date,h.max_score,
+    SELECT h.due_date,h.max_score,h.created_at,
       (SELECT s.score FROM submissions s WHERE s.homework_id=h.id AND s.student_id=?) AS score
     FROM homework h
     JOIN class_students cs ON cs.class_id=h.class_id AND cs.student_id=?
-  `).all(studentId, studentId);
+  `).all(studentId, studentId)
+    .filter((hw) => inSameMonth(monthAnchor(hw), ref)); // chỉ tính bài của tháng hiện tại
   let sum = 0, counted = 0;
   for (const hw of rows) {
     const max = hw.max_score > 0 ? hw.max_score : 10;

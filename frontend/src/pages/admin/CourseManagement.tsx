@@ -11,6 +11,7 @@ interface Course {
   description: string;
   thumbnail: string;
   creator_name: string;
+  created_by: number | null;
   class_count: number;
   active: number;
   created_at: string;
@@ -18,15 +19,19 @@ interface Course {
 
 export default function CourseManagement() {
   const [courses, setCourses] = useState<Course[]>([]);
+  const [teachers, setTeachers] = useState<any[]>([]);
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<Course | null>(null);
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({ title: '', description: '' });
+  const [form, setForm] = useState({ title: '', description: '', teacher_id: '' });
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { fetchCourses(); }, []);
+  useEffect(() => {
+    fetchCourses();
+    api.get('/admin/users?role=teacher').then((r) => setTeachers(r.data));
+  }, []);
 
   const fetchCourses = async () => {
     const { data } = await api.get('/admin/courses');
@@ -35,7 +40,7 @@ export default function CourseManagement() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ title: '', description: '' });
+    setForm({ title: '', description: '', teacher_id: '' });
     setFile(null);
     setPreview('');
     setModal(true);
@@ -43,7 +48,9 @@ export default function CourseManagement() {
 
   const openEdit = (c: Course) => {
     setEditing(c);
-    setForm({ title: c.title, description: c.description || '' });
+    // Chỉ pre-select khi khóa đang thuộc một giáo viên (created_by là GV); admin-quản-lý → bỏ trống.
+    const ownedByTeacher = teachers.some((t) => t.id === c.created_by);
+    setForm({ title: c.title, description: c.description || '', teacher_id: ownedByTeacher ? String(c.created_by) : '' });
     setFile(null);
     setPreview(c.thumbnail ? `/uploads/courses/${c.thumbnail}` : '');
     setModal(true);
@@ -54,12 +61,13 @@ export default function CourseManagement() {
     setLoading(true);
     try {
       let courseId: number;
+      const payload = { title: form.title, description: form.description, teacher_id: form.teacher_id || null };
       if (editing) {
-        await api.put(`/admin/courses/${editing.id}`, { title: form.title, description: form.description });
+        await api.put(`/admin/courses/${editing.id}`, payload);
         courseId = editing.id;
         toast.success('Đã cập nhật');
       } else {
-        const { data } = await api.post('/admin/courses', { title: form.title, description: form.description });
+        const { data } = await api.post('/admin/courses', payload);
         courseId = data.id;
         toast.success('Đã tạo khóa học');
       }
@@ -78,7 +86,7 @@ export default function CourseManagement() {
   };
 
   const deleteCourse = async (c: Course) => {
-    if (!confirm(`Xóa khóa học "${c.title}"?`)) return;
+    if (!confirm(`Xóa khóa học "${c.title}"?\n\nTất cả lớp học trong khóa cùng bài giảng, bài tập, bài nộp sẽ bị xóa. Học sinh chỉ thuộc các lớp này sẽ bị xóa vĩnh viễn (tài khoản + dữ liệu). Không thể khôi phục.`)) return;
     await api.delete(`/admin/courses/${c.id}`);
     toast.success('Đã xóa');
     fetchCourses();
@@ -154,6 +162,18 @@ export default function CourseManagement() {
         <div className="form-group">
           <label className="label">Mô tả</label>
           <textarea className="input" placeholder="Mô tả khóa học..." value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} />
+        </div>
+        <div className="form-group">
+          <label className="label">Giáo viên phụ trách</label>
+          <select className="input" value={form.teacher_id} onChange={(e) => setForm({ ...form, teacher_id: e.target.value })}>
+            <option value="">— Admin quản lý (không chỉ định) —</option>
+            {teachers.map((t) => (
+              <option key={t.id} value={t.id}>{t.full_name} ({t.username})</option>
+            ))}
+          </select>
+          <div style={{ fontSize: '0.75rem', color: '#888', marginTop: 4 }}>
+            Khóa học sẽ hiện trong "Khóa học của tôi" của giáo viên được chọn để họ tự quản lý.
+          </div>
         </div>
         <div className="form-group">
           <label className="label">Ảnh đại diện</label>

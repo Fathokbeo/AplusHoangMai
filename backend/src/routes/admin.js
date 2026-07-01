@@ -31,7 +31,16 @@ router.get('/users', (req, res) => {
   const params = [];
   if (role) { query += ' WHERE role=?'; params.push(role); }
   query += ' ORDER BY created_at DESC';
-  res.json(db.prepare(query).all(...params));
+  const rows = db.prepare(query).all(...params);
+  // Gắn danh sách lớp cho học sinh → admin có thể chia/lọc theo lớp để thao tác.
+  const classStmt = db.prepare(`
+    SELECT cl.id, cl.title, co.title course_title
+    FROM class_students cs JOIN classes cl ON cs.class_id=cl.id
+    LEFT JOIN courses co ON cl.course_id=co.id
+    WHERE cs.student_id=? AND cl.active=1 ORDER BY cl.title
+  `);
+  rows.forEach(u => { if (u.role === 'student') u.classes = classStmt.all(u.id); });
+  res.json(rows);
 });
 
 router.post('/users', (req, res) => {
@@ -169,13 +178,23 @@ router.get('/courses', (req, res) => {
   `).all());
 });
 
+// Xác thực teacher_id là giáo viên hợp lệ (nếu có truyền). Trả về id giáo viên hoặc null.
+function resolveTeacherId(db, teacherId) {
+  if (!teacherId) return null;
+  const t = db.prepare("SELECT id FROM users WHERE id=? AND role='teacher'").get(teacherId);
+  return t ? t.id : undefined; // undefined = không hợp lệ
+}
+
 router.post('/courses', (req, res) => {
-  const { title, description } = req.body;
+  const { title, description, teacher_id } = req.body;
   if (!title) return res.status(400).json({ message: 'Cần tiêu đề khóa học' });
   const db = getDb();
+  // created_by = giáo viên được chỉ định (để khóa hiện trong "Khóa học của tôi" của GV đó), hoặc admin nếu bỏ trống.
+  const tid = resolveTeacherId(db, teacher_id);
+  if (tid === undefined) return res.status(400).json({ message: 'Giáo viên không hợp lệ' });
   const result = db.prepare(
     'INSERT INTO courses (title,description,created_by) VALUES (?,?,?)'
-  ).run(title, description || null, req.user.id);
+  ).run(title, description || null, tid || req.user.id);
   res.status(201).json({ id: result.lastInsertRowid, title });
 });
 
@@ -187,12 +206,18 @@ router.post('/courses/:id/thumbnail', uploadCourseThumbnail.single('thumbnail'),
 });
 
 router.put('/courses/:id', (req, res) => {
-  const { title, description, active } = req.body;
+  const { title, description, active, teacher_id } = req.body;
   const db = getDb();
   const sets = []; const vals = [];
   if (title) { sets.push('title=?'); vals.push(title); }
   if (description !== undefined) { sets.push('description=?'); vals.push(description); }
   if (active !== undefined) { sets.push('active=?'); vals.push(active ? 1 : 0); }
+  // Chỉ định lại giáo viên phụ trách khóa (created_by). Bỏ trống → admin quản lý.
+  if (teacher_id !== undefined) {
+    const tid = resolveTeacherId(db, teacher_id);
+    if (tid === undefined) return res.status(400).json({ message: 'Giáo viên không hợp lệ' });
+    sets.push('created_by=?'); vals.push(tid || req.user.id);
+  }
   if (sets.length > 0) { vals.push(req.params.id); db.prepare(`UPDATE courses SET ${sets.join(',')} WHERE id=?`).run(...vals); }
   res.json({ message: 'Đã cập nhật' });
 });

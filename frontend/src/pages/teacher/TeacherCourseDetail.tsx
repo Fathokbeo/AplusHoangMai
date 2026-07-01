@@ -42,7 +42,12 @@ export default function TeacherCourseDetail() {
   };
 
   const deleteClass = async (cls: any) => {
-    if (!confirm(`Xóa lớp "${cls.title}"?`)) return;
+    if (!confirm(
+      `Xóa lớp "${cls.title}"?\n\n` +
+      `Toàn bộ bài giảng, bài tập và bài nộp của lớp sẽ bị xóa. ` +
+      `Học sinh CHỈ thuộc lớp này sẽ bị XÓA VĨNH VIỄN (tài khoản + dữ liệu) để tiết kiệm dữ liệu; ` +
+      `học sinh còn học lớp khác chỉ bị gỡ khỏi lớp này.\nKhông thể khôi phục.`
+    )) return;
     await api.delete(`/teacher/classes/${cls.id}`);
     toast.success('Đã xóa lớp học');
     fetchCourse();

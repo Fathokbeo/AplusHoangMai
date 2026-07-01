@@ -70,7 +70,7 @@ export default function TeacherDashboard() {
   const deleteCourse = async (c: any, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!confirm(`Xóa khóa học "${c.title}"?`)) return;
+    if (!confirm(`Xóa khóa học "${c.title}"?\n\nTất cả lớp học trong khóa cùng bài giảng, bài tập, bài nộp sẽ bị xóa. Học sinh chỉ thuộc các lớp này sẽ bị xóa vĩnh viễn (tài khoản + dữ liệu). Không thể khôi phục.`)) return;
     await api.delete(`/teacher/courses/${c.id}`);
     toast.success('Đã xóa');
     fetchCourses();
