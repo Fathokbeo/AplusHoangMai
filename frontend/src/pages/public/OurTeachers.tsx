@@ -1,7 +1,15 @@
 import { useState, useEffect } from 'react';
 import PublicLayout from '../../components/PublicLayout';
 import api from '../../lib/api';
-import { GraduationCap, UserCircle } from 'lucide-react';
+import { GraduationCap, UserCircle, Phone } from 'lucide-react';
+
+function FacebookIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" width={size} height={size} aria-hidden="true">
+      <path d="M22 12c0-5.52-4.48-10-10-10S2 6.48 2 12c0 4.99 3.66 9.13 8.44 9.88v-6.99H7.9V12h2.54V9.8c0-2.5 1.49-3.89 3.77-3.89 1.09 0 2.23.2 2.23.2v2.46h-1.26c-1.24 0-1.63.77-1.63 1.56V12h2.78l-.45 2.89h-2.33v6.99C18.34 21.13 22 16.99 22 12z" />
+    </svg>
+  );
+}
 
 function StaffGrid({ list }: { list: any[] }) {
   return (
@@ -19,6 +27,22 @@ function StaffGrid({ list }: { list: any[] }) {
             <h3 style={{ margin: '0 0 4px', fontSize: '1.05rem', fontWeight: 800, color: '#1A1A2E' }}>{s.name}</h3>
             {s.role_title && <div style={{ color: '#1565C0', fontWeight: 600, fontSize: '0.88rem', marginBottom: 6 }}>{s.role_title}</div>}
             {s.description && <p style={{ margin: 0, fontSize: '0.83rem', color: '#777', lineHeight: 1.5 }}>{s.description}</p>}
+            {(s.phone || s.facebook_url) && (
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                {s.phone && (
+                  <a href={`tel:${String(s.phone).replace(/[^+\d]/g, '')}`}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 20, background: '#E8F5E9', color: '#2E7D32', fontWeight: 700, fontSize: '0.8rem', textDecoration: 'none' }}>
+                    <Phone size={13} /> {s.phone}
+                  </a>
+                )}
+                {s.facebook_url && (
+                  <a href={s.facebook_url} target="_blank" rel="noopener noreferrer"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 20, background: '#E3F2FD', color: '#1565C0', fontWeight: 700, fontSize: '0.8rem', textDecoration: 'none' }}>
+                    <FacebookIcon size={13} /> Facebook
+                  </a>
+                )}
+              </div>
+            )}
           </div>
         </div>
       ))}

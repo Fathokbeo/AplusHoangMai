@@ -22,6 +22,8 @@ const COLLECTIONS: Record<string, { label: string; dir: string; titleKey: string
       { key: 'name', label: 'Họ tên', type: 'text', required: true },
       { key: 'role_title', label: 'Chức danh', type: 'text', placeholder: 'vd: Giáo viên Toán' },
       { key: 'staff_type', label: 'Loại', type: 'select', options: [{ value: 'teacher', label: 'Giáo viên' }, { value: 'assistant', label: 'Trợ giảng' }] },
+      { key: 'phone', label: 'Số điện thoại', type: 'text', placeholder: 'vd: 0912 345 678' },
+      { key: 'facebook_url', label: 'Link Facebook', type: 'text', placeholder: 'vd: https://facebook.com/ten.giao.vien' },
       { key: 'description', label: 'Giới thiệu', type: 'textarea' },
     ],
   },
@@ -138,6 +140,8 @@ function CollectionManager({ collection }: { collection: string }) {
               </div>
               {it.exam && <span className="badge badge-red" style={{ fontSize: '0.7rem' }}>{it.exam}</span>}
               {it.role_title && <div style={{ fontSize: '0.8rem', color: '#1565C0', fontWeight: 600 }}>{it.role_title}{it.staff_type === 'assistant' ? ' · Trợ giảng' : ''}</div>}
+              {it.phone && <div style={{ fontSize: '0.78rem', color: '#2E7D32', fontWeight: 600 }}>SĐT: {it.phone}</div>}
+              {it.facebook_url && <div style={{ fontSize: '0.75rem', color: '#888', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>FB: {it.facebook_url}</div>}
               {it.student_count && <div style={{ fontSize: '0.8rem', color: '#2E7D32', fontWeight: 600 }}>{it.student_count}</div>}
               {it.year && <div style={{ fontSize: '0.8rem', color: '#E65100', fontWeight: 700 }}>{it.year}</div>}
               {it.achievement && <div style={{ fontSize: '0.82rem', color: '#C62828', fontWeight: 600, marginTop: 2 }}>{it.achievement}</div>}

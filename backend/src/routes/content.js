@@ -11,7 +11,7 @@ router.use(authMiddleware, requireRole('admin'));
 // Cấu hình từng bộ nội dung: bảng + các trường text cho phép
 const COLLECTIONS = {
   'featured-students': { table: 'featured_students', dir: 'featured_students', fields: ['name', 'exam', 'achievement', 'description', 'display_order', 'active'] },
-  'staff':             { table: 'staff',              dir: 'staff',              fields: ['name', 'role_title', 'staff_type', 'description', 'display_order', 'active'] },
+  'staff':             { table: 'staff',              dir: 'staff',              fields: ['name', 'role_title', 'staff_type', 'description', 'facebook_url', 'phone', 'display_order', 'active'] },
   'featured-courses':  { table: 'featured_courses',   dir: 'featured_courses',   fields: ['title', 'student_count', 'description', 'display_order', 'active'] },
   'achievements':      { table: 'achievements',       dir: 'achievements',       fields: ['year', 'title', 'description', 'display_order', 'active'] },
 };

@@ -154,6 +154,8 @@ function initSchema() {
       role_title TEXT,                 -- vd: Giáo viên Toán, Trợ giảng
       staff_type TEXT DEFAULT 'teacher', -- 'teacher' | 'assistant'
       description TEXT,
+      facebook_url TEXT,               -- link Facebook để học sinh liên hệ
+      phone TEXT,                      -- số điện thoại liên hệ
       display_order INTEGER DEFAULT 0,
       active INTEGER DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -261,6 +263,14 @@ function initSchema() {
   // Migration: file đính kèm bài giảng (JSON array [{file,name,kind}], kind: 'doc' tài liệu | 'answer' đáp án BT trên lớp)
   if (!lessonCols.some(c => c.name === 'attachments')) {
     db.exec('ALTER TABLE lessons ADD COLUMN attachments TEXT');
+  }
+  // Migration: link Facebook + SĐT của giáo viên/trợ giảng để học sinh liên hệ
+  const staffCols = db.prepare("PRAGMA table_info(staff)").all();
+  if (!staffCols.some(c => c.name === 'facebook_url')) {
+    db.exec('ALTER TABLE staff ADD COLUMN facebook_url TEXT');
+  }
+  if (!staffCols.some(c => c.name === 'phone')) {
+    db.exec('ALTER TABLE staff ADD COLUMN phone TEXT');
   }
 
   const admin = db.prepare("SELECT id FROM users WHERE role='admin' LIMIT 1").get();
