@@ -13,7 +13,7 @@ import { emptyPartsConfig, normalizePartsConfig, computeMaxScore, anyPartEnabled
 import {
   Users, BookOpen, ClipboardList, Edit, Trash2,
   UserPlus, UserMinus, Play, File, ChevronLeft, Upload, Clock, Eye, Bot, Layers, Video, Search,
-  ChevronDown, ChevronRight, Trophy, FileSpreadsheet, Download, Paperclip, FileText, X
+  ChevronDown, ChevronRight, Trophy, FileSpreadsheet, Download, Paperclip, FileText, X, Plus
 } from 'lucide-react';
 
 // Giờ nhập ở ô datetime-local là GIỜ ĐỊA PHƯƠNG. Lưu dạng ISO (UTC) để khi so "đến hạn"
@@ -333,10 +333,10 @@ export default function ClassDetail() {
     fetchClass();
   };
 
-  // Lesson CRUD
-  const openCreateLesson = () => {
+  // Lesson CRUD — truyền chapterId để form chọn sẵn chương (nút + ở từng chương)
+  const openCreateLesson = (chapterId?: number) => {
     setEditingLesson(null);
-    setLessonForm({ title: '', description: '', video_url: '', video_type: 'youtube', lesson_order: String(nextOrder(cls?.lessons, 'lesson_order')), chapter_id: '' });
+    setLessonForm({ title: '', description: '', video_url: '', video_type: 'youtube', lesson_order: String(nextOrder(cls?.lessons, 'lesson_order')), chapter_id: chapterId ? String(chapterId) : '' });
     setLessonFiles({ doc: [], answer: [] });
     setLessonModal(true);
   };
@@ -411,10 +411,10 @@ export default function ClassDetail() {
     fetchClass();
   };
 
-  // Homework CRUD
-  const openCreateHw = () => {
+  // Homework CRUD — truyền chapterId để form chọn sẵn chương (nút + ở từng chương)
+  const openCreateHw = (chapterId?: number) => {
     setEditingHw(null);
-    setHwForm({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '', chapter_id: '', solution_video_url: '' });
+    setHwForm({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '', chapter_id: chapterId ? String(chapterId) : '', solution_video_url: '' });
     setHwParts(emptyPartsConfig());
     setScaleTouched(false);
     setHwFiles({});
@@ -601,13 +601,27 @@ export default function ClassDetail() {
         {open && (
           <div style={{ padding: '0 1.25rem 1.25rem', display: 'flex', flexDirection: 'column', gap: 16, borderTop: '1px solid #F0F0F0' }}>
             <div style={{ marginTop: 14 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}><BookOpen size={14} color="#1565C0" /><span style={{ fontWeight: 700, fontSize: '0.85rem' }}>Bài giảng ({lc})</span></div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                <BookOpen size={14} color="#1565C0" /><span style={{ fontWeight: 700, fontSize: '0.85rem' }}>Bài giảng ({lc})</span>
+                <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#1565C0', border: '1px dashed #90CAF9' }}
+                  title={group.chapter ? `Thêm bài giảng vào "${group.chapter.title}"` : 'Thêm bài giảng (chưa phân chương)'}
+                  onClick={() => openCreateLesson(group.chapter?.id)}>
+                  <Plus size={14} />
+                </button>
+              </div>
               {lc === 0 ? <div style={{ fontSize: '0.8rem', color: '#aaa' }}>Chưa có bài giảng</div> : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{group.lessons.map((l: any, i: number) => renderLessonCard(l, i))}</div>
               )}
             </div>
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}><ClipboardList size={14} color="#6A1B9A" /><span style={{ fontWeight: 700, fontSize: '0.85rem' }}>Bài tập ({hc})</span></div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                <ClipboardList size={14} color="#6A1B9A" /><span style={{ fontWeight: 700, fontSize: '0.85rem' }}>Bài tập ({hc})</span>
+                <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#6A1B9A', border: '1px dashed #CE93D8' }}
+                  title={group.chapter ? `Thêm bài tập vào "${group.chapter.title}"` : 'Thêm bài tập (chưa phân chương)'}
+                  onClick={() => openCreateHw(group.chapter?.id)}>
+                  <Plus size={14} />
+                </button>
+              </div>
               {hc === 0 ? <div style={{ fontSize: '0.8rem', color: '#aaa' }}>Chưa có bài tập</div> : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{group.homework.map((h: any) => renderHomeworkCard(h))}</div>
               )}
@@ -735,8 +749,8 @@ export default function ClassDetail() {
         <div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
             <button className="btn btn-secondary" onClick={openCreateChapter}><Layers size={15} /> Thêm chương</button>
-            <button className="btn btn-secondary" onClick={openCreateLesson}><BookOpen size={15} /> Thêm bài giảng</button>
-            <button className="btn btn-primary" onClick={openCreateHw}><ClipboardList size={15} /> Thêm bài tập</button>
+            <button className="btn btn-secondary" onClick={() => openCreateLesson()}><BookOpen size={15} /> Thêm bài giảng</button>
+            <button className="btn btn-primary" onClick={() => openCreateHw()}><ClipboardList size={15} /> Thêm bài tập</button>
           </div>
           {contentGroups.length === 0 ? (
             <div style={{ textAlign: 'center', color: '#999', padding: '2rem', background: 'white', borderRadius: 12 }}>
