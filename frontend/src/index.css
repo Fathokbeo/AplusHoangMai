@@ -149,6 +149,7 @@ tbody tr:hover { background: #FAFAFA; }
   width: 100%; max-width: 520px;
   max-height: 90vh;
   overflow-y: auto;
+  overflow-x: hidden; /* không bao giờ phải kéo ngang trong modal; nội dung tự co trong khung */
   box-shadow: 0 20px 60px rgba(0,0,0,0.2);
   animation: slideUp 0.25s ease;
 }

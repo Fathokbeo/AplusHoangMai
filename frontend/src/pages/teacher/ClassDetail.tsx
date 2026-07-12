@@ -896,7 +896,7 @@ export default function ClassDetail() {
       </Modal>
 
       {/* Lesson Modal */}
-      <Modal open={lessonModal} onClose={() => setLessonModal(false)} title={editingLesson ? 'Sửa bài giảng' : 'Thêm bài giảng'}
+      <Modal open={lessonModal} onClose={() => setLessonModal(false)} title={editingLesson ? 'Sửa bài giảng' : 'Thêm bài giảng'} size="lg"
         footer={<><button className="btn btn-ghost" onClick={() => setLessonModal(false)}>Hủy</button><button className="btn btn-primary" onClick={saveLesson} disabled={loading}>{loading ? 'Đang lưu...' : 'Lưu'}</button></>}>
         <div className="form-group">
           <label className="label">Tiêu đề *</label>
@@ -913,7 +913,7 @@ export default function ClassDetail() {
           <label className="label">Mô tả</label>
           <textarea className="input" rows={2} value={lessonForm.description} onChange={(e) => setLessonForm({ ...lessonForm, description: e.target.value })} />
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 2fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) minmax(0, 2fr)', gap: 12 }}>
           <div className="form-group">
             <label className="label">Loại video</label>
             <select className="input" value={lessonForm.video_type} onChange={(e) => setLessonForm({ ...lessonForm, video_type: e.target.value, video_url: '' })}>
@@ -933,7 +933,7 @@ export default function ClassDetail() {
         )}
 
         {/* File đính kèm: tài liệu bài giảng & đáp án bài tập trên lớp (không cần video vẫn đăng được) */}
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12 }}>
           {([
             { kind: 'doc' as const, label: 'File bài giảng / tài liệu', ref: lessonDocRef, hint: 'PDF, ảnh, Word, PowerPoint...' },
             { kind: 'answer' as const, label: 'Đáp án bài tập trên lớp', ref: lessonAnswerRef, hint: 'PDF, ảnh, Word...' },
@@ -1051,7 +1051,7 @@ export default function ClassDetail() {
           </div>
           <PartsEditor value={hwParts} onChange={updateHwParts} />
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12 }}>
           <div className="form-group">
             <label className="label">Thang điểm{anyPartEnabled(hwParts) ? ' (quy đổi về)' : ''}</label>
             <input className="input" type="number" min={1} step={0.5}
@@ -1090,7 +1090,7 @@ export default function ClassDetail() {
             <VideoPlayer url={hwForm.solution_video_url} type="youtube" />
           </div>
         )}
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12 }}>
           <div className="form-group">
             <label className="label">File đề bài (PDF)</label>
             <div className="dropzone" style={{ padding: '1rem' }} onClick={() => pdfRef.current?.click()}>
