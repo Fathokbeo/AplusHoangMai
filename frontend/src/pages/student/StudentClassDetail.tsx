@@ -10,7 +10,7 @@ import useIsMobile from '../../lib/useIsMobile';
 import { toast } from '../../components/Toast';
 import { parsePartsConfig, hasObjectiveParts, hasEssay, emptyStudentAnswers, PART_LABELS, PART_ORDER, type PartKey } from '../../lib/homeworkParts';
 import { parseAttachments, isViewableFile } from '../../lib/attachments';
-import { ChevronLeft, Play, ClipboardList, BookOpen, Upload, CheckCircle, Clock, Eye, Bot, Lock, FileText, X, Plus, Layers, Video, ChevronDown, ChevronRight, Trophy, Star, Paperclip, Download } from 'lucide-react';
+import { ChevronLeft, Play, ClipboardList, BookOpen, Upload, CheckCircle, Clock, Eye, Bot, Lock, FileText, X, Plus, Layers, Video, ChevronDown, ChevronRight, ChevronUp, Trophy, Star, Paperclip, Download } from 'lucide-react';
 
 // Danh sách URL các file đã nộp (hỗ trợ cũ: 1 file, mới: nhiều file dạng JSON)
 function submittedFileUrls(hw: any): string[] {
@@ -33,6 +33,8 @@ export default function StudentClassDetail() {
   const [studentAnswers, setStudentAnswers] = useState<StudentAnswers>({ multiple_choice: [], true_false: [], short_answer: [] });
   const [loading, setLoading] = useState(false);
   const [viewFiles, setViewFiles] = useState<string[] | null>(null);
+  // Bài tập nào đang mở "Chi tiết" điểm (nhận xét + kết quả từng câu); mặc định ẩn hết
+  const [openGradeDetails, setOpenGradeDetails] = useState<Set<number>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
   const isMobile = useIsMobile();
 
@@ -209,10 +211,24 @@ export default function StudentClassDetail() {
                     <div style={{ fontSize: '0.78rem', color: '#888' }}>Điểm đạt được</div>
                     <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{hw.score}/{hw.max_score}</div>
                   </div>
-                  {hw.graded_by_ai && <span className="badge badge-purple" style={{ marginLeft: 'auto' }}><Bot size={10} style={{ marginRight: 4 }} />AI chấm</span>}
+                  {/* Góc trên bên phải: nhãn AI chấm + nút Chi tiết (mở/đóng nhận xét & từng câu) */}
+                  <div style={{ marginLeft: 'auto', alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {hw.graded_by_ai && <span className="badge badge-purple"><Bot size={10} style={{ marginRight: 4 }} />AI chấm</span>}
+                    {hw.can_see_answer && (hw.feedback || hw.grading_details) && (
+                      <button className="btn btn-ghost btn-sm" onClick={() => setOpenGradeDetails((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(hw.id)) next.delete(hw.id); else next.add(hw.id);
+                        return next;
+                      })}>
+                        {openGradeDetails.has(hw.id) ? <ChevronUp size={13} /> : <ChevronDown size={13} />} Chi tiết
+                      </button>
+                    )}
+                  </div>
                 </div>
-                {/* Nhận xét + chi tiết sai câu nào: chỉ hiện sau khi mở đáp án (theo "Thời gian xem đáp án") */}
+                {/* Nhận xét + chi tiết sai câu nào: chỉ hiện sau khi mở đáp án (theo "Thời gian xem đáp án")
+                    VÀ học sinh bấm nút "Chi tiết" — mặc định ẩn cho gọn */}
                 {hw.can_see_answer ? (
+                  openGradeDetails.has(hw.id) && (
                   <>
                     {hw.feedback && (
                       <div style={{ fontSize: '0.83rem', color: '#555', lineHeight: 1.6, borderTop: '1px solid #EEE', paddingTop: 8, marginTop: 8 }}>
@@ -221,6 +237,7 @@ export default function StudentClassDetail() {
                     )}
                     <GradingDetails details={hw.grading_details} />
                   </>
+                  )
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', color: '#999', borderTop: '1px solid #EEE', paddingTop: 8, marginTop: 8 }}>
                     <Lock size={12} />
