@@ -213,8 +213,9 @@ export default function StudentClassDetail() {
                   </div>
                   {/* Góc trên bên phải: nhãn AI chấm + nút Chi tiết (mở/đóng nhận xét & từng câu) */}
                   <div style={{ marginLeft: 'auto', alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {hw.graded_by_ai && <span className="badge badge-purple"><Bot size={10} style={{ marginRight: 4 }} />AI chấm</span>}
-                    {hw.can_see_answer && (hw.feedback || hw.grading_details) && (
+                    {/* !! ép cờ 0/1 từ CSDL về true/false — không thì số 0 bị in ra màn hình */}
+                    {!!hw.graded_by_ai && <span className="badge badge-purple"><Bot size={10} style={{ marginRight: 4 }} />AI chấm</span>}
+                    {!!hw.can_see_answer && !!(hw.feedback || hw.grading_details) && (
                       <button className="btn btn-ghost btn-sm" onClick={() => setOpenGradeDetails((prev) => {
                         const next = new Set(prev);
                         if (next.has(hw.id)) next.delete(hw.id); else next.add(hw.id);
@@ -280,12 +281,12 @@ export default function StudentClassDetail() {
                 <Eye size={13} /> Bài đã nộp ({submittedFileUrls(hw).length})
               </button>
             )}
-            {hw.can_see_answer && hw.answer_file && (
+            {!!hw.can_see_answer && !!hw.answer_file && (
               <button className="btn btn-success btn-sm" onClick={() => setViewFiles([`/uploads/homework/${hw.answer_file}`])}>
                 <Eye size={13} /> Đáp án
               </button>
             )}
-            {hw.can_see_answer && hw.solution_video_url && (
+            {!!hw.can_see_answer && !!hw.solution_video_url && (
               <button className="btn btn-secondary btn-sm" onClick={() => setSolutionVideo({ title: hw.title, url: hw.solution_video_url })}>
                 <Video size={13} /> Video chữa
               </button>
