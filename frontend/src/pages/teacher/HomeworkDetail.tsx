@@ -8,7 +8,7 @@ import FileViewer from '../../components/FileViewer';
 import { toast } from '../../components/Toast';
 import { sortByVietnameseName } from '../../lib/vietnameseName';
 import { parsePartsConfig, hasObjectiveParts } from '../../lib/homeworkParts';
-import { ChevronLeft, Users, CheckCircle, Clock, Bot, Star, Eye, Download } from 'lucide-react';
+import { ChevronLeft, Users, CheckCircle, XCircle, Clock, Bot, Star, Eye, Download } from 'lucide-react';
 
 // Danh sách URL file của một bài nộp (hỗ trợ cũ: 1 file, mới: nhiều file dạng JSON)
 function submissionFileUrls(s: any): string[] {
@@ -27,6 +27,8 @@ export default function HomeworkDetail() {
   const [loading, setLoading] = useState(false);
   const [regrading, setRegrading] = useState<number | null>(null);
   const [viewFiles, setViewFiles] = useState<string[] | null>(null);
+  // Bộ lọc danh sách cả lớp: tất cả / đã nộp / chưa nộp
+  const [filter, setFilter] = useState<'all' | 'submitted' | 'missing'>('all');
 
   useEffect(() => { fetchHw(); }, [id]);
 
@@ -84,17 +86,21 @@ export default function HomeworkDetail() {
     return { bg: '#FFEBEE', color: '#C62828' };
   };
 
-  // Xuất bảng điểm ra file Excel (.xlsx): STT, Họ và tên, Điểm, Nhận xét
+  // Xuất bảng điểm CẢ LỚP ra file Excel (.xlsx): STT, Họ và tên, Trạng thái, Điểm, Nhận xét
   const exportExcel = async () => {
-    const subs = sortByVietnameseName(hw.submissions || [], (s: any) => s.full_name || '');
-    if (subs.length === 0) { toast.error('Chưa có bài nộp để xuất'); return; }
+    const rowsSrc = sortByVietnameseName((hw.roster || []) as any[], (s: any) => s.full_name || '');
+    if (rowsSrc.length === 0) { toast.error('Lớp chưa có học sinh'); return; }
     const XLSX = await import('xlsx');
+    const overdue = hw.due_date ? new Date() > new Date(hw.due_date) : false;
 
-    const header = ['STT', 'Họ và tên', 'Điểm', 'Nhận xét'];
-    const rows = subs.map((s: any, i: number) => [
+    const header = ['STT', 'Họ và tên', 'Trạng thái', 'Điểm', 'Nhận xét'];
+    const rows = rowsSrc.map((s: any, i: number) => [
       i + 1,
       s.full_name || '',
-      s.score !== null && s.score !== undefined ? s.score : 'Chưa chấm',
+      s.submission_id ? 'Đã nộp' : 'Chưa nộp',
+      s.submission_id
+        ? (s.score !== null && s.score !== undefined ? s.score : 'Chưa chấm')
+        : (overdue ? 0 : ''),
       s.feedback || '',
     ]);
     const aoa = [
@@ -106,10 +112,10 @@ export default function HomeworkDetail() {
     ];
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 8 }, { wch: 60 }];
+    ws['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 10 }, { wch: 8 }, { wch: 60 }];
     ws['!merges'] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 3 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 3 } },
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 4 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 4 } },
     ];
 
     const wb = XLSX.utils.book_new();
@@ -121,9 +127,14 @@ export default function HomeworkDetail() {
 
   if (!hw) return <div style={{ padding: '2rem', color: '#999', textAlign: 'center' }}>Đang tải...</div>;
 
+  // Danh sách CẢ LỚP (kèm bài nộp nếu có); quá hạn mà chưa nộp → "Chưa nộp bài" + 0 điểm
+  const roster = sortByVietnameseName((hw.roster || []) as any[], (s: any) => s.full_name || '');
+  const isOverdue = hw.due_date ? new Date() > new Date(hw.due_date) : false;
+  const submittedCount = roster.filter((s: any) => s.submission_id).length;
+  const missingCount = roster.length - submittedCount;
   const graded = hw.submissions?.filter((s: any) => s.score !== null).length || 0;
-  const total = hw.submissions?.length || 0;
-  const sortedSubmissions = sortByVietnameseName(hw.submissions || [], (s: any) => s.full_name || '');
+  const visibleRoster = roster.filter((s: any) =>
+    filter === 'all' ? true : filter === 'submitted' ? !!s.submission_id : !s.submission_id);
   // Bài có thể AI chấm: có file đáp án tự luận hoặc có phần objective (có key)
   const aiGradable = !!hw.answer_file || hasObjectiveParts(parsePartsConfig(hw.parts_config));
 
@@ -151,7 +162,11 @@ export default function HomeworkDetail() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: '1.5rem' }}>
         <div className="stat-card">
           <div className="stat-icon" style={{ background: '#E3F2FD' }}><Users size={18} color="#1565C0" /></div>
-          <div><div className="stat-value" style={{ color: '#1565C0' }}>{total}</div><div className="stat-label">Đã nộp</div></div>
+          <div><div className="stat-value" style={{ color: '#1565C0' }}>{submittedCount}/{roster.length}</div><div className="stat-label">Đã nộp</div></div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-icon" style={{ background: '#FFEBEE' }}><XCircle size={18} color="#C62828" /></div>
+          <div><div className="stat-value" style={{ color: '#C62828' }}>{missingCount}</div><div className="stat-label">Chưa nộp</div></div>
         </div>
         <div className="stat-card">
           <div className="stat-icon" style={{ background: '#E8F5E9' }}><CheckCircle size={18} color="#2E7D32" /></div>
@@ -190,18 +205,34 @@ export default function HomeworkDetail() {
         </div>
       )}
 
-      {/* Submissions table */}
+      {/* Danh sách cả lớp + bộ lọc đã nộp / chưa nộp */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <h2 className="section-title" style={{ margin: 0 }}>Danh sách nộp bài</h2>
-        <button className="btn btn-success btn-sm" onClick={exportExcel} disabled={total === 0} title="Xuất bảng điểm ra Excel">
-          <Download size={14} /> Xuất Excel
-        </button>
+        <h2 className="section-title" style={{ margin: 0 }}>Danh sách lớp</h2>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Bộ lọc trạng thái nộp */}
+          <div style={{ display: 'flex', gap: 4, background: '#F5F5F5', padding: 4, borderRadius: 10 }}>
+            {([
+              { key: 'all', label: `Tất cả (${roster.length})` },
+              { key: 'submitted', label: `Đã nộp (${submittedCount})` },
+              { key: 'missing', label: `Chưa nộp (${missingCount})` },
+            ] as const).map(({ key, label }) => (
+              <button key={key} className="btn btn-sm" onClick={() => setFilter(key)}
+                style={{ background: filter === key ? 'white' : 'transparent', boxShadow: filter === key ? '0 2px 6px rgba(0,0,0,0.08)' : 'none', color: filter === key ? '#C62828' : '#888', border: 'none' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <button className="btn btn-success btn-sm" onClick={exportExcel} disabled={roster.length === 0} title="Xuất bảng điểm cả lớp ra Excel">
+            <Download size={14} /> Xuất Excel
+          </button>
+        </div>
       </div>
       <div className="table-wrap" style={{ marginTop: 12 }}>
         <table>
           <thead>
             <tr>
               <th>Học sinh</th>
+              <th>Trạng thái</th>
               <th>Thời gian nộp</th>
               <th>File bài</th>
               <th>Điểm</th>
@@ -210,56 +241,78 @@ export default function HomeworkDetail() {
             </tr>
           </thead>
           <tbody>
-            {sortedSubmissions.map((s: any) => {
-              const sc = s.score !== null ? scoreColor(s.score, hw.max_score) : null;
-              const fileUrls = submissionFileUrls(s);
+            {visibleRoster.map((s: any) => {
+              const submitted = !!s.submission_id;
+              const sc = submitted && s.score !== null ? scoreColor(s.score, hw.max_score) : null;
+              const fileUrls = submitted ? submissionFileUrls(s) : [];
               return (
-                <tr key={s.id}>
+                <tr key={s.student_id}>
                   <td><strong>{s.full_name}</strong><div style={{ fontSize: '0.78rem', color: '#999' }}>{s.username}</div></td>
-                  <td style={{ fontSize: '0.82rem', color: '#888' }}>{new Date(s.submitted_at).toLocaleString('vi-VN')}</td>
+                  <td>
+                    {submitted
+                      ? <span className="badge badge-green"><CheckCircle size={10} style={{ marginRight: 4 }} />Đã nộp</span>
+                      : isOverdue
+                        ? <span className="badge badge-red"><XCircle size={10} style={{ marginRight: 4 }} />Chưa nộp bài</span>
+                        : <span className="badge badge-gray">Chưa nộp</span>}
+                  </td>
+                  <td style={{ fontSize: '0.82rem', color: '#888' }}>{submitted ? new Date(s.submitted_at).toLocaleString('vi-VN') : '—'}</td>
                   <td>
                     {fileUrls.length > 0 ? (
                       <button className="btn btn-ghost btn-sm" onClick={() => setViewFiles(fileUrls)}>
                         <Eye size={13} /> Xem{fileUrls.length > 1 ? ` (${fileUrls.length})` : ''}
                       </button>
-                    ) : s.structured_answers ? (
+                    ) : submitted && s.structured_answers ? (
                       <span style={{ fontSize: '0.78rem', color: '#6A1B9A' }}>Đã làm bài</span>
-                    ) : null}
+                    ) : '—'}
                   </td>
                   <td>
-                    {s.score !== null ? (
-                      <span style={{ background: sc?.bg, color: sc?.color, padding: '3px 10px', borderRadius: 99, fontWeight: 700, fontSize: '0.88rem' }}>
-                        {s.score}/{hw.max_score}
+                    {submitted ? (
+                      s.score !== null ? (
+                        <span style={{ background: sc?.bg, color: sc?.color, padding: '3px 10px', borderRadius: 99, fontWeight: 700, fontSize: '0.88rem' }}>
+                          {s.score}/{hw.max_score}
+                        </span>
+                      ) : (s.grading_status === 'pending' || s.grading_status === 'grading') ? (
+                        <span style={{ color: '#1565C0', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <Bot size={12} /> Đang chấm...
+                        </span>
+                      ) : s.grading_status === 'failed' ? (
+                        <span style={{ color: '#C62828', fontSize: '0.82rem' }}>Chấm lỗi</span>
+                      ) : <span style={{ color: '#ccc' }}>Chưa chấm</span>
+                    ) : isOverdue ? (
+                      // Quá hạn không nộp → 0 điểm (khớp cách tính điểm TB & xếp hạng)
+                      <span style={{ background: '#FFEBEE', color: '#C62828', padding: '3px 10px', borderRadius: 99, fontWeight: 700, fontSize: '0.88rem' }}>
+                        0/{hw.max_score}
                       </span>
-                    ) : (s.grading_status === 'pending' || s.grading_status === 'grading') ? (
-                      <span style={{ color: '#1565C0', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <Bot size={12} /> Đang chấm...
-                      </span>
-                    ) : s.grading_status === 'failed' ? (
-                      <span style={{ color: '#C62828', fontSize: '0.82rem' }}>Chấm lỗi</span>
-                    ) : <span style={{ color: '#ccc' }}>Chưa chấm</span>}
+                    ) : <span style={{ color: '#ccc' }}>—</span>}
                   </td>
                   <td>
-                    {s.graded_by_ai ? <span className="badge badge-purple"><Bot size={10} style={{ marginRight: 4 }} />AI</span> : s.score !== null ? <span className="badge badge-blue">Thủ công</span> : '—'}
+                    {submitted
+                      ? (s.graded_by_ai ? <span className="badge badge-purple"><Bot size={10} style={{ marginRight: 4 }} />AI</span> : s.score !== null ? <span className="badge badge-blue">Thủ công</span> : '—')
+                      : '—'}
                   </td>
                   <td>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button className="btn btn-secondary btn-sm" onClick={() => openGrade(s)}>
-                        <Star size={13} /> {s.score !== null ? 'Sửa điểm' : 'Chấm'}
-                      </button>
-                      {aiGradable && (fileUrls.length > 0 || s.structured_answers) && (
-                        <button className="btn btn-ghost btn-sm" onClick={() => regrade(s.id)} disabled={regrading === s.id} title="Chấm lại bằng AI">
-                          <Bot size={13} style={{ color: '#6A1B9A' }} />
-                          {regrading === s.id ? '...' : 'AI'}
+                    {submitted ? (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button className="btn btn-secondary btn-sm" onClick={() => openGrade({ ...s, id: s.submission_id })}>
+                          <Star size={13} /> {s.score !== null ? 'Sửa điểm' : 'Chấm'}
                         </button>
-                      )}
-                    </div>
+                        {aiGradable && (fileUrls.length > 0 || s.structured_answers) && (
+                          <button className="btn btn-ghost btn-sm" onClick={() => regrade(s.submission_id)} disabled={regrading === s.submission_id} title="Chấm lại bằng AI">
+                            <Bot size={13} style={{ color: '#6A1B9A' }} />
+                            {regrading === s.submission_id ? '...' : 'AI'}
+                          </button>
+                        )}
+                      </div>
+                    ) : '—'}
                   </td>
                 </tr>
               );
             })}
-            {(!hw.submissions || hw.submissions.length === 0) && (
-              <tr><td colSpan={6} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Chưa có bài nộp</td></tr>
+            {roster.length === 0 && (
+              <tr><td colSpan={7} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Lớp chưa có học sinh</td></tr>
+            )}
+            {roster.length > 0 && visibleRoster.length === 0 && (
+              <tr><td colSpan={7} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Không có học sinh nào trong nhóm lọc này</td></tr>
             )}
           </tbody>
         </table>

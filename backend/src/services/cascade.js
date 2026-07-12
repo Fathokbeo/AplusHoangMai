@@ -46,8 +46,14 @@ function hardDeleteClass(db, classId, { purgeStudents = true } = {}) {
   }
   db.prepare('DELETE FROM homework WHERE class_id=?').run(classId);
 
-  const lessons = db.prepare("SELECT video_url,video_type FROM lessons WHERE class_id=?").all(classId);
-  lessons.forEach(l => { if (l.video_type === 'local') rmFile('videos', l.video_url); });
+  const lessons = db.prepare("SELECT video_url,video_type,attachments FROM lessons WHERE class_id=?").all(classId);
+  lessons.forEach(l => {
+    if (l.video_type === 'local') rmFile('videos', l.video_url);
+    // File đính kèm bài giảng (tài liệu / đáp án BT trên lớp)
+    if (l.attachments) {
+      try { JSON.parse(l.attachments).forEach((a) => rmFile('lessons', a.file)); } catch {}
+    }
+  });
   db.prepare('DELETE FROM lessons WHERE class_id=?').run(classId);
 
   db.prepare('DELETE FROM chapters WHERE class_id=?').run(classId);

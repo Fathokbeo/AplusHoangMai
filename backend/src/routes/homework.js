@@ -183,7 +183,20 @@ router.get('/homework/:id', (req, res) => {
     SELECT s.*,u.full_name,u.username FROM submissions s
     JOIN users u ON s.student_id=u.id WHERE s.homework_id=? ORDER BY s.submitted_at DESC
   `).all(req.params.id);
-  res.json({ ...hw, submissions });
+
+  // Danh sách CẢ LỚP kèm bài nộp (nếu có) → giáo viên thấy cả bạn chưa nộp.
+  // Quá hạn mà chưa nộp → giao diện hiện "Chưa nộp bài" + 0 điểm (khớp cách tính xếp hạng).
+  const roster = db.prepare(`
+    SELECT u.id student_id, u.username, u.full_name,
+           s.id submission_id, s.file_path, s.files, s.structured_answers, s.submitted_at,
+           s.score, s.feedback, s.graded_at, s.graded_by_ai, s.grading_details, s.grading_status
+    FROM class_students cs JOIN users u ON cs.student_id=u.id
+    LEFT JOIN submissions s ON s.homework_id=? AND s.student_id=u.id
+    WHERE cs.class_id=? AND u.active=1
+    ORDER BY u.full_name
+  `).all(req.params.id, hw.class_id);
+
+  res.json({ ...hw, submissions, roster, is_overdue: hw.due_date ? now > hw.due_date : false });
 });
 
 // ── Submit homework (student) ──────────────────────────────────────────

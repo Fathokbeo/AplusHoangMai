@@ -1,12 +1,15 @@
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 
 const UPLOADS_DIR = path.join(__dirname, '../../uploads');
 
 function createStorage(subDir) {
+  const dir = path.join(UPLOADS_DIR, subDir);
+  fs.mkdirSync(dir, { recursive: true });
   return multer.diskStorage({
-    destination: (req, file, cb) => cb(null, path.join(UPLOADS_DIR, subDir)),
+    destination: (req, file, cb) => cb(null, dir),
     filename: (req, file, cb) => {
       const ext = path.extname(file.originalname);
       cb(null, `${uuidv4()}${ext}`);
@@ -51,6 +54,26 @@ const uploadVideo = multer({
   limits: { fileSize: 500 * 1024 * 1024 },
 });
 
+// File đính kèm bài giảng: tài liệu bài giảng / đáp án bài tập trên lớp (PDF, ảnh, Office)
+const LESSON_FILE_TYPES = [
+  'application/pdf',
+  'image/jpeg', 'image/png', 'image/jpg', 'image/webp',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+];
+const uploadLessonFile = multer({
+  storage: createStorage('lessons'),
+  fileFilter: (req, file, cb) => {
+    if (LESSON_FILE_TYPES.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Chỉ chấp nhận file PDF, ảnh hoặc tài liệu Office'));
+  },
+  limits: { fileSize: 50 * 1024 * 1024 },
+});
+
 const uploadCourseThumbnail = multer({
   storage: createStorage('courses'),
   fileFilter: (req, file, cb) => {
@@ -79,4 +102,4 @@ const uploadContent = {
   'achievements': makeImageUpload('achievements'),
 };
 
-module.exports = { uploadAd, uploadHomework, uploadSubmission, uploadVideo, uploadCourseThumbnail, uploadContent };
+module.exports = { uploadAd, uploadHomework, uploadSubmission, uploadVideo, uploadCourseThumbnail, uploadContent, uploadLessonFile };

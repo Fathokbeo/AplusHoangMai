@@ -1,10 +1,13 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
+const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
-const { uploadVideo, uploadCourseThumbnail } = require('../middleware/upload');
+const { uploadVideo, uploadCourseThumbnail, uploadLessonFile } = require('../middleware/upload');
 const { hardDeleteCourse, hardDeleteClass, hardDeleteStudent } = require('../services/cascade');
+const { classRanking, classMonths, ymOf } = require('../services/classRanking');
 
 router.use(authMiddleware, requireRole('teacher', 'admin'));
 
@@ -154,6 +157,37 @@ router.get('/classes/:id', (req, res) => {
   res.json({ ...cls, students, chapters, lessons, homework });
 });
 
+// ── Xếp hạng lớp theo THÁNG (giáo viên theo dõi thứ bậc, xem lại các tháng trước) ──
+// ?month=YYYY-MM (tùy chọn, mặc định tháng hiện tại). Top 3 gắn huy chương vàng/bạc/đồng ở giao diện.
+router.get('/classes/:id/ranking', (req, res) => {
+  const db = getDb();
+  const cls = db.prepare('SELECT * FROM classes WHERE id=? AND active=1').get(req.params.id);
+  if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp' });
+  if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+
+  const currentYm = ymOf(new Date().toISOString());
+  const month = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : currentYm;
+
+  const students = db.prepare(`
+    SELECT u.id, u.username, u.full_name FROM class_students cs
+    JOIN users u ON cs.student_id=u.id WHERE cs.class_id=? AND u.active=1
+  `).all(req.params.id);
+
+  const rankMap = classRanking(db, req.params.id, null, month);
+  const rows = students.map((s) => {
+    const r = rankMap.get(s.id) || {};
+    return { ...s, avg: r.avg ?? null, counted: r.counted ?? 0, graded: r.graded ?? 0, rank: r.rank ?? null };
+  });
+  // Có hạng đứng trước (theo hạng tăng dần), chưa có hạng xếp sau
+  rows.sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity) || (b.avg ?? -1) - (a.avg ?? -1));
+
+  // Các tháng có bài tập để giáo viên chọn xem lại; luôn kèm tháng hiện tại
+  const months = classMonths(db, req.params.id);
+  if (!months.includes(currentYm)) { months.push(currentYm); months.sort(); months.reverse(); }
+
+  res.json({ month, months, current_month: currentYm, students: rows });
+});
+
 router.put('/classes/:id', (req, res) => {
   const { title, description } = req.body;
   const db = getDb();
@@ -219,6 +253,57 @@ router.post('/classes/:id/students', (req, res) => {
     if (e.message.includes('UNIQUE')) return res.status(400).json({ message: 'Học sinh đã trong lớp' });
     throw e;
   }
+});
+
+// Tạo tài khoản học sinh HÀNG LOẠT cho một lớp (nhập từ file Excel ở giao diện).
+// Body: { students: [{ full_name, username, password, parent_phone }] }
+// Trả về: số tạo thành công + danh sách dòng lỗi (trùng tên đăng nhập, thiếu thông tin...).
+router.post('/classes/:id/students/bulk', (req, res) => {
+  const { students } = req.body;
+  if (!Array.isArray(students) || students.length === 0) {
+    return res.status(400).json({ message: 'Danh sách học sinh trống' });
+  }
+  if (students.length > 500) {
+    return res.status(400).json({ message: 'Tối đa 500 học sinh mỗi lần nhập' });
+  }
+  const db = getDb();
+  const cls = db.prepare('SELECT * FROM classes WHERE id=?').get(req.params.id);
+  if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp' });
+  if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+
+  let created = 0;
+  const errors = [];
+  const insertUser = db.prepare(
+    'INSERT INTO users (username,password,plain_password,full_name,parent_phone,role,created_by) VALUES (?,?,?,?,?,?,?)'
+  );
+  const enroll = db.prepare('INSERT INTO class_students (class_id,student_id) VALUES (?,?)');
+
+  db.transaction(() => {
+    students.forEach((row, i) => {
+      const line = Number(row.row) || i + 1; // số dòng trong file Excel để báo lỗi dễ tìm
+      const full_name = String(row.full_name || '').trim();
+      const username = String(row.username || '').trim();
+      const password = String(row.password || '').trim();
+      const parent_phone = String(row.parent_phone || '').trim() || null;
+
+      if (!full_name || !username || !password) {
+        errors.push({ row: line, username, reason: 'Thiếu họ tên, tên đăng nhập hoặc mật khẩu' });
+        return;
+      }
+      if (db.prepare('SELECT id FROM users WHERE username=?').get(username)) {
+        errors.push({ row: line, username, reason: 'Tên đăng nhập đã tồn tại' });
+        return;
+      }
+      const r = insertUser.run(username, bcrypt.hashSync(password, 10), password, full_name, parent_phone, 'student', req.user.id);
+      enroll.run(req.params.id, r.lastInsertRowid);
+      created++;
+    });
+  })();
+
+  res.status(201).json({
+    message: `Đã tạo ${created}/${students.length} tài khoản và thêm vào lớp`,
+    created, failed: errors.length, errors,
+  });
 });
 
 // Đổi lớp: chuyển học sinh từ lớp này sang lớp khác
@@ -346,8 +431,27 @@ router.put('/lessons/:id', (req, res) => {
   res.json({ message: 'Đã cập nhật' });
 });
 
+// Danh sách file đính kèm của bài giảng (JSON) → mảng; hỏng/không có → []
+function parseAttachments(raw) {
+  if (!raw) return [];
+  try { const a = JSON.parse(raw); return Array.isArray(a) ? a : []; } catch { return []; }
+}
+
+function rmLessonFile(name) {
+  const f = path.join(__dirname, '../../uploads/lessons', name);
+  if (fs.existsSync(f)) { try { fs.unlinkSync(f); } catch { /* ignore */ } }
+}
+
 router.delete('/lessons/:id', (req, res) => {
   const db = getDb();
+  const lesson = db.prepare('SELECT * FROM lessons WHERE id=?').get(req.params.id);
+  if (lesson) {
+    parseAttachments(lesson.attachments).forEach((a) => rmLessonFile(a.file));
+    if (lesson.video_type === 'local' && lesson.video_url) {
+      const v = path.join(__dirname, '../../uploads/videos', lesson.video_url);
+      if (fs.existsSync(v)) { try { fs.unlinkSync(v); } catch { /* ignore */ } }
+    }
+  }
   db.prepare('DELETE FROM lessons WHERE id=?').run(req.params.id);
   res.json({ message: 'Đã xóa' });
 });
@@ -357,6 +461,43 @@ router.post('/lessons/:id/video', uploadVideo.single('video'), (req, res) => {
   const db = getDb();
   db.prepare("UPDATE lessons SET video_url=?,video_type='local' WHERE id=?").run(req.file.filename, req.params.id);
   res.json({ filename: req.file.filename });
+});
+
+// ── File đính kèm bài giảng: tài liệu bài giảng / đáp án bài tập trên lớp ──
+// kind: 'doc' (tài liệu) | 'answer' (đáp án BT trên lớp). Nhiều file mỗi lần.
+router.post('/lessons/:id/attachments', uploadLessonFile.array('files', 10), (req, res) => {
+  const db = getDb();
+  const lesson = db.prepare('SELECT l.*,c.teacher_id FROM lessons l JOIN classes c ON l.class_id=c.id WHERE l.id=?').get(req.params.id);
+  if (!lesson) return res.status(404).json({ message: 'Không tìm thấy bài giảng' });
+  if (req.user.role === 'teacher' && lesson.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  const files = req.files || [];
+  if (files.length === 0) return res.status(400).json({ message: 'Cần ít nhất một file' });
+
+  const kind = req.body.kind === 'answer' ? 'answer' : 'doc';
+  const list = parseAttachments(lesson.attachments);
+  files.forEach((f) => {
+    // Trình duyệt gửi tên file UTF-8 nhưng multer đọc theo latin1 → giải mã lại cho tên tiếng Việt
+    let name = f.originalname;
+    try { name = Buffer.from(f.originalname, 'latin1').toString('utf8'); } catch { /* giữ nguyên */ }
+    list.push({ file: f.filename, name, kind });
+  });
+  db.prepare('UPDATE lessons SET attachments=? WHERE id=?').run(JSON.stringify(list), req.params.id);
+  res.status(201).json({ attachments: list });
+});
+
+router.delete('/lessons/:id/attachments/:file', (req, res) => {
+  const db = getDb();
+  const lesson = db.prepare('SELECT l.*,c.teacher_id FROM lessons l JOIN classes c ON l.class_id=c.id WHERE l.id=?').get(req.params.id);
+  if (!lesson) return res.status(404).json({ message: 'Không tìm thấy bài giảng' });
+  if (req.user.role === 'teacher' && lesson.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+
+  const list = parseAttachments(lesson.attachments);
+  const target = list.find((a) => a.file === req.params.file);
+  if (!target) return res.status(404).json({ message: 'Không tìm thấy file' });
+  rmLessonFile(target.file);
+  const next = list.filter((a) => a.file !== req.params.file);
+  db.prepare('UPDATE lessons SET attachments=? WHERE id=?').run(next.length ? JSON.stringify(next) : null, req.params.id);
+  res.json({ attachments: next });
 });
 
 module.exports = router;

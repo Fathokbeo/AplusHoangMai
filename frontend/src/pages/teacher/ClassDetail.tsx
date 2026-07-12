@@ -3,15 +3,17 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../../lib/api';
 import Modal from '../../components/Modal';
 import VideoPlayer from '../../components/VideoPlayer';
+import FileViewer from '../../components/FileViewer';
 import PartsEditor from '../../components/PartsEditor';
 import useIsMobile from '../../lib/useIsMobile';
 import { toast } from '../../components/Toast';
-import { sortByVietnameseName, matchesNameSearch } from '../../lib/vietnameseName';
+import { sortByVietnameseName, matchesNameSearch, normalizeVietnamese } from '../../lib/vietnameseName';
+import { parseAttachments, isViewableFile } from '../../lib/attachments';
 import { emptyPartsConfig, normalizePartsConfig, computeMaxScore, anyPartEnabled, type PartsConfig, PART_LABELS, PART_ORDER, type PartKey } from '../../lib/homeworkParts';
 import {
   Users, BookOpen, ClipboardList, Edit, Trash2,
   UserPlus, UserMinus, Play, File, ChevronLeft, Upload, Clock, Eye, Bot, Layers, Video, Search,
-  ChevronDown, ChevronRight
+  ChevronDown, ChevronRight, Trophy, FileSpreadsheet, Download, Paperclip, FileText, X
 } from 'lucide-react';
 
 // Giờ nhập ở ô datetime-local là GIỜ ĐỊA PHƯƠNG. Lưu dạng ISO (UTC) để khi so "đến hạn"
@@ -30,6 +32,19 @@ function isoToLocalInput(v: string | null | undefined): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// SĐT từ Excel: bỏ ký tự lạ; Excel hay cắt số 0 đầu của ô dạng số → tự thêm lại
+function normalizePhone(v: any): string {
+  let s = String(v ?? '').replace(/[^\d+]/g, '');
+  if (/^\d{9}$/.test(s) && !s.startsWith('0')) s = '0' + s;
+  return s;
+}
+
+// 'YYYY-MM' → 'Tháng M/YYYY' cho ô chọn tháng xếp hạng
+function formatMonth(ym: string): string {
+  const [y, m] = (ym || '').split('-');
+  return y && m ? `Tháng ${parseInt(m)}/${y}` : ym;
+}
+
 // Badge hiển thị các phần đã bật của một bài tập (từ parts_config)
 function partBadges(raw: any) {
   const cfg = normalizePartsConfig(raw);
@@ -45,7 +60,7 @@ export default function ClassDetail() {
   const { id } = useParams();
   const [cls, setCls] = useState<any>(null);
   const [allStudents, setAllStudents] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'students' | 'content'>('content');
+  const [activeTab, setActiveTab] = useState<'students' | 'content' | 'ranking'>('content');
   const [lessonModal, setLessonModal] = useState(false);
   const [editingLesson, setEditingLesson] = useState<any>(null);
   const [hwModal, setHwModal] = useState(false);
@@ -71,8 +86,39 @@ export default function ClassDetail() {
   const [newStudent, setNewStudent] = useState({ username: '', password: '', full_name: '', parent_phone: '' });
   const pdfRef = useRef<HTMLInputElement>(null);
   const answerRef = useRef<HTMLInputElement>(null);
+  // Xếp hạng theo tháng
+  const [ranking, setRanking] = useState<any>(null);
+  const [rankingMonth, setRankingMonth] = useState('');
+  const [rankingLoading, setRankingLoading] = useState(false);
+  // File đính kèm bài giảng (chọn mới, chờ upload khi lưu)
+  const [lessonFiles, setLessonFiles] = useState<{ doc: File[]; answer: File[] }>({ doc: [], answer: [] });
+  const lessonDocRef = useRef<HTMLInputElement>(null);
+  const lessonAnswerRef = useRef<HTMLInputElement>(null);
+  const [viewFiles, setViewFiles] = useState<string[] | null>(null);
+  // Nhập Excel tạo tài khoản hàng loạt
+  const [excelModal, setExcelModal] = useState(false);
+  const [excelRows, setExcelRows] = useState<any[]>([]);
+  const [excelName, setExcelName] = useState('');
+  const [excelResult, setExcelResult] = useState<any>(null);
+  const excelRef = useRef<HTMLInputElement>(null);
   const isMobile = useIsMobile();
   useEffect(() => { fetchClass(); }, [id]);
+
+  // Tải xếp hạng khi mở tab hoặc đổi tháng
+  useEffect(() => {
+    if (activeTab !== 'ranking') return;
+    (async () => {
+      setRankingLoading(true);
+      try {
+        const { data } = await api.get(`/teacher/classes/${id}/ranking`, { params: rankingMonth ? { month: rankingMonth } : {} });
+        setRanking(data);
+      } catch {
+        toast.error('Lỗi tải xếp hạng');
+      } finally {
+        setRankingLoading(false);
+      }
+    })();
+  }, [activeTab, rankingMonth, id]);
 
   // Khi mở lớp: nếu lớp chưa dùng chương thì mở sẵn nhóm "Chưa phân chương", còn lại để thu gọn
   useEffect(() => {
@@ -155,6 +201,94 @@ export default function ClassDetail() {
     }
   };
 
+  // ── Nhập Excel tạo tài khoản hàng loạt ──────────────────────────────
+  const openExcelModal = () => {
+    setExcelRows([]); setExcelName(''); setExcelResult(null);
+    setExcelModal(true);
+  };
+
+  // Tải file Excel mẫu: Họ và tên, Tên đăng nhập, Mật khẩu, Số điện thoại
+  const downloadTemplate = async () => {
+    const XLSX = await import('xlsx');
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['Họ và tên', 'Tên đăng nhập', 'Mật khẩu', 'Số điện thoại'],
+      ['Nguyễn Văn An', 'nguyenvanan', '123456', '0912345678'],
+      ['Trần Thị Bình', 'tranthibinh', 'abc123', ''],
+    ]);
+    ws['!cols'] = [{ wch: 26 }, { wch: 18 }, { wch: 14 }, { wch: 16 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Danh sách');
+    XLSX.writeFile(wb, 'Mau danh sach hoc sinh.xlsx');
+  };
+
+  // Đọc file Excel: tìm dòng tiêu đề, nhận diện cột theo tên (không phân biệt hoa thường/dấu)
+  const handleExcelFile = async (file: File) => {
+    try {
+      const XLSX = await import('xlsx');
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+
+      const norm = (s: any) => normalizeVietnamese(String(s ?? ''));
+      const headerIdx = aoa.findIndex((r) => r.some((c) => norm(c).includes('ten dang nhap')));
+      if (headerIdx < 0) {
+        toast.error('Không tìm thấy dòng tiêu đề chứa cột "Tên đăng nhập". Hãy dùng file mẫu.');
+        return;
+      }
+      const header = aoa[headerIdx].map(norm);
+      const col = (...keys: string[]) => header.findIndex((h) => keys.some((k) => h.includes(k)));
+      const iName = col('ho va ten', 'ho ten');
+      const iUser = col('ten dang nhap');
+      const iPass = col('mat khau');
+      const iPhone = col('so dien thoai', 'sdt', 'dien thoai');
+
+      const rows: any[] = aoa.slice(headerIdx + 1)
+        .map((r, k) => ({
+          row: headerIdx + 2 + k, // số dòng thật trong file Excel (1-based)
+          full_name: String(iName >= 0 ? r[iName] ?? '' : '').trim(),
+          username: String(iUser >= 0 ? r[iUser] ?? '' : '').trim(),
+          password: String(iPass >= 0 ? r[iPass] ?? '' : '').trim(),
+          parent_phone: normalizePhone(iPhone >= 0 ? r[iPhone] : ''),
+        }))
+        .filter((r) => r.full_name || r.username || r.password);
+
+      if (rows.length === 0) { toast.error('File không có dòng dữ liệu nào'); return; }
+
+      // Đánh dấu lỗi thấy được ngay (thiếu thông tin, trùng trong file); trùng hệ thống do server kiểm tra khi tạo
+      const seen = new Set<string>();
+      rows.forEach((r) => {
+        if (!r.full_name || !r.username || !r.password) r.error = 'Thiếu họ tên / tên đăng nhập / mật khẩu';
+        else if (seen.has(r.username)) r.error = 'Trùng tên đăng nhập trong file';
+        if (r.username) seen.add(r.username);
+      });
+
+      setExcelRows(rows);
+      setExcelName(file.name);
+      setExcelResult(null);
+    } catch {
+      toast.error('Không đọc được file. Hãy chọn file Excel (.xlsx, .xls)');
+    }
+  };
+
+  const importExcel = async () => {
+    const valid = excelRows.filter((r) => !r.error);
+    if (valid.length === 0) { toast.error('Không có dòng hợp lệ để tạo'); return; }
+    setLoading(true);
+    try {
+      const { data } = await api.post(`/teacher/classes/${id}/students/bulk`, {
+        students: valid.map(({ row, full_name, username, password, parent_phone }) => ({ row, full_name, username, password, parent_phone })),
+      });
+      setExcelResult(data);
+      toast.success(data.message);
+      fetchClass();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Lỗi nhập danh sách');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Số thứ tự mặc định kế tiếp: chương/bài đầu = 1, sau đó nối tiếp tăng dần (vẫn sửa tay được).
   const nextOrder = (items: any[] | undefined, field: string) =>
     ((items && items.length) ? Math.max(0, ...items.map((x: any) => Number(x[field]) || 0)) : 0) + 1;
@@ -203,13 +337,27 @@ export default function ClassDetail() {
   const openCreateLesson = () => {
     setEditingLesson(null);
     setLessonForm({ title: '', description: '', video_url: '', video_type: 'youtube', lesson_order: String(nextOrder(cls?.lessons, 'lesson_order')), chapter_id: '' });
+    setLessonFiles({ doc: [], answer: [] });
     setLessonModal(true);
   };
 
   const openEditLesson = (l: any) => {
     setEditingLesson(l);
     setLessonForm({ title: l.title, description: l.description || '', video_url: l.video_url || '', video_type: l.video_type || 'youtube', lesson_order: String(l.lesson_order), chapter_id: l.chapter_id ? String(l.chapter_id) : '' });
+    setLessonFiles({ doc: [], answer: [] });
     setLessonModal(true);
+  };
+
+  // Upload các file đính kèm đã chọn (tài liệu bài giảng / đáp án BT trên lớp) cho một bài giảng
+  const uploadLessonAttachments = async (lessonId: number) => {
+    for (const kind of ['doc', 'answer'] as const) {
+      const files = lessonFiles[kind];
+      if (files.length === 0) continue;
+      const body = new FormData();
+      files.forEach((f) => body.append('files', f));
+      body.append('kind', kind);
+      await api.post(`/teacher/lessons/${lessonId}/attachments`, body);
+    }
   };
 
   const saveLesson = async () => {
@@ -218,9 +366,11 @@ export default function ClassDetail() {
     try {
       if (editingLesson) {
         await api.put(`/teacher/lessons/${editingLesson.id}`, lessonForm);
+        await uploadLessonAttachments(editingLesson.id);
         toast.success('Đã cập nhật');
       } else {
-        await api.post(`/teacher/classes/${id}/lessons`, lessonForm);
+        const { data } = await api.post(`/teacher/classes/${id}/lessons`, lessonForm);
+        await uploadLessonAttachments(data.id);
         toast.success('Đã thêm bài giảng');
       }
       setLessonModal(false);
@@ -230,6 +380,28 @@ export default function ClassDetail() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Xóa một file đính kèm đã lưu của bài giảng đang sửa
+  const deleteAttachment = async (file: string) => {
+    if (!editingLesson) return;
+    try {
+      const { data } = await api.delete(`/teacher/lessons/${editingLesson.id}/attachments/${file}`);
+      setEditingLesson({ ...editingLesson, attachments: JSON.stringify(data.attachments) });
+      fetchClass();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Lỗi xóa file');
+    }
+  };
+
+  // Thêm file vào danh sách chờ upload của bài giảng (gộp, loại trùng tên+kích thước)
+  const addLessonFiles = (kind: 'doc' | 'answer', incoming: FileList) => {
+    const arr = Array.from(incoming);
+    setLessonFiles((prev) => {
+      const merged = [...prev[kind]];
+      arr.forEach((f) => { if (!merged.some((x) => x.name === f.name && x.size === f.size)) merged.push(f); });
+      return { ...prev, [kind]: merged.slice(0, 10) };
+    });
   };
 
   const deleteLesson = async (lessonId: number) => {
@@ -341,32 +513,41 @@ export default function ClassDetail() {
     return next;
   });
 
-  const renderLessonCard = (l: any, i: number) => (
-    <div key={l.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '1rem 1.25rem' }}>
-      <div style={{ width: 36, height: 36, background: '#E3F2FD', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-        <span style={{ fontWeight: 700, color: '#1565C0', fontSize: '0.9rem' }}>{i + 1}</span>
+  const renderLessonCard = (l: any, i: number) => {
+    const atts = parseAttachments(l.attachments);
+    const docCount = atts.filter((a) => a.kind !== 'answer').length;
+    const ansCount = atts.filter((a) => a.kind === 'answer').length;
+    return (
+      <div key={l.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '1rem 1.25rem' }}>
+        <div style={{ width: 36, height: 36, background: '#E3F2FD', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <span style={{ fontWeight: 700, color: '#1565C0', fontSize: '0.9rem' }}>{i + 1}</span>
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{l.title}</div>
+          {l.description && <div style={{ fontSize: '0.8rem', color: '#888', marginTop: 2 }}>{l.description}</div>}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+            {l.video_url && (
+              <span className="badge badge-blue">
+                <Play size={10} style={{ marginRight: 4 }} />
+                {l.video_type === 'youtube' ? 'YouTube' : l.video_type === 'local' ? 'Video nội bộ' : 'Video URL'}
+              </span>
+            )}
+            {docCount > 0 && <span className="badge badge-orange"><Paperclip size={10} style={{ marginRight: 3 }} />Tài liệu ×{docCount}</span>}
+            {ansCount > 0 && <span className="badge badge-green"><FileText size={10} style={{ marginRight: 3 }} />Đáp án BT ×{ansCount}</span>}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {(l.video_url || atts.length > 0) && (
+            <button className="btn btn-secondary btn-sm" onClick={() => { setViewingLesson(l); setViewLessonModal(true); }}>
+              <Eye size={13} /> Xem
+            </button>
+          )}
+          <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openEditLesson(l)}><Edit size={14} /></button>
+          <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} onClick={() => deleteLesson(l.id)}><Trash2 size={14} /></button>
+        </div>
       </div>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{l.title}</div>
-        {l.description && <div style={{ fontSize: '0.8rem', color: '#888', marginTop: 2 }}>{l.description}</div>}
-        {l.video_url && (
-          <span className="badge badge-blue" style={{ marginTop: 6 }}>
-            <Play size={10} style={{ marginRight: 4 }} />
-            {l.video_type === 'youtube' ? 'YouTube' : l.video_type === 'local' ? 'Video nội bộ' : 'Video URL'}
-          </span>
-        )}
-      </div>
-      <div style={{ display: 'flex', gap: 6 }}>
-        {l.video_url && (
-          <button className="btn btn-secondary btn-sm" onClick={() => { setViewingLesson(l); setViewLessonModal(true); }}>
-            <Play size={13} /> Xem
-          </button>
-        )}
-        <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openEditLesson(l)}><Edit size={14} /></button>
-        <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} onClick={() => deleteLesson(l.id)}><Trash2 size={14} /></button>
-      </div>
-    </div>
-  );
+    );
+  };
 
   const renderHomeworkCard = (h: any) => (
     <div key={h.id} className="card" style={{ padding: '1rem 1.25rem' }}>
@@ -440,7 +621,16 @@ export default function ClassDetail() {
   const tabs = [
     { key: 'students', label: `Học sinh (${cls.students?.length || 0})`, icon: Users },
     { key: 'content', label: `Nội dung (${chapters.length} chương)`, icon: Layers },
+    { key: 'ranking', label: 'Xếp hạng', icon: Trophy },
   ];
+
+  // Nhóm huy chương top 3 của tháng đang xem (đồng hạng → cùng huy chương)
+  const rankedStudents: any[] = ranking?.students || [];
+  const medalGroups = [
+    { rank: 1, medal: '🥇', label: 'Hạng Nhất', color: '#F9A825', bg: '#FFF8E1', border: '#FFE082' },
+    { rank: 2, medal: '🥈', label: 'Hạng Nhì', color: '#757575', bg: '#F5F5F5', border: '#E0E0E0' },
+    { rank: 3, medal: '🥉', label: 'Hạng Ba', color: '#8D6E63', bg: '#EFEBE9', border: '#D7CCC8' },
+  ].map((g) => ({ ...g, students: rankedStudents.filter((s) => s.rank === g.rank) }));
 
   return (
     <div className="fade-in">
@@ -482,7 +672,12 @@ export default function ClassDetail() {
                 onChange={(e) => setStudentSearch(e.target.value)}
               />
             </div>
-            <button className="btn btn-primary" onClick={openAddStudent}><UserPlus size={15} /> Thêm học sinh</button>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn btn-secondary" onClick={openExcelModal} title="Tạo tài khoản hàng loạt từ file Excel">
+                <FileSpreadsheet size={15} /> Nhập Excel
+              </button>
+              <button className="btn btn-primary" onClick={openAddStudent}><UserPlus size={15} /> Thêm học sinh</button>
+            </div>
           </div>
 
           {/* Thanh thao tác hàng loạt */}
@@ -551,6 +746,92 @@ export default function ClassDetail() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {contentGroups.map((g, i) => renderChapterAccordion(g, i))}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Ranking tab: xếp hạng theo tháng, top 3 gắn huy chương vàng/bạc/đồng */}
+      {activeTab === 'ranking' && (
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: '0.82rem', color: '#888', lineHeight: 1.5 }}>
+              Xếp hạng theo <strong>điểm TB các bài tập trong tháng</strong> (quá hạn không nộp = 0 điểm). Sang tháng mới bảng tự reset — chọn tháng để xem lại.
+            </div>
+            <select className="input" style={{ width: 'auto', minWidth: 160 }} value={rankingMonth || ranking?.month || ''}
+              onChange={(e) => setRankingMonth(e.target.value)}>
+              {(ranking?.months || []).map((m: string) => (
+                <option key={m} value={m}>{formatMonth(m)}{m === ranking?.current_month ? ' (hiện tại)' : ''}</option>
+              ))}
+            </select>
+          </div>
+
+          {rankingLoading && !ranking ? (
+            <div style={{ padding: '2rem', color: '#999', textAlign: 'center' }}>Đang tải...</div>
+          ) : (
+            <>
+              {/* Podium top 3 */}
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+                {medalGroups.map((g) => (
+                  <div key={g.rank} className="card" style={{ padding: '1rem 1.25rem', background: g.bg, border: `1px solid ${g.border}` }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <span style={{ fontSize: '1.6rem' }}>{g.medal}</span>
+                      <span style={{ fontWeight: 800, color: g.color, fontSize: '0.95rem' }}>{g.label}</span>
+                    </div>
+                    {g.students.length === 0 ? (
+                      <div style={{ fontSize: '0.82rem', color: '#aaa' }}>Chưa có</div>
+                    ) : g.students.map((s: any) => (
+                      <div key={s.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '4px 0' }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{s.full_name}</div>
+                          <div style={{ fontSize: '0.75rem', color: '#999' }}>{s.username}</div>
+                        </div>
+                        <span style={{ fontWeight: 800, color: g.color, fontSize: '1.05rem' }}>{s.avg}</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+
+              {/* Bảng xếp hạng đầy đủ */}
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{ width: 70 }}>Hạng</th>
+                      <th>Học sinh</th>
+                      <th>Điểm TB</th>
+                      <th>Số bài tính điểm</th>
+                      <th>Đã có điểm</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rankedStudents.map((s: any) => (
+                      <tr key={s.id}>
+                        <td>
+                          {s.rank ? (
+                            <span style={{ fontWeight: 800, fontSize: '0.95rem' }}>
+                              {s.rank <= 3 ? <span style={{ marginRight: 4 }}>{s.rank === 1 ? '🥇' : s.rank === 2 ? '🥈' : '🥉'}</span> : null}
+                              {s.rank}
+                            </span>
+                          ) : <span style={{ color: '#ccc' }}>—</span>}
+                        </td>
+                        <td><strong>{s.full_name}</strong><div style={{ fontSize: '0.78rem', color: '#999' }}>{s.username}</div></td>
+                        <td>
+                          {s.avg !== null
+                            ? <span style={{ fontWeight: 700, color: s.avg >= 8 ? '#2E7D32' : s.avg >= 5 ? '#E65100' : '#C62828' }}>{s.avg}/10</span>
+                            : <span style={{ color: '#ccc' }}>Chưa có</span>}
+                        </td>
+                        <td style={{ color: '#888' }}>{s.counted}</td>
+                        <td style={{ color: '#888' }}>{s.graded}</td>
+                      </tr>
+                    ))}
+                    {rankedStudents.length === 0 && (
+                      <tr><td colSpan={5} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Lớp chưa có học sinh</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       )}
@@ -632,22 +913,81 @@ export default function ClassDetail() {
           <label className="label">Mô tả</label>
           <textarea className="input" rows={2} value={lessonForm.description} onChange={(e) => setLessonForm({ ...lessonForm, description: e.target.value })} />
         </div>
-        <div className="form-group">
-          <label className="label">Loại video</label>
-          <select className="input" value={lessonForm.video_type} onChange={(e) => setLessonForm({ ...lessonForm, video_type: e.target.value, video_url: '' })}>
-            <option value="youtube">YouTube</option>
-            <option value="url">URL trực tiếp</option>
-          </select>
-        </div>
-        <div className="form-group">
-          <label className="label">Link video</label>
-          <input className="input" placeholder={lessonForm.video_type === 'youtube' ? 'https://youtube.com/watch?v=...' : 'https://...'} value={lessonForm.video_url} onChange={(e) => setLessonForm({ ...lessonForm, video_url: e.target.value })} />
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 2fr', gap: 12 }}>
+          <div className="form-group">
+            <label className="label">Loại video</label>
+            <select className="input" value={lessonForm.video_type} onChange={(e) => setLessonForm({ ...lessonForm, video_type: e.target.value, video_url: '' })}>
+              <option value="youtube">YouTube</option>
+              <option value="url">URL trực tiếp</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="label">Link video (tùy chọn)</label>
+            <input className="input" placeholder={lessonForm.video_type === 'youtube' ? 'https://youtube.com/watch?v=... (không bắt buộc)' : 'https://... (không bắt buộc)'} value={lessonForm.video_url} onChange={(e) => setLessonForm({ ...lessonForm, video_url: e.target.value })} />
+          </div>
         </div>
         {lessonForm.video_url && (
           <div style={{ marginBottom: '1rem', borderRadius: 8, overflow: 'hidden' }}>
             <VideoPlayer url={lessonForm.video_url} type={lessonForm.video_type as any} />
           </div>
         )}
+
+        {/* File đính kèm: tài liệu bài giảng & đáp án bài tập trên lớp (không cần video vẫn đăng được) */}
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
+          {([
+            { kind: 'doc' as const, label: 'File bài giảng / tài liệu', ref: lessonDocRef, hint: 'PDF, ảnh, Word, PowerPoint...' },
+            { kind: 'answer' as const, label: 'Đáp án bài tập trên lớp', ref: lessonAnswerRef, hint: 'PDF, ảnh, Word...' },
+          ]).map(({ kind, label, ref, hint }) => (
+            <div className="form-group" key={kind}>
+              <label className="label">{label}</label>
+              <div className="dropzone" style={{ padding: '0.9rem' }} onClick={() => ref.current?.click()}>
+                <span style={{ fontSize: '0.82rem' }}><Upload size={15} style={{ verticalAlign: 'middle' }} /> Chọn file ({hint})</span>
+              </div>
+              <input ref={ref} type="file" multiple hidden
+                accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.ppt,.pptx,.xls,.xlsx"
+                onChange={(e) => { if (e.target.files?.length) addLessonFiles(kind, e.target.files); e.target.value = ''; }} />
+              {lessonFiles[kind].length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
+                  {lessonFiles[kind].map((f, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', background: '#F1F8E9', borderRadius: 6, padding: '0.35rem 0.55rem' }}>
+                      <FileText size={13} color="#2E7D32" style={{ flexShrink: 0 }} />
+                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#2E7D32', fontWeight: 600 }}>{f.name}</span>
+                      <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} title="Bỏ file này"
+                        onClick={() => setLessonFiles((prev) => ({ ...prev, [kind]: prev[kind].filter((_, k) => k !== i) }))}>
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* File đã lưu của bài giảng (khi sửa): xem / tải / xóa */}
+        {editingLesson && parseAttachments(editingLesson.attachments).length > 0 && (
+          <div className="form-group">
+            <label className="label">File đã đính kèm</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {parseAttachments(editingLesson.attachments).map((a) => (
+                <div key={a.file} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem', background: '#FAFAFA', border: '1px solid #EEE', borderRadius: 6, padding: '0.4rem 0.6rem' }}>
+                  <Paperclip size={13} color={a.kind === 'answer' ? '#2E7D32' : '#E65100'} style={{ flexShrink: 0 }} />
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {a.name} <span className={`badge ${a.kind === 'answer' ? 'badge-green' : 'badge-orange'}`} style={{ marginLeft: 6 }}>{a.kind === 'answer' ? 'Đáp án BT' : 'Tài liệu'}</span>
+                  </span>
+                  {isViewableFile(a.file)
+                    ? <button className="btn btn-ghost btn-sm" onClick={() => setViewFiles([`/uploads/lessons/${a.file}`])}><Eye size={13} /> Xem</button>
+                    : <a className="btn btn-ghost btn-sm" href={`/uploads/lessons/${a.file}`} download={a.name}><Download size={13} /> Tải</a>}
+                  <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} title="Xóa file"
+                    onClick={() => { if (confirm(`Xóa file "${a.name}"?`)) deleteAttachment(a.file); }}>
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="form-group">
           <label className="label">Thứ tự</label>
           <input className="input" type="number" min={0} value={lessonForm.lesson_order} onChange={(e) => setLessonForm({ ...lessonForm, lesson_order: e.target.value })} />
@@ -656,11 +996,28 @@ export default function ClassDetail() {
 
       {/* View Lesson Modal */}
       <Modal open={viewLessonModal} onClose={() => setViewLessonModal(false)} title={viewingLesson?.title || ''} size="xl">
-        {viewingLesson?.video_url && (
-          <>
-            <VideoPlayer url={viewingLesson.video_url} type={viewingLesson.video_type} />
-            {viewingLesson.description && <p style={{ color: '#555', marginTop: 12, lineHeight: 1.6 }}>{viewingLesson.description}</p>}
-          </>
+        {viewingLesson?.video_url && <VideoPlayer url={viewingLesson.video_url} type={viewingLesson.video_type} />}
+        {viewingLesson?.description && <p style={{ color: '#555', marginTop: 12, lineHeight: 1.6 }}>{viewingLesson.description}</p>}
+        {viewingLesson && parseAttachments(viewingLesson.attachments).length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Paperclip size={14} /> Tài liệu đính kèm
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {parseAttachments(viewingLesson.attachments).map((a) => (
+                <div key={a.file} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', background: '#FAFAFA', border: '1px solid #EEE', borderRadius: 8, padding: '0.5rem 0.75rem' }}>
+                  <FileText size={15} color={a.kind === 'answer' ? '#2E7D32' : '#E65100'} style={{ flexShrink: 0 }} />
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {a.name} <span className={`badge ${a.kind === 'answer' ? 'badge-green' : 'badge-orange'}`} style={{ marginLeft: 6 }}>{a.kind === 'answer' ? 'Đáp án BT trên lớp' : 'Tài liệu bài giảng'}</span>
+                  </span>
+                  {isViewableFile(a.file) && (
+                    <button className="btn btn-secondary btn-sm" onClick={() => setViewFiles([`/uploads/lessons/${a.file}`])}><Eye size={13} /> Xem</button>
+                  )}
+                  <a className="btn btn-ghost btn-sm" href={`/uploads/lessons/${a.file}`} download={a.name}><Download size={13} /> Tải về</a>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </Modal>
 
@@ -758,6 +1115,102 @@ export default function ClassDetail() {
           </div>
         </div>
       </Modal>
+
+      {/* Excel Import Modal: tạo tài khoản học sinh hàng loạt */}
+      <Modal open={excelModal} onClose={() => setExcelModal(false)} title="Nhập Excel — tạo tài khoản hàng loạt" size="lg"
+        footer={
+          <>
+            <button className="btn btn-ghost" onClick={() => setExcelModal(false)}>Đóng</button>
+            {excelRows.length > 0 && !excelResult && (
+              <button className="btn btn-primary" onClick={importExcel} disabled={loading || excelRows.filter((r) => !r.error).length === 0}>
+                {loading ? 'Đang tạo...' : `Tạo ${excelRows.filter((r) => !r.error).length} tài khoản`}
+              </button>
+            )}
+          </>
+        }>
+        {/* Bước 1: hướng dẫn + chọn file */}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+          <button className="btn btn-secondary btn-sm" onClick={downloadTemplate}>
+            <Download size={14} /> Tải file mẫu
+          </button>
+          <button className="btn btn-primary btn-sm" onClick={() => excelRef.current?.click()}>
+            <FileSpreadsheet size={14} /> {excelName ? 'Chọn file khác' : 'Chọn file Excel'}
+          </button>
+          <input ref={excelRef} type="file" accept=".xlsx,.xls" hidden
+            onChange={(e) => { if (e.target.files?.[0]) handleExcelFile(e.target.files[0]); e.target.value = ''; }} />
+        </div>
+        <div style={{ padding: '0.6rem 0.8rem', background: '#F5F5F5', borderRadius: 8, fontSize: '0.8rem', color: '#666', lineHeight: 1.6, marginBottom: 14 }}>
+          File Excel cần các cột: <strong>Họ và tên</strong>, <strong>Tên đăng nhập</strong>, <strong>Mật khẩu</strong>, <strong>Số điện thoại</strong> (tùy chọn).
+          Mỗi dòng là một học sinh — tất cả sẽ được tạo tài khoản và thêm thẳng vào lớp này.
+        </div>
+
+        {/* Bước 2: xem trước dữ liệu đã đọc */}
+        {excelName && !excelResult && (
+          <>
+            <div style={{ fontSize: '0.85rem', marginBottom: 8 }}>
+              <FileSpreadsheet size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />
+              <strong>{excelName}</strong> — {excelRows.length} dòng, {excelRows.filter((r) => !r.error).length} hợp lệ
+              {excelRows.some((r) => r.error) && <span style={{ color: '#C62828' }}> · {excelRows.filter((r) => r.error).length} dòng lỗi (bỏ qua khi tạo)</span>}
+            </div>
+            <div className="table-wrap" style={{ maxHeight: 320, overflowY: 'auto' }}>
+              <table>
+                <thead><tr><th>Dòng</th><th>Họ và tên</th><th>Tên đăng nhập</th><th>Mật khẩu</th><th>SĐT</th><th>Trạng thái</th></tr></thead>
+                <tbody>
+                  {excelRows.map((r) => (
+                    <tr key={r.row} style={r.error ? { background: '#FFF8F8' } : undefined}>
+                      <td style={{ color: '#999' }}>{r.row}</td>
+                      <td><strong>{r.full_name || '—'}</strong></td>
+                      <td style={{ fontFamily: 'monospace' }}>{r.username || '—'}</td>
+                      <td style={{ fontFamily: 'monospace' }}>{r.password || '—'}</td>
+                      <td>{r.parent_phone || '—'}</td>
+                      <td>
+                        {r.error
+                          ? <span className="badge badge-red">{r.error}</span>
+                          : <span className="badge badge-green">Sẵn sàng</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+
+        {/* Bước 3: kết quả sau khi tạo */}
+        {excelResult && (
+          <div>
+            <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+              <div className="card" style={{ flex: 1, padding: '0.8rem 1rem', background: '#E8F5E9', minWidth: 140 }}>
+                <div style={{ fontWeight: 800, fontSize: '1.3rem', color: '#2E7D32' }}>{excelResult.created}</div>
+                <div style={{ fontSize: '0.8rem', color: '#2E7D32' }}>Tài khoản đã tạo & thêm vào lớp</div>
+              </div>
+              <div className="card" style={{ flex: 1, padding: '0.8rem 1rem', background: excelResult.failed > 0 ? '#FFEBEE' : '#F5F5F5', minWidth: 140 }}>
+                <div style={{ fontWeight: 800, fontSize: '1.3rem', color: excelResult.failed > 0 ? '#C62828' : '#888' }}>{excelResult.failed}</div>
+                <div style={{ fontSize: '0.8rem', color: excelResult.failed > 0 ? '#C62828' : '#888' }}>Dòng lỗi</div>
+              </div>
+            </div>
+            {excelResult.errors?.length > 0 && (
+              <div className="table-wrap" style={{ maxHeight: 240, overflowY: 'auto' }}>
+                <table>
+                  <thead><tr><th>Dòng</th><th>Tên đăng nhập</th><th>Lý do</th></tr></thead>
+                  <tbody>
+                    {excelResult.errors.map((e: any, i: number) => (
+                      <tr key={i}>
+                        <td style={{ color: '#999' }}>{e.row}</td>
+                        <td style={{ fontFamily: 'monospace' }}>{e.username || '—'}</td>
+                        <td style={{ color: '#C62828' }}>{e.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* File Viewer (xem file đính kèm bài giảng) */}
+      {viewFiles && <FileViewer files={viewFiles} onClose={() => setViewFiles(null)} />}
     </div>
   );
 }

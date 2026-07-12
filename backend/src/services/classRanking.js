@@ -17,6 +17,14 @@ function monthAnchor(hw) {
   return hw.due_date || hw.created_at || null;
 }
 
+// Tháng 'YYYY-MM' (theo lịch địa phương) của một mốc thời gian ISO; null nếu không hợp lệ.
+function ymOf(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 // Bài có thuộc cùng tháng (theo lịch địa phương) với mốc tham chiếu không?
 function inSameMonth(anchorIso, ref) {
   if (!anchorIso) return false;
@@ -25,16 +33,25 @@ function inSameMonth(anchorIso, ref) {
   return d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth();
 }
 
+// Danh sách các tháng ('YYYY-MM', mới nhất trước) có bài tập trong lớp — để giáo viên xem lại lịch sử xếp hạng.
+function classMonths(db, classId) {
+  const homeworks = db.prepare('SELECT due_date,created_at FROM homework WHERE class_id=?').all(classId);
+  const set = new Set();
+  homeworks.forEach((hw) => { const ym = ymOf(monthAnchor(hw)); if (ym) set.add(ym); });
+  return [...set].sort().reverse();
+}
+
 // Điểm TB (thang 10) + số bài đã tính của TỪNG học sinh trong lớp.
+// month ('YYYY-MM', tùy chọn): tính cho tháng đó; bỏ trống → tháng hiện tại.
 // Trả về Map: studentId -> { avg: number|null, counted, graded }
-function classAverages(db, classId, nowIso) {
+function classAverages(db, classId, nowIso, month) {
   const now = nowIso || new Date().toISOString();
-  const ref = new Date(now);
+  const targetYm = month || ymOf(now);
   const students = db.prepare('SELECT student_id FROM class_students WHERE class_id=?').all(classId);
-  // Chỉ lấy bài tập thuộc THÁNG HIỆN TẠI (theo hạn nộp / ngày tạo) → xếp hạng reset theo tháng.
+  // Chỉ lấy bài tập thuộc THÁNG ĐANG XÉT (theo hạn nộp / ngày tạo) → xếp hạng reset theo tháng.
   const homeworks = db.prepare('SELECT id,due_date,max_score,created_at FROM homework WHERE class_id=?')
     .all(classId)
-    .filter((hw) => inSameMonth(monthAnchor(hw), ref));
+    .filter((hw) => ymOf(monthAnchor(hw)) === targetYm);
   const subs = db.prepare(`
     SELECT s.homework_id,s.student_id,s.score
     FROM submissions s JOIN homework h ON s.homework_id=h.id
@@ -65,8 +82,9 @@ function classAverages(db, classId, nowIso) {
 
 // Gắn thứ hạng (rank) theo điểm TB giảm dần. Đồng điểm → đồng hạng (kiểu thi đấu: 1,2,2,4).
 // Học sinh chưa có điểm TB (avg=null) → rank=null. total = số học sinh đã được xếp hạng.
-function classRanking(db, classId, nowIso) {
-  const averages = classAverages(db, classId, nowIso);
+// month ('YYYY-MM', tùy chọn): xếp hạng của tháng đó; bỏ trống → tháng hiện tại.
+function classRanking(db, classId, nowIso, month) {
+  const averages = classAverages(db, classId, nowIso, month);
   const ranked = [...averages.entries()]
     .map(([student_id, v]) => ({ student_id, ...v }))
     .filter((e) => e.avg !== null)
@@ -107,4 +125,4 @@ function studentOverallAverage(db, studentId, nowIso) {
   return counted > 0 ? round1((sum / counted) * 10) : null;
 }
 
-module.exports = { classAverages, classRanking, studentOverallAverage, isOverdue };
+module.exports = { classAverages, classRanking, classMonths, studentOverallAverage, isOverdue, ymOf };

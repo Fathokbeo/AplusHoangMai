@@ -258,6 +258,10 @@ function initSchema() {
   if (!subCols.some(c => c.name === 'structured_answers')) {
     db.exec('ALTER TABLE submissions ADD COLUMN structured_answers TEXT');
   }
+  // Migration: file đính kèm bài giảng (JSON array [{file,name,kind}], kind: 'doc' tài liệu | 'answer' đáp án BT trên lớp)
+  if (!lessonCols.some(c => c.name === 'attachments')) {
+    db.exec('ALTER TABLE lessons ADD COLUMN attachments TEXT');
+  }
 
   const admin = db.prepare("SELECT id FROM users WHERE role='admin' LIMIT 1").get();
   if (!admin) {
