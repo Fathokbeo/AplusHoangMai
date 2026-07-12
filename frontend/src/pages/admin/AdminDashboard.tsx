@@ -23,7 +23,7 @@ export default function AdminDashboard() {
     <div className="fade-in">
       <h1 className="page-title">Tổng quan</h1>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16, marginBottom: '2rem' }}>
+      <div className="stat-grid" style={{ marginBottom: '2rem' }}>
         {cards.map(({ label, value, icon: Icon, color, bg, link }) => (
           <Link key={label} to={link} style={{ textDecoration: 'none' }}>
             <div className="stat-card" style={{ transition: 'transform 0.2s', cursor: 'pointer' }}

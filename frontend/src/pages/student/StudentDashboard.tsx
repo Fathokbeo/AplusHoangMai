@@ -31,7 +31,7 @@ export default function StudentDashboard() {
 
       {/* Stats */}
       {stats && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 16, marginBottom: '2rem' }}>
+        <div className="stat-grid" style={{ marginBottom: '2rem' }}>
           {[
             { label: 'Lớp học', value: stats.classCount, icon: School, color: '#C62828', bg: '#FFEBEE' },
             { label: 'Bài đã nộp', value: stats.submittedCount, icon: ClipboardList, color: '#1565C0', bg: '#E3F2FD' },

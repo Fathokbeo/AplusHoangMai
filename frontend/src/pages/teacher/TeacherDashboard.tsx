@@ -92,7 +92,7 @@ export default function TeacherDashboard() {
       </div>
 
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 16, marginBottom: '2rem' }}>
+      <div className="stat-grid" style={{ marginBottom: '2rem' }}>
         {[
           { label: 'Khóa học', value: courses.length, icon: BookOpen, color: '#C62828', bg: '#FFEBEE' },
           { label: 'Lớp học', value: totalClasses, icon: School, color: '#1565C0', bg: '#E3F2FD' },

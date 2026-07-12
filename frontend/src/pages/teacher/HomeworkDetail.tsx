@@ -159,7 +159,7 @@ export default function HomeworkDetail() {
       </div>
 
       {/* Info cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: '1.5rem' }}>
+      <div className="stat-grid" style={{ marginBottom: '1.5rem' }}>
         <div className="stat-card">
           <div className="stat-icon" style={{ background: '#E3F2FD' }}><Users size={18} color="#1565C0" /></div>
           <div><div className="stat-value" style={{ color: '#1565C0' }}>{submittedCount}/{roster.length}</div><div className="stat-label">Đã nộp</div></div>

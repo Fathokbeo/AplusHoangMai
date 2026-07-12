@@ -25,9 +25,10 @@ body {
   font-family: 'Segoe UI', Inter, system-ui, sans-serif;
   margin: 0;
   padding: 0;
-  /* Chống chữ tràn khỏi ô/thẻ: tự bẻ từ quá dài (URL, email, tên file...)
-     khi hết chỗ. Thuộc tính này kế thừa xuống mọi phần tử con. */
-  overflow-wrap: anywhere;
+  /* Chống chữ tràn khỏi ô/thẻ: bẻ từ quá dài (URL, email, tên file...)
+     CHỈ khi từ đó thật sự tràn khỏi ô. Dùng break-word (không dùng anywhere)
+     để chữ không bị xuống dòng sớm khi ô vẫn còn chỗ. Kế thừa xuống mọi phần tử. */
+  overflow-wrap: break-word;
 }
 
 #root { min-height: 100vh; }
@@ -218,8 +219,12 @@ tbody tr:hover { background: #FAFAFA; }
 .carousel-slide { min-width: 100%; height: 400px; object-fit: cover; }
 
 /* ── Stats cards ──────────────────────────────────────────── */
+/* Lưới thẻ thống kê: mỗi thẻ rộng đúng theo nội dung (số/chữ luôn hiện đủ trên
+   một dòng), hết chỗ ngang thì CẢ THẺ xuống hàng chứ không bẻ chữ bên trong */
+.stat-grid { display: flex; flex-wrap: wrap; gap: 14px; }
+.stat-grid > * { flex: 1 1 auto; min-width: 150px; }
 .stat-card { background: white; border-radius: 12px; padding: 1.25rem 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.06); display: flex; align-items: center; gap: 1rem; }
-.stat-card > div { min-width: 0; } /* cho phép cột chữ co lại để xuống dòng thay vì tràn ra ngoài thẻ */
+.stat-card > div { min-width: 0; } /* dự phòng: màn hình quá hẹp thì vẫn co lại được, không tràn */
 .stat-icon { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .stat-value { font-size: 1.8rem; font-weight: 800; line-height: 1; }
 .stat-label { font-size: 0.82rem; color: #888; margin-top: 2px; }

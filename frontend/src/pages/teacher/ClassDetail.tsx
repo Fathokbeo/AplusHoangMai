@@ -940,12 +940,15 @@ export default function ClassDetail() {
           ]).map(({ kind, label, ref, hint }) => (
             <div className="form-group" key={kind}>
               <label className="label">{label}</label>
-              <div className="dropzone" style={{ padding: '0.9rem' }} onClick={() => ref.current?.click()}>
-                <span style={{ fontSize: '0.82rem' }}><Upload size={15} style={{ verticalAlign: 'middle' }} /> Chọn file ({hint})</span>
+              <div className="dropzone" style={{ padding: '1rem' }} onClick={() => ref.current?.click()}>
+                {lessonFiles[kind].length > 0
+                  ? <span style={{ color: '#2E7D32', fontSize: '0.85rem' }}>✓ {lessonFiles[kind].length === 1 ? lessonFiles[kind][0].name : `Đã chọn ${lessonFiles[kind].length} file`}</span>
+                  : <span style={{ fontSize: '0.82rem' }}><Upload size={16} style={{ verticalAlign: 'middle' }} /> Chọn file</span>}
               </div>
               <input ref={ref} type="file" multiple hidden
                 accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.ppt,.pptx,.xls,.xlsx"
                 onChange={(e) => { if (e.target.files?.length) addLessonFiles(kind, e.target.files); e.target.value = ''; }} />
+              <div style={{ fontSize: '0.75rem', color: '#888', marginTop: 4 }}>{hint} — chọn được nhiều file</div>
               {lessonFiles[kind].length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
                   {lessonFiles[kind].map((f, i) => (
