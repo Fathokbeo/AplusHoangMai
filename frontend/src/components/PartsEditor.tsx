@@ -1,12 +1,13 @@
 // Giáo viên cấu hình 4 kiểu nộp bài + nhập đáp án (key) khi tạo/sửa bài tập.
 // Đáp án để TRỐNG nghĩa là: AI tự đọc từ File đáp án (PDF) khi chấm.
-// Trắc nghiệm/Đúng-Sai/Trả lời ngắn: AI CHẤM TỰ ĐỘNG bằng cách so khớp đáp án + chia điểm theo
-// thang đã đặt — không cần ghi chú hướng dẫn. Chỉ phần Tự luận cần "Ghi chú cho AI chấm" (AI đọc
-// ghi chú này để biết cách chia điểm/chấm theo yêu cầu của giáo viên).
+// Trả lời ngắn có thêm "Ghi chú cho học sinh cách điền" (vd: làm tròn 2 chữ số) — hiện cho HỌC SINH
+// khi làm bài, không liên quan chấm bài. Còn "Ghi chú cho AI chấm" ở khối Tự luận là hướng dẫn cho AI
+// (chấm phần nào, chia điểm thế nào) — Trắc nghiệm/Đúng-Sai/Trả lời ngắn tự chấm theo đáp án nên
+// không cần ghi chú loại này.
 import { Bot } from 'lucide-react';
 import {
   type PartsConfig, type PartKey, type TfMode, MC_OPTIONS, TF_SUB_LABELS,
-  resizeAnswers, uniformPoints, pointPerOf, keyIsSet,
+  resizeAnswers, resizeNotes, uniformPoints, pointPerOf, keyIsSet,
   computeMaxScore, partTotalPoints, tfModeOf, tfLadderOf,
 } from '../lib/homeworkParts';
 
@@ -40,6 +41,7 @@ export default function PartsEditor({ value, onChange, gradingNote, onGradingNot
         enabled: true, count,
         answers: resizeAnswers(key, cur.answers, count),
         points: uniformPoints(per, count),
+        ...(key === 'short_answer' ? { notes: resizeNotes(cur.notes, count) } : {}),
       });
     }
   };
@@ -51,6 +53,7 @@ export default function PartsEditor({ value, onChange, gradingNote, onGradingNot
       count,
       answers: resizeAnswers(key, (value as any)[key].answers, count),
       points: uniformPoints(per, count),
+      ...(key === 'short_answer' ? { notes: resizeNotes((value as any)[key].notes, count) } : {}),
     });
   };
 
@@ -65,6 +68,12 @@ export default function PartsEditor({ value, onChange, gradingNote, onGradingNot
     const answers = [...(value as any)[key].answers];
     answers[idx] = val;
     setPart(key, { answers });
+  };
+
+  const setNote = (idx: number, val: string) => {
+    const notes = [...((value.short_answer.notes as string[]) || [])];
+    notes[idx] = val;
+    setPart('short_answer', { notes });
   };
 
   const setEssayPoints = (raw: string) => {
@@ -174,12 +183,20 @@ export default function PartsEditor({ value, onChange, gradingNote, onGradingNot
         {value.short_answer.enabled && (
           <div style={{ marginTop: 8 }}>
             {countPointRow('short_answer')}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {value.short_answer.answers.map((ans: string, i: number) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={qLabel}>Câu {i + 1}</span>
-                  <input className="input" style={{ flex: 1, minWidth: 0, padding: '5px 9px' }} placeholder="Đáp án đúng (để trống → AI đọc file). Vd: 12; 1/2; x=3"
-                    value={ans} onChange={(e) => setAnswer('short_answer', i, e.target.value)} />
+                <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={qLabel}>Câu {i + 1}</span>
+                    <input className="input" style={{ flex: 1, minWidth: 0, padding: '5px 9px' }} placeholder="Đáp án đúng (để trống → AI đọc file). Vd: 12; 1/2; x=3"
+                      value={ans} onChange={(e) => setAnswer('short_answer', i, e.target.value)} />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ ...qLabel, visibility: 'hidden' }} aria-hidden="true">Câu {i + 1}</span>
+                    <input className="input" style={{ flex: 1, minWidth: 0, padding: '4px 9px', fontSize: '0.82rem', background: '#FFFDF5' }}
+                      placeholder="Ghi chú cho học sinh cách điền (vd: làm tròn 2 chữ số; ghi dạng a/b)"
+                      value={(value.short_answer.notes as string[])?.[i] || ''} onChange={(e) => setNote(i, e.target.value)} />
+                  </div>
                 </div>
               ))}
             </div>
