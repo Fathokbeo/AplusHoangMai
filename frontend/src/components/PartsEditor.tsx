@@ -1,14 +1,20 @@
 // Giáo viên cấu hình 4 kiểu nộp bài + nhập đáp án (key) khi tạo/sửa bài tập.
 // Đáp án để TRỐNG nghĩa là: AI tự đọc từ File đáp án (PDF) khi chấm.
+// Trắc nghiệm/Đúng-Sai/Trả lời ngắn: AI CHẤM TỰ ĐỘNG bằng cách so khớp đáp án + chia điểm theo
+// thang đã đặt — không cần ghi chú hướng dẫn. Chỉ phần Tự luận cần "Ghi chú cho AI chấm" (AI đọc
+// ghi chú này để biết cách chia điểm/chấm theo yêu cầu của giáo viên).
+import { Bot } from 'lucide-react';
 import {
   type PartsConfig, type PartKey, type TfMode, MC_OPTIONS, TF_SUB_LABELS,
-  resizeAnswers, resizeNotes, uniformPoints, pointPerOf, keyIsSet,
+  resizeAnswers, uniformPoints, pointPerOf, keyIsSet,
   computeMaxScore, partTotalPoints, tfModeOf, tfLadderOf,
 } from '../lib/homeworkParts';
 
 interface Props {
   value: PartsConfig;
   onChange: (next: PartsConfig) => void;
+  gradingNote: string;
+  onGradingNoteChange: (next: string) => void;
 }
 
 const PART_TITLES: Record<string, string> = {
@@ -18,7 +24,7 @@ const PART_TITLES: Record<string, string> = {
   essay: 'Tự luận (nộp ảnh, AI chấm theo file đáp án)',
 };
 
-export default function PartsEditor({ value, onChange }: Props) {
+export default function PartsEditor({ value, onChange, gradingNote, onGradingNoteChange }: Props) {
   const setPart = (key: PartKey, patch: any) => {
     onChange({ ...value, [key]: { ...(value as any)[key], ...patch } } as PartsConfig);
   };
@@ -34,7 +40,6 @@ export default function PartsEditor({ value, onChange }: Props) {
         enabled: true, count,
         answers: resizeAnswers(key, cur.answers, count),
         points: uniformPoints(per, count),
-        ...(key === 'short_answer' ? { notes: resizeNotes(cur.notes, count) } : {}),
       });
     }
   };
@@ -46,7 +51,6 @@ export default function PartsEditor({ value, onChange }: Props) {
       count,
       answers: resizeAnswers(key, (value as any)[key].answers, count),
       points: uniformPoints(per, count),
-      ...(key === 'short_answer' ? { notes: resizeNotes((value as any)[key].notes, count) } : {}),
     });
   };
 
@@ -61,12 +65,6 @@ export default function PartsEditor({ value, onChange }: Props) {
     const answers = [...(value as any)[key].answers];
     answers[idx] = val;
     setPart(key, { answers });
-  };
-
-  const setNote = (idx: number, val: string) => {
-    const notes = [...((value.short_answer.notes as string[]) || [])];
-    notes[idx] = val;
-    setPart('short_answer', { notes });
   };
 
   const setEssayPoints = (raw: string) => {
@@ -176,17 +174,12 @@ export default function PartsEditor({ value, onChange }: Props) {
         {value.short_answer.enabled && (
           <div style={{ marginTop: 8 }}>
             {countPointRow('short_answer')}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {value.short_answer.answers.map((ans: string, i: number) => (
-                <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={qLabel}>Câu {i + 1}</span>
-                    <input className="input" style={{ flex: 1, minWidth: 0, padding: '5px 9px' }} placeholder="Đáp án đúng (để trống → AI đọc file). Vd: 12; 1/2; x=3"
-                      value={ans} onChange={(e) => setAnswer('short_answer', i, e.target.value)} />
-                  </div>
-                  <input className="input" style={{ marginLeft: 56, padding: '4px 9px', fontSize: '0.82rem', background: '#FFFDF5' }}
-                    placeholder="Ghi chú cho học sinh cách điền (vd: làm tròn 2 chữ số; ghi dạng a/b)"
-                    value={(value.short_answer.notes as string[])?.[i] || ''} onChange={(e) => setNote(i, e.target.value)} />
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={qLabel}>Câu {i + 1}</span>
+                  <input className="input" style={{ flex: 1, minWidth: 0, padding: '5px 9px' }} placeholder="Đáp án đúng (để trống → AI đọc file). Vd: 12; 1/2; x=3"
+                    value={ans} onChange={(e) => setAnswer('short_answer', i, e.target.value)} />
                 </div>
               ))}
             </div>
@@ -209,6 +202,17 @@ export default function PartsEditor({ value, onChange }: Props) {
             </div>
             <div style={{ marginTop: 6, fontSize: '0.78rem', color: '#888' }}>
               Học sinh chụp ảnh bài làm tự luận. AI chấm trên thang điểm này dựa vào <strong>File đáp án (PDF)</strong> ở phần bên dưới.
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#444', display: 'block', marginBottom: 6 }}>
+                Ghi chú cho AI chấm (tùy chọn)
+              </label>
+              <textarea className="input" rows={3}
+                placeholder="vd: Câu 1 (2đ) chấm chặt từng bước lập luận; câu 2 (2đ) chỉ cần đúng kết quả cuối. Trừ 0,5đ nếu thiếu đơn vị."
+                value={gradingNote} onChange={(e) => onGradingNoteChange(e.target.value)} />
+              <div style={{ fontSize: '0.74rem', color: '#888', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Bot size={12} /> AI sẽ đọc và chấm đúng theo hướng dẫn này (chia điểm từng câu, cách chấm...). Học sinh không nhìn thấy ghi chú này.
+              </div>
             </div>
           </div>
         )}

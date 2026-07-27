@@ -264,6 +264,11 @@ function initSchema() {
   if (!lessonCols.some(c => c.name === 'attachments')) {
     db.exec('ALTER TABLE lessons ADD COLUMN attachments TEXT');
   }
+  // Migration: thứ tự bài tập TRONG TỪNG CHƯƠNG (độc lập với bài giảng) — trước đây bài tập không có
+  // cột thứ tự, hiển thị theo created_at DESC nên số thứ tự lúc tạo/sửa không khớp giao diện.
+  if (!hwCols.some(c => c.name === 'hw_order')) {
+    db.exec('ALTER TABLE homework ADD COLUMN hw_order INTEGER DEFAULT 0');
+  }
   // Migration: link Facebook + SĐT của giáo viên/trợ giảng để học sinh liên hệ
   const staffCols = db.prepare("PRAGMA table_info(staff)").all();
   if (!staffCols.some(c => c.name === 'facebook_url')) {

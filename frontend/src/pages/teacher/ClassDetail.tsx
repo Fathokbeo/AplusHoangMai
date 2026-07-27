@@ -12,7 +12,7 @@ import { parseAttachments, isViewableFile } from '../../lib/attachments';
 import { emptyPartsConfig, normalizePartsConfig, computeMaxScore, anyPartEnabled, type PartsConfig, PART_LABELS, PART_ORDER, type PartKey } from '../../lib/homeworkParts';
 import {
   Users, BookOpen, ClipboardList, Edit, Trash2,
-  UserPlus, UserMinus, Play, File, ChevronLeft, Upload, Clock, Eye, Bot, Layers, Video, Search,
+  UserPlus, UserMinus, Play, File, ChevronLeft, Upload, Clock, Eye, Layers, Video, Search,
   ChevronDown, ChevronRight, Trophy, FileSpreadsheet, Download, Paperclip, FileText, X, Plus
 } from 'lucide-react';
 
@@ -72,10 +72,8 @@ export default function ClassDetail() {
   const [viewingLesson, setViewingLesson] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [lessonForm, setLessonForm] = useState({ title: '', description: '', video_url: '', video_type: 'youtube', lesson_order: '0', chapter_id: '' });
-  const [hwForm, setHwForm] = useState({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '', chapter_id: '', solution_video_url: '' });
+  const [hwForm, setHwForm] = useState({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '', chapter_id: '', solution_video_url: '', hw_order: '0' });
   const [hwParts, setHwParts] = useState<PartsConfig>(emptyPartsConfig());
-  // Thang điểm đã được giáo viên chỉnh tay chưa (nếu chưa, tự bám theo tổng điểm các câu).
-  const [scaleTouched, setScaleTouched] = useState(false);
   const [hwFiles, setHwFiles] = useState<{ pdf?: File; answer?: File }>({});
   const [chapterForm, setChapterForm] = useState({ title: '', chapter_order: '0' });
   const [studentSearch, setStudentSearch] = useState('');
@@ -289,9 +287,26 @@ export default function ClassDetail() {
     }
   };
 
-  // Số thứ tự mặc định kế tiếp: chương/bài đầu = 1, sau đó nối tiếp tăng dần (vẫn sửa tay được).
+  // Số thứ tự mặc định kế tiếp: chương đầu = 1, sau đó nối tiếp tăng dần (vẫn sửa tay được).
   const nextOrder = (items: any[] | undefined, field: string) =>
     ((items && items.length) ? Math.max(0, ...items.map((x: any) => Number(x[field]) || 0)) : 0) + 1;
+
+  // Bài giảng/bài tập CÙNG một chương (chapterId null/'' = nhóm "Chưa phân chương"). Dùng để đánh số
+  // ĐỘC LẬP theo từng chương — bài giảng và bài tập cũng đánh số riêng, không liên quan nhau.
+  const chapterScoped = (items: any[] | undefined, chapterId: any) => {
+    const norm = (v: any) => (v === undefined || v === null || v === '' ? null : Number(v));
+    const cid = norm(chapterId);
+    return (items || []).filter((x: any) => norm(x.chapter_id) === cid);
+  };
+  // Số thứ tự mặc định cho bài MỚI trong chương (= số bài hiện có trong chương đó + 1).
+  const nextOrderInChapter = (items: any[] | undefined, chapterId: any) => chapterScoped(items, chapterId).length + 1;
+  // Vị trí hiện tại của một bài trong danh sách CÙNG CHƯƠNG — luôn khớp đúng số hiển thị trên thẻ
+  // ngoài giao diện (thẻ đánh số theo vị trí trong danh sách, không theo giá trị lưu trong CSDL).
+  const positionInChapter = (items: any[] | undefined, chapterId: any, itemId: number) => {
+    const scoped = chapterScoped(items, chapterId);
+    const idx = scoped.findIndex((x: any) => x.id === itemId);
+    return idx >= 0 ? idx + 1 : scoped.length + 1;
+  };
 
   // Chapter CRUD
   const openCreateChapter = () => {
@@ -336,14 +351,14 @@ export default function ClassDetail() {
   // Lesson CRUD — truyền chapterId để form chọn sẵn chương (nút + ở từng chương)
   const openCreateLesson = (chapterId?: number) => {
     setEditingLesson(null);
-    setLessonForm({ title: '', description: '', video_url: '', video_type: 'youtube', lesson_order: String(nextOrder(cls?.lessons, 'lesson_order')), chapter_id: chapterId ? String(chapterId) : '' });
+    setLessonForm({ title: '', description: '', video_url: '', video_type: 'youtube', lesson_order: String(nextOrderInChapter(cls?.lessons, chapterId ?? null)), chapter_id: chapterId ? String(chapterId) : '' });
     setLessonFiles({ doc: [], answer: [] });
     setLessonModal(true);
   };
 
   const openEditLesson = (l: any) => {
     setEditingLesson(l);
-    setLessonForm({ title: l.title, description: l.description || '', video_url: l.video_url || '', video_type: l.video_type || 'youtube', lesson_order: String(l.lesson_order), chapter_id: l.chapter_id ? String(l.chapter_id) : '' });
+    setLessonForm({ title: l.title, description: l.description || '', video_url: l.video_url || '', video_type: l.video_type || 'youtube', lesson_order: String(positionInChapter(cls?.lessons, l.chapter_id, l.id)), chapter_id: l.chapter_id ? String(l.chapter_id) : '' });
     setLessonFiles({ doc: [], answer: [] });
     setLessonModal(true);
   };
@@ -414,20 +429,14 @@ export default function ClassDetail() {
   // Homework CRUD — truyền chapterId để form chọn sẵn chương (nút + ở từng chương)
   const openCreateHw = (chapterId?: number) => {
     setEditingHw(null);
-    setHwForm({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '', chapter_id: chapterId ? String(chapterId) : '', solution_video_url: '' });
+    setHwForm({
+      title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '',
+      chapter_id: chapterId ? String(chapterId) : '', solution_video_url: '',
+      hw_order: String(nextOrderInChapter(cls?.homework, chapterId ?? null)),
+    });
     setHwParts(emptyPartsConfig());
-    setScaleTouched(false);
     setHwFiles({});
     setHwModal(true);
-  };
-
-  // Cập nhật cấu hình các phần; nếu giáo viên chưa tự sửa thang điểm thì để thang bám theo tổng điểm các câu.
-  const updateHwParts = (next: PartsConfig) => {
-    setHwParts(next);
-    if (!scaleTouched && anyPartEnabled(next)) {
-      const m = computeMaxScore(next);
-      if (m > 0) setHwForm((f) => ({ ...f, max_score: String(m) }));
-    }
   };
 
   const openEditHw = (h: any) => {
@@ -440,9 +449,9 @@ export default function ClassDetail() {
       grading_note: h.grading_note || '',
       chapter_id: h.chapter_id ? String(h.chapter_id) : '',
       solution_video_url: h.solution_video_url || '',
+      hw_order: String(positionInChapter(cls?.homework, h.chapter_id, h.id)),
     });
     setHwParts(normalizePartsConfig(h.parts_config));
-    setScaleTouched(true); // giữ nguyên thang điểm đã lưu của bài
     setHwFiles({});
     setHwModal(true);
   };
@@ -549,11 +558,11 @@ export default function ClassDetail() {
     );
   };
 
-  const renderHomeworkCard = (h: any) => (
+  const renderHomeworkCard = (h: any, i: number) => (
     <div key={h.id} className="card" style={{ padding: '1rem 1.25rem' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ width: 36, height: 36, background: '#F3E5F5', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <ClipboardList size={18} color="#6A1B9A" />
+          <span style={{ fontWeight: 700, color: '#6A1B9A', fontSize: '0.9rem' }}>{i + 1}</span>
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 700, fontSize: '0.95rem', marginBottom: 4 }}>{h.title}</div>
@@ -623,7 +632,7 @@ export default function ClassDetail() {
                 </button>
               </div>
               {hc === 0 ? <div style={{ fontSize: '0.8rem', color: '#aaa' }}>Chưa có bài tập</div> : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{group.homework.map((h: any) => renderHomeworkCard(h))}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{group.homework.map((h: any, i: number) => renderHomeworkCard(h, i))}</div>
               )}
             </div>
           </div>
@@ -1008,6 +1017,7 @@ export default function ClassDetail() {
         <div className="form-group">
           <label className="label">Thứ tự</label>
           <input className="input" type="number" min={0} value={lessonForm.lesson_order} onChange={(e) => setLessonForm({ ...lessonForm, lesson_order: e.target.value })} />
+          <div style={{ fontSize: '0.72rem', color: '#888', marginTop: 4 }}>Đánh số riêng trong từng chương, không liên quan bài tập.</div>
         </div>
       </Modal>
 
@@ -1045,12 +1055,19 @@ export default function ClassDetail() {
           <label className="label">Tiêu đề *</label>
           <input className="input" placeholder="Tên bài tập" value={hwForm.title} onChange={(e) => setHwForm({ ...hwForm, title: e.target.value })} />
         </div>
-        <div className="form-group">
-          <label className="label">Chương</label>
-          <select className="input" value={hwForm.chapter_id} onChange={(e) => setHwForm({ ...hwForm, chapter_id: e.target.value })}>
-            <option value="">— Chưa phân chương —</option>
-            {chapters.map((ch) => <option key={ch.id} value={ch.id}>{ch.title}</option>)}
-          </select>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 2fr) minmax(0, 1fr)', gap: 12 }}>
+          <div className="form-group">
+            <label className="label">Chương</label>
+            <select className="input" value={hwForm.chapter_id} onChange={(e) => setHwForm({ ...hwForm, chapter_id: e.target.value })}>
+              <option value="">— Chưa phân chương —</option>
+              {chapters.map((ch) => <option key={ch.id} value={ch.id}>{ch.title}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="label">Thứ tự</label>
+            <input className="input" type="number" min={0} value={hwForm.hw_order} onChange={(e) => setHwForm({ ...hwForm, hw_order: e.target.value })} />
+            <div style={{ fontSize: '0.72rem', color: '#888', marginTop: 4 }}>Đánh số riêng trong từng chương, không liên quan bài giảng.</div>
+          </div>
         </div>
         <div className="form-group">
           <label className="label">Mô tả / Hướng dẫn</label>
@@ -1063,20 +1080,21 @@ export default function ClassDetail() {
             Trắc nghiệm/Đúng-Sai/Trả lời ngắn được <strong>chấm tự động</strong> theo đáp án &amp; điểm bạn đặt.
             Câu nào <strong>để trống đáp án</strong> → AI tự đọc từ <strong>File đáp án (PDF)</strong> bên dưới để chấm. Phần tự luận do AI chấm theo file đáp án.
           </div>
-          <PartsEditor value={hwParts} onChange={updateHwParts} />
+          <PartsEditor value={hwParts} onChange={setHwParts}
+            gradingNote={hwForm.grading_note} onGradingNoteChange={(v) => setHwForm({ ...hwForm, grading_note: v })} />
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12 }}>
           <div className="form-group">
             <label className="label">Thang điểm{anyPartEnabled(hwParts) ? ' (quy đổi về)' : ''}</label>
             <input className="input" type="number" min={1} step={0.5}
               value={hwForm.max_score}
-              onChange={(e) => { setScaleTouched(true); setHwForm({ ...hwForm, max_score: e.target.value }); }} />
+              onChange={(e) => setHwForm({ ...hwForm, max_score: e.target.value })} />
             {anyPartEnabled(hwParts) && (
               <div style={{ fontSize: '0.72rem', color: '#888', marginTop: 4, lineHeight: 1.5 }}>
                 Tổng điểm các câu: <strong>{computeMaxScore(hwParts)}</strong>. Điểm cuối = (điểm đạt ÷ tổng) × thang điểm.{' '}
                 {computeMaxScore(hwParts) > 0 && String(computeMaxScore(hwParts)) !== String(hwForm.max_score) && (
                   <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '0 6px', height: 'auto' }}
-                    onClick={() => { setScaleTouched(true); setHwForm({ ...hwForm, max_score: String(computeMaxScore(hwParts)) }); }}>
+                    onClick={() => setHwForm({ ...hwForm, max_score: String(computeMaxScore(hwParts)) })}>
                     Đặt = {computeMaxScore(hwParts)} (không quy đổi)
                   </button>
                 )}
@@ -1120,15 +1138,6 @@ export default function ClassDetail() {
             </div>
             <input ref={answerRef} type="file" accept=".pdf" hidden onChange={(e) => { if (e.target.files?.[0]) setHwFiles({ ...hwFiles, answer: e.target.files[0] }); }} />
             {editingHw?.answer_file && !hwFiles.answer && <div style={{ fontSize: '0.75rem', color: '#2E7D32', marginTop: 4 }}>✓ Đã có đáp án (AI sẽ dùng file này)</div>}
-          </div>
-        </div>
-        <div className="form-group">
-          <label className="label">Ghi chú cho AI chấm bài (tùy chọn)</label>
-          <textarea className="input" rows={3}
-            placeholder="vd: Chỉ chấm câu 1 đến câu 5. Chấm chặt phần lập luận, mỗi bước sai trừ điểm. Ưu tiên cách giải tự luận, không chấm phần trắc nghiệm."
-            value={hwForm.grading_note} onChange={(e) => setHwForm({ ...hwForm, grading_note: e.target.value })} />
-          <div style={{ fontSize: '0.75rem', color: '#888', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-            <Bot size={12} /> AI sẽ chấm theo đúng hướng dẫn này (chấm phần nào, chấm theo kiểu gì). Học sinh không nhìn thấy ghi chú này.
           </div>
         </div>
       </Modal>

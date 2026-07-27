@@ -153,7 +153,7 @@ router.get('/classes/:id', (req, res) => {
   `).all(req.params.id);
   const chapters = db.prepare('SELECT * FROM chapters WHERE class_id=? ORDER BY chapter_order,created_at').all(req.params.id);
   const lessons = db.prepare('SELECT * FROM lessons WHERE class_id=? ORDER BY lesson_order,created_at').all(req.params.id);
-  const homework = db.prepare('SELECT * FROM homework WHERE class_id=? ORDER BY created_at DESC').all(req.params.id);
+  const homework = db.prepare('SELECT * FROM homework WHERE class_id=? ORDER BY hw_order,created_at').all(req.params.id);
   res.json({ ...cls, students, chapters, lessons, homework });
 });
 

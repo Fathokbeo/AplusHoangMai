@@ -62,7 +62,7 @@ router.post(
   requireRole('teacher', 'admin'),
   uploadHomework.fields([{ name: 'pdf_file', maxCount: 1 }, { name: 'answer_file', maxCount: 1 }]),
   (req, res) => {
-    const { title, description, due_date, answer_visible_date, max_score, grading_note, chapter_id, solution_video_url, parts_config } = req.body;
+    const { title, description, due_date, answer_visible_date, max_score, grading_note, chapter_id, solution_video_url, parts_config, hw_order } = req.body;
     if (!title) return res.status(400).json({ message: 'Cần tiêu đề bài tập' });
     const db = getDb();
     const cls = db.prepare('SELECT * FROM classes WHERE id=?').get(req.params.classId);
@@ -76,15 +76,15 @@ router.post(
     const finalMax = isFinite(provided) && provided > 0 ? provided : (rawSum != null ? rawSum : 10);
 
     const result = db.prepare(`
-      INSERT INTO homework (class_id,title,description,pdf_file,answer_file,due_date,answer_visible_date,max_score,grading_note,chapter_id,solution_video_url,parts_config)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      INSERT INTO homework (class_id,title,description,pdf_file,answer_file,due_date,answer_visible_date,max_score,grading_note,chapter_id,solution_video_url,parts_config,hw_order)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       req.params.classId, title, description || null,
       req.files?.pdf_file?.[0]?.filename || null,
       req.files?.answer_file?.[0]?.filename || null,
       due_date || null, answer_visible_date || null, finalMax,
       grading_note || null, chapter_id || null, solution_video_url || null,
-      partsJson
+      partsJson, parseInt(hw_order) || 0
     );
     res.status(201).json({ id: result.lastInsertRowid, title });
   }
@@ -96,7 +96,7 @@ router.put(
   requireRole('teacher', 'admin'),
   uploadHomework.fields([{ name: 'pdf_file', maxCount: 1 }, { name: 'answer_file', maxCount: 1 }]),
   (req, res) => {
-    const { title, description, due_date, answer_visible_date, max_score, grading_note, chapter_id, solution_video_url, parts_config } = req.body;
+    const { title, description, due_date, answer_visible_date, max_score, grading_note, chapter_id, solution_video_url, parts_config, hw_order } = req.body;
     const db = getDb();
     const hw = db.prepare('SELECT h.*,c.teacher_id FROM homework h JOIN classes c ON h.class_id=c.id WHERE h.id=?').get(req.params.id);
     if (!hw) return res.status(404).json({ message: 'Không tìm thấy' });
@@ -110,6 +110,7 @@ router.put(
     if (grading_note !== undefined) { sets.push('grading_note=?'); vals.push(grading_note || null); }
     if (chapter_id !== undefined) { sets.push('chapter_id=?'); vals.push(chapter_id || null); }
     if (solution_video_url !== undefined) { sets.push('solution_video_url=?'); vals.push(solution_video_url || null); }
+    if (hw_order !== undefined) { sets.push('hw_order=?'); vals.push(parseInt(hw_order) || 0); }
 
     // parts_config + max_score: thang điểm = thang giáo viên chọn (để quy đổi),
     // mặc định = tổng điểm thô các câu nếu giáo viên không nhập.

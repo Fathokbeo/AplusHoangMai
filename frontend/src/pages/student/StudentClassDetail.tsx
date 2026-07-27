@@ -161,7 +161,7 @@ export default function StudentClassDetail() {
     );
   };
 
-  const renderHomeworkCard = (hw: any) => {
+  const renderHomeworkCard = (hw: any, i: number) => {
     const isSubmitted = !!hw.submission_id;
     const hasGrade = hw.score !== null;
     const canSubmit = hw.can_submit;
@@ -175,6 +175,7 @@ export default function StudentClassDetail() {
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <span style={{ fontWeight: 700, fontSize: '0.72rem', color: '#6A1B9A', background: '#F3E5F5', borderRadius: 6, padding: '2px 7px', flexShrink: 0 }}>{i + 1}</span>
               <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>{hw.title}</span>
               {isSubmitted && <span className="badge badge-green">Đã nộp</span>}
               {!canSubmit && !isSubmitted && <span className="badge badge-gray">Hết hạn</span>}
@@ -334,7 +335,7 @@ export default function StudentClassDetail() {
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}><ClipboardList size={14} color="#6A1B9A" /><span style={{ fontWeight: 700, fontSize: '0.85rem' }}>Bài tập ({hc})</span></div>
               {hc === 0 ? <div style={{ fontSize: '0.8rem', color: '#aaa' }}>Chưa có bài tập</div> : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{group.homework.map((hw: any) => renderHomeworkCard(hw))}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{group.homework.map((hw: any, i: number) => renderHomeworkCard(hw, i))}</div>
               )}
             </div>
           </div>
