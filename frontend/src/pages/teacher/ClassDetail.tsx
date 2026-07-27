@@ -1017,7 +1017,6 @@ export default function ClassDetail() {
         <div className="form-group">
           <label className="label">Thứ tự</label>
           <input className="input" type="number" min={0} value={lessonForm.lesson_order} onChange={(e) => setLessonForm({ ...lessonForm, lesson_order: e.target.value })} />
-          <div style={{ fontSize: '0.72rem', color: '#888', marginTop: 4 }}>Đánh số riêng trong từng chương, không liên quan bài tập.</div>
         </div>
       </Modal>
 
@@ -1066,7 +1065,6 @@ export default function ClassDetail() {
           <div className="form-group">
             <label className="label">Thứ tự</label>
             <input className="input" type="number" min={0} value={hwForm.hw_order} onChange={(e) => setHwForm({ ...hwForm, hw_order: e.target.value })} />
-            <div style={{ fontSize: '0.72rem', color: '#888', marginTop: 4 }}>Đánh số riêng trong từng chương, không liên quan bài giảng.</div>
           </div>
         </div>
         <div className="form-group">
