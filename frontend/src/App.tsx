@@ -26,6 +26,8 @@ import HomeworkDetail from './pages/teacher/HomeworkDetail';
 import StudentManagement from './pages/teacher/StudentManagement';
 
 import StudentDashboard from './pages/student/StudentDashboard';
+import StudentClasses from './pages/student/StudentClasses';
+import StudentCourseDetail from './pages/student/StudentCourseDetail';
 import StudentClassDetail from './pages/student/StudentClassDetail';
 
 function ProtectedRoute({ children, role }: { children: React.ReactElement; role?: string | string[] }) {
@@ -78,6 +80,8 @@ function AppRoutes() {
       {/* Student */}
       <Route path="/student" element={<ProtectedRoute role="student"><Layout /></ProtectedRoute>}>
         <Route index element={<StudentDashboard />} />
+        <Route path="courses/:courseId" element={<StudentCourseDetail />} />
+        <Route path="classes" element={<StudentClasses />} />
         <Route path="classes/:id" element={<StudentClassDetail />} />
       </Route>
 
