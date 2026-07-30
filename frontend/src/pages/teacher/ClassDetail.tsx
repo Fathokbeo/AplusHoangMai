@@ -12,11 +12,12 @@ import { parseAttachments, isViewableFile } from '../../lib/attachments';
 import { emptyPartsConfig, normalizePartsConfig, computeMaxScore, anyPartEnabled, type PartsConfig, PART_LABELS, PART_ORDER, type PartKey } from '../../lib/homeworkParts';
 import type { AssistantSchedule } from '../../lib/assistantSchedule';
 import AssistantScheduleModal from '../../components/AssistantScheduleModal';
+import FacebookIcon from '../../components/FacebookIcon';
 import {
   Users, BookOpen, ClipboardList, Edit, Trash2,
   UserPlus, UserMinus, Play, File, ChevronLeft, Upload, Clock, Eye, Layers, Video, Search,
   ChevronDown, ChevronRight, Trophy, FileSpreadsheet, Download, Paperclip, FileText, X, Plus, GripVertical,
-  UserCog, Phone, ExternalLink, Camera, Calendar
+  UserCog, Phone, Camera, Calendar
 } from 'lucide-react';
 
 // Giờ nhập ở ô datetime-local là GIỜ ĐỊA PHƯƠNG. Lưu dạng ISO (UTC) để khi so "đến hạn"
@@ -937,32 +938,49 @@ export default function ClassDetail() {
               <div>Chưa có trợ giảng nào</div>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 20 }}>
               {cls.assistants.map((a: any) => (
-                <div key={a.id} className="card" style={{ padding: '1.1rem', textAlign: 'center' }}>
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4, marginBottom: -6 }}>
-                    <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openEditAssistant(a)}><Edit size={13} /></button>
-                    <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} onClick={() => deleteAssistant(a)}><Trash2 size={13} /></button>
+                <div key={a.id} style={{ background: 'white', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.08)', textAlign: 'center', position: 'relative' }}>
+                  <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 4, zIndex: 1 }}>
+                    <button onClick={() => openEditAssistant(a)} title="Sửa"
+                      style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(255,255,255,0.9)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,0.25)' }}>
+                      <Edit size={13} color="#555" />
+                    </button>
+                    <button onClick={() => deleteAssistant(a)} title="Xóa"
+                      style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(255,255,255,0.9)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,0.25)' }}>
+                      <Trash2 size={13} color="#C62828" />
+                    </button>
                   </div>
                   {a.photo ? (
-                    <img src={`/uploads/assistants/${a.photo}`} alt={a.full_name} style={{ width: 76, height: 76, borderRadius: '50%', objectFit: 'cover', margin: '4px auto 10px' }} />
+                    <img src={`/uploads/assistants/${a.photo}`} alt={a.full_name} style={{ width: '100%', height: 220, objectFit: 'cover' }} />
                   ) : (
-                    <div style={{ width: 76, height: 76, borderRadius: '50%', background: '#F3E5F5', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '4px auto 10px' }}>
-                      <UserCog size={32} color="#6A1B9A" />
+                    <div style={{ height: 220, background: 'linear-gradient(135deg, #F3E5F5, #E1BEE7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <UserCog size={56} color="#6A1B9A" />
                     </div>
                   )}
-                  <h3 style={{ margin: '0 0 6px', fontSize: '0.95rem', fontWeight: 700, color: '#1A1A2E' }}>{a.full_name}</h3>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center', marginBottom: 12 }}>
-                    {a.phone && <span style={{ fontSize: '0.8rem', color: '#888' }}><Phone size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />{a.phone}</span>}
-                    {a.facebook_url && (
-                      <a href={a.facebook_url} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: '#1565C0', textDecoration: 'none' }}>
-                        <ExternalLink size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Facebook
-                      </a>
+                  <div style={{ padding: '1rem' }}>
+                    <h3 style={{ margin: '0 0 4px', fontSize: '1.05rem', fontWeight: 800, color: '#1A1A2E' }}>{a.full_name}</h3>
+                    <div style={{ color: '#6A1B9A', fontWeight: 600, fontSize: '0.88rem', marginBottom: 6 }}>Trợ giảng</div>
+                    {(a.phone || a.facebook_url) && (
+                      <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 4, marginBottom: 12, flexWrap: 'wrap' }}>
+                        {a.phone && (
+                          <a href={`tel:${String(a.phone).replace(/[^+\d]/g, '')}`}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 20, background: '#E8F5E9', color: '#2E7D32', fontWeight: 700, fontSize: '0.8rem', textDecoration: 'none' }}>
+                            <Phone size={13} /> {a.phone}
+                          </a>
+                        )}
+                        {a.facebook_url && (
+                          <a href={a.facebook_url} target="_blank" rel="noopener noreferrer"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 20, background: '#E3F2FD', color: '#1565C0', fontWeight: 700, fontSize: '0.8rem', textDecoration: 'none' }}>
+                            <FacebookIcon size={13} /> Facebook
+                          </a>
+                        )}
+                      </div>
                     )}
+                    <button className="btn btn-outline btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={() => setScheduleAssistantId(a.id)}>
+                      <Calendar size={13} /> Xem lịch làm việc
+                    </button>
                   </div>
-                  <button className="btn btn-outline btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={() => setScheduleAssistantId(a.id)}>
-                    <Calendar size={13} /> Xem lịch làm việc
-                  </button>
                 </div>
               ))}
             </div>

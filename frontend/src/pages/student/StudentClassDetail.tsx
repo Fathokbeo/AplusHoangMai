@@ -11,9 +11,10 @@ import { toast } from '../../components/Toast';
 import { parsePartsConfig, hasObjectiveParts, hasEssay, emptyStudentAnswers, PART_LABELS, PART_ORDER, type PartKey } from '../../lib/homeworkParts';
 import { parseAttachments, isViewableFile } from '../../lib/attachments';
 import AssistantScheduleModal from '../../components/AssistantScheduleModal';
+import FacebookIcon from '../../components/FacebookIcon';
 import {
   ChevronLeft, Play, ClipboardList, BookOpen, Upload, CheckCircle, Clock, Eye, Bot, Lock, FileText, X, Plus, Layers, Video,
-  ChevronDown, ChevronRight, ChevronUp, Trophy, Star, Paperclip, Download, UserCog, Phone, ExternalLink, Calendar
+  ChevronDown, ChevronRight, ChevronUp, Trophy, Star, Paperclip, Download, UserCog, Phone, Calendar
 } from 'lucide-react';
 
 // Danh sách URL các file đã nộp (hỗ trợ cũ: 1 file, mới: nhiều file dạng JSON)
@@ -456,28 +457,39 @@ export default function StudentClassDetail() {
             <div>Lớp chưa có trợ giảng</div>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 20 }}>
             {cls.assistants.map((a: any) => (
-              <div key={a.id} className="card" style={{ padding: '1.1rem', textAlign: 'center' }}>
+              <div key={a.id} style={{ background: 'white', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.08)', textAlign: 'center' }}>
                 {a.photo ? (
-                  <img src={`/uploads/assistants/${a.photo}`} alt={a.full_name} style={{ width: 76, height: 76, borderRadius: '50%', objectFit: 'cover', margin: '4px auto 10px' }} />
+                  <img src={`/uploads/assistants/${a.photo}`} alt={a.full_name} style={{ width: '100%', height: 220, objectFit: 'cover' }} />
                 ) : (
-                  <div style={{ width: 76, height: 76, borderRadius: '50%', background: '#F3E5F5', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '4px auto 10px' }}>
-                    <UserCog size={32} color="#6A1B9A" />
+                  <div style={{ height: 220, background: 'linear-gradient(135deg, #F3E5F5, #E1BEE7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <UserCog size={56} color="#6A1B9A" />
                   </div>
                 )}
-                <h3 style={{ margin: '0 0 6px', fontSize: '0.95rem', fontWeight: 700, color: '#1A1A2E' }}>{a.full_name}</h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center', marginBottom: 12 }}>
-                  {a.phone && <span style={{ fontSize: '0.8rem', color: '#888' }}><Phone size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />{a.phone}</span>}
-                  {a.facebook_url && (
-                    <a href={a.facebook_url} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: '#1565C0', textDecoration: 'none' }}>
-                      <ExternalLink size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Facebook
-                    </a>
+                <div style={{ padding: '1rem' }}>
+                  <h3 style={{ margin: '0 0 4px', fontSize: '1.05rem', fontWeight: 800, color: '#1A1A2E' }}>{a.full_name}</h3>
+                  <div style={{ color: '#6A1B9A', fontWeight: 600, fontSize: '0.88rem', marginBottom: 6 }}>Trợ giảng</div>
+                  {(a.phone || a.facebook_url) && (
+                    <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 4, marginBottom: 12, flexWrap: 'wrap' }}>
+                      {a.phone && (
+                        <a href={`tel:${String(a.phone).replace(/[^+\d]/g, '')}`}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 20, background: '#E8F5E9', color: '#2E7D32', fontWeight: 700, fontSize: '0.8rem', textDecoration: 'none' }}>
+                          <Phone size={13} /> {a.phone}
+                        </a>
+                      )}
+                      {a.facebook_url && (
+                        <a href={a.facebook_url} target="_blank" rel="noopener noreferrer"
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 20, background: '#E3F2FD', color: '#1565C0', fontWeight: 700, fontSize: '0.8rem', textDecoration: 'none' }}>
+                          <FacebookIcon size={13} /> Facebook
+                        </a>
+                      )}
+                    </div>
                   )}
+                  <button className="btn btn-outline btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={() => setScheduleAssistantId(a.id)}>
+                    <Calendar size={13} /> Xem lịch làm việc
+                  </button>
                 </div>
-                <button className="btn btn-outline btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={() => setScheduleAssistantId(a.id)}>
-                  <Calendar size={13} /> Xem lịch làm việc
-                </button>
               </div>
             ))}
           </div>
