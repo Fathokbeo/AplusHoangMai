@@ -13,7 +13,7 @@ import { emptyPartsConfig, normalizePartsConfig, computeMaxScore, anyPartEnabled
 import {
   Users, BookOpen, ClipboardList, Edit, Trash2,
   UserPlus, UserMinus, Play, File, ChevronLeft, Upload, Clock, Eye, Layers, Video, Search,
-  ChevronDown, ChevronRight, Trophy, FileSpreadsheet, Download, Paperclip, FileText, X, Plus
+  ChevronDown, ChevronRight, Trophy, FileSpreadsheet, Download, Paperclip, FileText, X, Plus, GripVertical
 } from 'lucide-react';
 
 // Giờ nhập ở ô datetime-local là GIỜ ĐỊA PHƯƠNG. Lưu dạng ISO (UTC) để khi so "đến hạn"
@@ -75,15 +75,17 @@ export default function ClassDetail() {
   const [hwForm, setHwForm] = useState({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '', chapter_id: '', solution_video_url: '', hw_order: '0' });
   const [hwParts, setHwParts] = useState<PartsConfig>(emptyPartsConfig());
   const [hwFiles, setHwFiles] = useState<{ pdf?: File; answer?: File }>({});
-  const [chapterForm, setChapterForm] = useState({ title: '', chapter_order: '0' });
+  const [chapterForm, setChapterForm] = useState({ title: '', chapter_order: '0', subject: 'algebra' as 'algebra' | 'geometry' });
   const [studentSearch, setStudentSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
   const [selectedStudent, setSelectedStudent] = useState('');
+  const [existingSearch, setExistingSearch] = useState('');
   const [addMode, setAddMode] = useState<'new' | 'existing'>('new');
   const [newStudent, setNewStudent] = useState({ username: '', password: '', full_name: '', parent_phone: '' });
   const pdfRef = useRef<HTMLInputElement>(null);
   const answerRef = useRef<HTMLInputElement>(null);
+  const draggedStudentId = useRef<number | null>(null);
   // Xếp hạng theo tháng
   const [ranking, setRanking] = useState<any>(null);
   const [rankingMonth, setRankingMonth] = useState('');
@@ -140,6 +142,7 @@ export default function ClassDetail() {
     setAddMode('new');
     setNewStudent({ username: '', password: '', full_name: '', parent_phone: '' });
     setSelectedStudent('');
+    setExistingSearch('');
     fetchAllStudents();
     setAddStudentModal(true);
   };
@@ -180,6 +183,24 @@ export default function ClassDetail() {
     next.has(sid) ? next.delete(sid) : next.add(sid);
     return next;
   });
+
+  // Kéo thả để đổi thứ tự học sinh trong lớp — cập nhật lạc quan rồi lưu lên server.
+  const reorderStudents = async (draggedId: number, targetId: number) => {
+    if (draggedId === targetId) return;
+    const list = [...(cls.students || [])];
+    const fromIdx = list.findIndex((s: any) => s.id === draggedId);
+    const toIdx = list.findIndex((s: any) => s.id === targetId);
+    if (fromIdx < 0 || toIdx < 0) return;
+    const [moved] = list.splice(fromIdx, 1);
+    list.splice(toIdx, 0, moved);
+    setCls((prev: any) => ({ ...prev, students: list }));
+    try {
+      await api.put(`/teacher/classes/${id}/students/reorder`, { student_ids: list.map((s: any) => s.id) });
+    } catch {
+      toast.error('Lỗi lưu thứ tự, đang tải lại danh sách');
+      fetchClass();
+    }
+  };
 
   // Xóa hàng loạt: HS chỉ thuộc lớp này bị xóa hẳn (tài khoản + dữ liệu); HS còn lớp khác chỉ gỡ khỏi lớp.
   const bulkDeleteStudents = async () => {
@@ -291,6 +312,11 @@ export default function ClassDetail() {
   const nextOrder = (items: any[] | undefined, field: string) =>
     ((items && items.length) ? Math.max(0, ...items.map((x: any) => Number(x[field]) || 0)) : 0) + 1;
 
+  // Số thứ tự chương kế tiếp, TÍNH RIÊNG theo môn (Đại số/Hình học độc lập nhau). excludeId: bỏ qua
+  // chính chương đang sửa khi đổi môn, để không tự cộng thêm chương đó vào phép đếm.
+  const nextChapterOrder = (chaptersList: any[] | undefined, subject: 'algebra' | 'geometry', excludeId?: number) =>
+    nextOrder((chaptersList || []).filter((c: any) => (c.subject || 'algebra') === subject && c.id !== excludeId), 'chapter_order');
+
   // Bài giảng/bài tập CÙNG một chương (chapterId null/'' = nhóm "Chưa phân chương"). Dùng để đánh số
   // ĐỘC LẬP theo từng chương — bài giảng và bài tập cũng đánh số riêng, không liên quan nhau.
   const chapterScoped = (items: any[] | undefined, chapterId: any) => {
@@ -311,13 +337,13 @@ export default function ClassDetail() {
   // Chapter CRUD
   const openCreateChapter = () => {
     setEditingChapter(null);
-    setChapterForm({ title: '', chapter_order: String(nextOrder(cls?.chapters, 'chapter_order')) });
+    setChapterForm({ title: '', chapter_order: String(nextChapterOrder(cls?.chapters, 'algebra')), subject: 'algebra' });
     setChapterModal(true);
   };
 
   const openEditChapter = (ch: any) => {
     setEditingChapter(ch);
-    setChapterForm({ title: ch.title, chapter_order: String(ch.chapter_order) });
+    setChapterForm({ title: ch.title, chapter_order: String(ch.chapter_order), subject: ch.subject === 'geometry' ? 'geometry' : 'algebra' });
     setChapterModal(true);
   };
 
@@ -496,25 +522,34 @@ export default function ClassDetail() {
 
   const chapters: any[] = cls.chapters || [];
 
-  // Học sinh: tự xếp theo tên riêng (tiếng Việt) rồi lọc theo ô tìm kiếm
-  const sortedStudents = sortByVietnameseName(cls.students || [], (s: any) => s.full_name || '');
-  const visibleStudents = sortedStudents.filter((s: any) => matchesNameSearch(s.full_name || '', studentSearch));
+  // Học sinh: giữ thứ tự lớp đã lưu (kéo thả), lọc theo ô tìm kiếm
+  const orderedStudents = cls.students || [];
+  const visibleStudents = orderedStudents.filter((s: any) => matchesNameSearch(s.full_name || '', studentSearch));
   const allVisibleSelected = visibleStudents.length > 0 && visibleStudents.every((s: any) => selectedIds.has(s.id));
   const toggleSelectAllStudents = () => setSelectedIds(allVisibleSelected ? new Set() : new Set(visibleStudents.map((s: any) => s.id)));
 
-  // Nội dung lớp gom theo chương (theo thứ tự); cuối là nhóm "Chưa phân chương" nếu có bài lẻ
+  // Học sinh có thể thêm vào lớp (chưa trong lớp), xếp theo tên riêng rồi lọc theo ô tìm kiếm trong modal thêm
+  const availableStudents = sortByVietnameseName(
+    (allStudents || []).filter((s: any) => !cls.students?.find((x: any) => x.id === s.id) && matchesNameSearch(s.full_name || '', existingSearch)),
+    (s: any) => s.full_name || ''
+  );
+
+  // Nội dung lớp gom theo chương, tách riêng Đại số (hiển thị trước) và Hình học (sau) — mỗi môn
+  // đánh số thứ tự độc lập. Cuối cùng là nhóm "Chưa phân chương" nếu có bài lẻ chưa gán chương.
   const lessonsAll: any[] = cls.lessons || [];
   const homeworkAll: any[] = cls.homework || [];
-  const contentGroups: any[] = chapters.map((ch: any) => ({
+  const toChapterGroup = (ch: any) => ({
     key: String(ch.id), chapter: ch,
     lessons: lessonsAll.filter((l: any) => l.chapter_id === ch.id),
     homework: homeworkAll.filter((h: any) => h.chapter_id === ch.id),
-  }));
+  });
+  const algebraGroups = chapters.filter((ch: any) => (ch.subject || 'algebra') === 'algebra').map(toChapterGroup);
+  const geometryGroups = chapters.filter((ch: any) => ch.subject === 'geometry').map(toChapterGroup);
   const orphanLessons = lessonsAll.filter((l: any) => !l.chapter_id || !chapters.some((c: any) => c.id === l.chapter_id));
   const orphanHomework = homeworkAll.filter((h: any) => !h.chapter_id || !chapters.some((c: any) => c.id === h.chapter_id));
-  if (orphanLessons.length || orphanHomework.length) {
-    contentGroups.push({ key: 'orphan', chapter: null, lessons: orphanLessons, homework: orphanHomework });
-  }
+  const orphanGroup = (orphanLessons.length || orphanHomework.length)
+    ? { key: 'orphan', chapter: null, lessons: orphanLessons, homework: orphanHomework }
+    : null;
 
   const toggleChapter = (key: string) => setExpandedChapters((prev) => {
     const next = new Set(prev);
@@ -659,7 +694,7 @@ export default function ClassDetail() {
     <div className="fade-in">
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: '1.5rem' }}>
-        <Link to="/teacher" style={{ color: '#888', textDecoration: 'none', display: 'flex', alignItems: 'center', marginTop: 4 }}>
+        <Link to={cls.course_id_ref ? `/teacher/courses/${cls.course_id_ref}` : '/teacher'} style={{ color: '#888', textDecoration: 'none', display: 'flex', alignItems: 'center', marginTop: 4 }}>
           <ChevronLeft size={18} />
         </Link>
         <div style={{ flex: 1 }}>
@@ -703,6 +738,10 @@ export default function ClassDetail() {
             </div>
           </div>
 
+          <div style={{ fontSize: '0.72rem', color: '#aaa', marginTop: -6, marginBottom: 12 }}>
+            {studentSearch ? 'Xóa ô tìm kiếm để kéo thả sắp xếp lại thứ tự học sinh.' : 'Kéo biểu tượng ⠿ ở đầu mỗi dòng để sắp xếp lại thứ tự học sinh.'}
+          </div>
+
           {/* Thanh thao tác hàng loạt */}
           {selectedIds.size > 0 && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#FFEBEE', border: '1px solid #FFCDD2', borderRadius: 10, padding: '0.6rem 1rem', marginBottom: 12 }}>
@@ -719,6 +758,7 @@ export default function ClassDetail() {
           <div className="table-wrap">
             <table>
               <thead><tr>
+                <th style={{ width: 28 }}></th>
                 <th style={{ width: 40 }}>
                   <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllStudents} style={{ cursor: 'pointer', width: 16, height: 16 }} />
                 </th>
@@ -726,7 +766,20 @@ export default function ClassDetail() {
               </tr></thead>
               <tbody>
                 {visibleStudents.map((s: any, i: number) => (
-                  <tr key={s.id} style={selectedIds.has(s.id) ? { background: '#FFF8F8' } : undefined}>
+                  <tr key={s.id}
+                    draggable={!studentSearch}
+                    onDragStart={() => { draggedStudentId.current = s.id; }}
+                    onDragOver={(e) => { if (!studentSearch) e.preventDefault(); }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (draggedStudentId.current != null) reorderStudents(draggedStudentId.current, s.id);
+                      draggedStudentId.current = null;
+                    }}
+                    style={selectedIds.has(s.id) ? { background: '#FFF8F8' } : undefined}>
+                    <td style={{ textAlign: 'center', cursor: studentSearch ? 'default' : 'grab' }}
+                      title={studentSearch ? 'Xóa ô tìm kiếm để kéo thả sắp xếp' : 'Kéo để đổi vị trí'}>
+                      <GripVertical size={14} color={studentSearch ? '#e0e0e0' : '#bbb'} />
+                    </td>
                     <td>
                       <input type="checkbox" checked={selectedIds.has(s.id)} onChange={() => toggleStudentSelect(s.id)} style={{ cursor: 'pointer', width: 16, height: 16 }} />
                     </td>
@@ -742,10 +795,10 @@ export default function ClassDetail() {
                   </tr>
                 ))}
                 {(!cls.students || cls.students.length === 0) && (
-                  <tr><td colSpan={6} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Chưa có học sinh</td></tr>
+                  <tr><td colSpan={7} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Chưa có học sinh</td></tr>
                 )}
                 {cls.students?.length > 0 && visibleStudents.length === 0 && (
-                  <tr><td colSpan={6} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Không tìm thấy học sinh phù hợp</td></tr>
+                  <tr><td colSpan={7} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Không tìm thấy học sinh phù hợp</td></tr>
                 )}
               </tbody>
             </table>
@@ -761,13 +814,41 @@ export default function ClassDetail() {
             <button className="btn btn-secondary" onClick={() => openCreateLesson()}><BookOpen size={15} /> Thêm bài giảng</button>
             <button className="btn btn-primary" onClick={() => openCreateHw()}><ClipboardList size={15} /> Thêm bài tập</button>
           </div>
-          {contentGroups.length === 0 ? (
+          {algebraGroups.length === 0 && geometryGroups.length === 0 && !orphanGroup ? (
             <div style={{ textAlign: 'center', color: '#999', padding: '2rem', background: 'white', borderRadius: 12 }}>
               Chưa có nội dung. Hãy thêm chương, bài giảng hoặc bài tập.
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {contentGroups.map((g, i) => renderChapterAccordion(g, i))}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#1A1A2E', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 7 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#1565C0', display: 'inline-block' }} /> Đại số
+                </div>
+                {algebraGroups.length === 0 ? (
+                  <div style={{ fontSize: '0.82rem', color: '#aaa' }}>Chưa có chương Đại số</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {algebraGroups.map((g, i) => renderChapterAccordion(g, i))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#1A1A2E', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 7 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#6A1B9A', display: 'inline-block' }} /> Hình học
+                </div>
+                {geometryGroups.length === 0 ? (
+                  <div style={{ fontSize: '0.82rem', color: '#aaa' }}>Chưa có chương Hình học</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {geometryGroups.map((g, i) => renderChapterAccordion(g, i))}
+                  </div>
+                )}
+              </div>
+              {orphanGroup && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {renderChapterAccordion(orphanGroup, 0)}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -894,12 +975,33 @@ export default function ClassDetail() {
         ) : (
           <div className="form-group">
             <label className="label">Chọn học sinh đã có</label>
-            <select className="input" value={selectedStudent} onChange={(e) => setSelectedStudent(e.target.value)}>
-              <option value="">-- Chọn học sinh --</option>
-              {allStudents.filter((s) => !cls.students?.find((x: any) => x.id === s.id)).map((s) => (
-                <option key={s.id} value={s.id}>{s.full_name} ({s.username})</option>
+            <div style={{ position: 'relative', marginBottom: 8 }}>
+              <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#999' }} />
+              <input
+                className="input"
+                style={{ paddingLeft: 32 }}
+                placeholder="Gõ tên để tìm học sinh..."
+                value={existingSearch}
+                onChange={(e) => setExistingSearch(e.target.value)}
+              />
+            </div>
+            <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid #eee', borderRadius: 8 }}>
+              {availableStudents.map((s: any) => (
+                <div key={s.id}
+                  onClick={() => setSelectedStudent(String(s.id))}
+                  style={{
+                    padding: '0.5rem 0.75rem', cursor: 'pointer',
+                    background: selectedStudent === String(s.id) ? '#FFEBEE' : 'transparent',
+                    borderBottom: '1px solid #f5f5f5',
+                  }}>
+                  <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>{s.full_name}</div>
+                  <div style={{ fontSize: '0.76rem', color: '#999' }}>{s.username}</div>
+                </div>
               ))}
-            </select>
+              {availableStudents.length === 0 && (
+                <div style={{ padding: '0.75rem', textAlign: 'center', color: '#999', fontSize: '0.85rem' }}>Không tìm thấy học sinh</div>
+              )}
+            </div>
           </div>
         )}
       </Modal>
@@ -912,9 +1014,29 @@ export default function ClassDetail() {
           <input className="input" placeholder="vd: Chương 1 — Hàm số bậc nhất" value={chapterForm.title} onChange={(e) => setChapterForm({ ...chapterForm, title: e.target.value })} />
         </div>
         <div className="form-group">
+          <label className="label">Phân môn</label>
+          <div style={{ display: 'flex', gap: 4, background: '#F5F5F5', padding: 4, borderRadius: 10 }}>
+            {(['algebra', 'geometry'] as const).map((subj) => (
+              <button key={subj} type="button" className="btn"
+                style={{
+                  flex: 1, border: 'none',
+                  background: chapterForm.subject === subj ? 'white' : 'transparent',
+                  boxShadow: chapterForm.subject === subj ? '0 2px 6px rgba(0,0,0,0.08)' : 'none',
+                  color: chapterForm.subject === subj ? '#C62828' : '#888',
+                }}
+                onClick={() => setChapterForm({
+                  ...chapterForm, subject: subj,
+                  chapter_order: String(nextChapterOrder(cls?.chapters, subj, editingChapter?.id)),
+                })}>
+                {subj === 'algebra' ? 'Đại số' : 'Hình học'}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="form-group">
           <label className="label">Thứ tự</label>
           <input className="input" type="number" min={0} value={chapterForm.chapter_order} onChange={(e) => setChapterForm({ ...chapterForm, chapter_order: e.target.value })} />
-          <div style={{ fontSize: '0.75rem', color: '#888', marginTop: 4 }}>Số nhỏ hiển thị trước. Các chương sắp xếp theo thứ tự này.</div>
+          <div style={{ fontSize: '0.75rem', color: '#888', marginTop: 4 }}>Số nhỏ hiển thị trước. Đại số và Hình học đánh số độc lập với nhau.</div>
         </div>
       </Modal>
 

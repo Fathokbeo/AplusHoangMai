@@ -112,19 +112,22 @@ export default function StudentClassDetail() {
 
   const chapters: any[] = cls.chapters || [];
 
-  // Nội dung lớp gom theo chương (theo thứ tự); cuối là nhóm "Chưa phân chương" nếu có bài lẻ
+  // Nội dung lớp gom theo chương, tách riêng Đại số (hiển thị trước) và Hình học (sau) — mỗi môn
+  // đánh số thứ tự độc lập. Cuối cùng là nhóm "Chưa phân chương" nếu có bài lẻ chưa gán chương.
   const lessonsAll: any[] = cls.lessons || [];
   const homeworkAll: any[] = cls.homework || [];
-  const contentGroups: any[] = chapters.map((ch: any) => ({
+  const toChapterGroup = (ch: any) => ({
     key: String(ch.id), chapter: ch,
     lessons: lessonsAll.filter((l: any) => l.chapter_id === ch.id),
     homework: homeworkAll.filter((h: any) => h.chapter_id === ch.id),
-  }));
+  });
+  const algebraGroups = chapters.filter((ch: any) => (ch.subject || 'algebra') === 'algebra').map(toChapterGroup);
+  const geometryGroups = chapters.filter((ch: any) => ch.subject === 'geometry').map(toChapterGroup);
   const orphanLessons = lessonsAll.filter((l: any) => !l.chapter_id || !chapters.some((c: any) => c.id === l.chapter_id));
   const orphanHomework = homeworkAll.filter((h: any) => !h.chapter_id || !chapters.some((c: any) => c.id === h.chapter_id));
-  if (orphanLessons.length || orphanHomework.length) {
-    contentGroups.push({ key: 'orphan', chapter: null, lessons: orphanLessons, homework: orphanHomework });
-  }
+  const orphanGroup = (orphanLessons.length || orphanHomework.length)
+    ? { key: 'orphan', chapter: null, lessons: orphanLessons, homework: orphanHomework }
+    : null;
 
   const toggleChapter = (key: string) => setExpandedChapters((prev) => {
     const next = new Set(prev);
@@ -390,12 +393,36 @@ export default function StudentClassDetail() {
         </div>
       </div>
 
-      {/* Danh sách chương → mở chương ra mới thấy bài giảng & bài tập */}
-      {contentGroups.length === 0 ? (
+      {/* Danh sách chương → mở chương ra mới thấy bài giảng & bài tập. Đại số trước, Hình học sau. */}
+      {algebraGroups.length === 0 && geometryGroups.length === 0 && !orphanGroup ? (
         <div style={{ textAlign: 'center', color: '#999', padding: '2rem', background: 'white', borderRadius: 12 }}>Chưa có nội dung</div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {contentGroups.map((g, i) => renderChapterAccordion(g, i))}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+          {algebraGroups.length > 0 && (
+            <div>
+              <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#1A1A2E', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 7 }}>
+                <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#1565C0', display: 'inline-block' }} /> Đại số
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {algebraGroups.map((g, i) => renderChapterAccordion(g, i))}
+              </div>
+            </div>
+          )}
+          {geometryGroups.length > 0 && (
+            <div>
+              <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#1A1A2E', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 7 }}>
+                <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#6A1B9A', display: 'inline-block' }} /> Hình học
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {geometryGroups.map((g, i) => renderChapterAccordion(g, i))}
+              </div>
+            </div>
+          )}
+          {orphanGroup && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {renderChapterAccordion(orphanGroup, 0)}
+            </div>
+          )}
         </div>
       )}
 

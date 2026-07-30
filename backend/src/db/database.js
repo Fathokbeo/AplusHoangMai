@@ -277,6 +277,17 @@ function initSchema() {
   if (!staffCols.some(c => c.name === 'phone')) {
     db.exec('ALTER TABLE staff ADD COLUMN phone TEXT');
   }
+  // Migration: thứ tự học sinh trong lớp (kéo thả sắp xếp ở giao diện)
+  const csCols = db.prepare("PRAGMA table_info(class_students)").all();
+  if (!csCols.some(c => c.name === 'sort_order')) {
+    db.exec('ALTER TABLE class_students ADD COLUMN sort_order INTEGER DEFAULT 0');
+  }
+  // Migration: phân môn của chương — 'algebra' (Đại số) | 'geometry' (Hình học). Đại số hiển thị trước,
+  // Hình học sau; số thứ tự (chapter_order) độc lập theo từng môn.
+  const chapterCols = db.prepare("PRAGMA table_info(chapters)").all();
+  if (!chapterCols.some(c => c.name === 'subject')) {
+    db.exec("ALTER TABLE chapters ADD COLUMN subject TEXT DEFAULT 'algebra'");
+  }
 
   const admin = db.prepare("SELECT id FROM users WHERE role='admin' LIMIT 1").get();
   if (!admin) {

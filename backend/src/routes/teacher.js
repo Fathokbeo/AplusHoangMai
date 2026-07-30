@@ -149,7 +149,7 @@ router.get('/classes/:id', (req, res) => {
   }
   const students = db.prepare(`
     SELECT u.id,u.username,u.full_name,u.parent_phone FROM class_students cs
-    JOIN users u ON cs.student_id=u.id WHERE cs.class_id=? AND u.active=1 ORDER BY u.full_name
+    JOIN users u ON cs.student_id=u.id WHERE cs.class_id=? AND u.active=1 ORDER BY cs.sort_order, u.full_name
   `).all(req.params.id);
   const chapters = db.prepare('SELECT * FROM chapters WHERE class_id=? ORDER BY chapter_order,created_at').all(req.params.id);
   const lessons = db.prepare('SELECT * FROM lessons WHERE class_id=? ORDER BY lesson_order,created_at').all(req.params.id);
@@ -247,7 +247,8 @@ router.post('/classes/:id/students', (req, res) => {
   }
 
   try {
-    db.prepare('INSERT INTO class_students (class_id,student_id) VALUES (?,?)').run(req.params.id, sid);
+    const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),0) m FROM class_students WHERE class_id=?').get(req.params.id).m;
+    db.prepare('INSERT INTO class_students (class_id,student_id,sort_order) VALUES (?,?,?)').run(req.params.id, sid, maxOrder + 1);
     res.status(201).json({ message: 'Đã thêm học sinh vào lớp', student_id: sid });
   } catch (e) {
     if (e.message.includes('UNIQUE')) return res.status(400).json({ message: 'Học sinh đã trong lớp' });
@@ -276,7 +277,8 @@ router.post('/classes/:id/students/bulk', (req, res) => {
   const insertUser = db.prepare(
     'INSERT INTO users (username,password,plain_password,full_name,parent_phone,role,created_by) VALUES (?,?,?,?,?,?,?)'
   );
-  const enroll = db.prepare('INSERT INTO class_students (class_id,student_id) VALUES (?,?)');
+  const enroll = db.prepare('INSERT INTO class_students (class_id,student_id,sort_order) VALUES (?,?,?)');
+  let nextOrder = db.prepare('SELECT COALESCE(MAX(sort_order),0) m FROM class_students WHERE class_id=?').get(req.params.id).m + 1;
 
   db.transaction(() => {
     students.forEach((row, i) => {
@@ -295,7 +297,7 @@ router.post('/classes/:id/students/bulk', (req, res) => {
         return;
       }
       const r = insertUser.run(username, bcrypt.hashSync(password, 10), password, full_name, parent_phone, 'student', req.user.id);
-      enroll.run(req.params.id, r.lastInsertRowid);
+      enroll.run(req.params.id, r.lastInsertRowid, nextOrder++);
       created++;
     });
   })();
@@ -324,7 +326,8 @@ router.put('/students/:studentId/move', (req, res) => {
     if (from_class_id) {
       db.prepare('DELETE FROM class_students WHERE class_id=? AND student_id=?').run(from_class_id, req.params.studentId);
     }
-    db.prepare('INSERT INTO class_students (class_id,student_id) VALUES (?,?)').run(to_class_id, req.params.studentId);
+    const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),0) m FROM class_students WHERE class_id=?').get(to_class_id).m;
+    db.prepare('INSERT INTO class_students (class_id,student_id,sort_order) VALUES (?,?,?)').run(to_class_id, req.params.studentId, maxOrder + 1);
   })();
   res.json({ message: from_class_id ? 'Đã chuyển lớp' : 'Đã chỉ định lớp' });
 });
@@ -359,22 +362,40 @@ router.post('/classes/:id/students/bulk-delete', (req, res) => {
   res.json({ message: `Đã xử lý ${ids.length} học sinh`, purged, kept });
 });
 
+// Đổi thứ tự học sinh trong lớp (kéo thả sắp xếp ở giao diện). Body: { student_ids: [...] } theo thứ tự mới.
+router.put('/classes/:id/students/reorder', (req, res) => {
+  const { student_ids } = req.body;
+  if (!Array.isArray(student_ids) || student_ids.length === 0) {
+    return res.status(400).json({ message: 'Danh sách trống' });
+  }
+  const db = getDb();
+  const cls = db.prepare('SELECT * FROM classes WHERE id=?').get(req.params.id);
+  if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp' });
+  if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+
+  const update = db.prepare('UPDATE class_students SET sort_order=? WHERE class_id=? AND student_id=?');
+  db.transaction(() => {
+    student_ids.forEach((sid, i) => update.run(i + 1, req.params.id, Number(sid)));
+  })();
+  res.json({ message: 'Đã cập nhật thứ tự' });
+});
+
 // ── Chapters (chương: nhóm bài giảng & bài tập) ───────────────────────
 router.post('/classes/:id/chapters', (req, res) => {
-  const { title, chapter_order } = req.body;
+  const { title, chapter_order, subject } = req.body;
   if (!title) return res.status(400).json({ message: 'Cần tên chương' });
   const db = getDb();
   const cls = db.prepare('SELECT * FROM classes WHERE id=?').get(req.params.id);
   if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp' });
   if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
   const result = db.prepare(
-    'INSERT INTO chapters (class_id,title,chapter_order) VALUES (?,?,?)'
-  ).run(req.params.id, title, parseInt(chapter_order) || 0);
+    'INSERT INTO chapters (class_id,title,chapter_order,subject) VALUES (?,?,?,?)'
+  ).run(req.params.id, title, parseInt(chapter_order) || 0, subject === 'geometry' ? 'geometry' : 'algebra');
   res.status(201).json({ id: result.lastInsertRowid, title });
 });
 
 router.put('/chapters/:id', (req, res) => {
-  const { title, chapter_order } = req.body;
+  const { title, chapter_order, subject } = req.body;
   const db = getDb();
   const ch = db.prepare('SELECT ch.*,c.teacher_id FROM chapters ch JOIN classes c ON ch.class_id=c.id WHERE ch.id=?').get(req.params.id);
   if (!ch) return res.status(404).json({ message: 'Không tìm thấy' });
@@ -382,6 +403,7 @@ router.put('/chapters/:id', (req, res) => {
   const sets = []; const vals = [];
   if (title) { sets.push('title=?'); vals.push(title); }
   if (chapter_order !== undefined) { sets.push('chapter_order=?'); vals.push(parseInt(chapter_order) || 0); }
+  if (subject !== undefined) { sets.push('subject=?'); vals.push(subject === 'geometry' ? 'geometry' : 'algebra'); }
   if (sets.length > 0) { vals.push(req.params.id); db.prepare(`UPDATE chapters SET ${sets.join(',')} WHERE id=?`).run(...vals); }
   res.json({ message: 'Đã cập nhật' });
 });
