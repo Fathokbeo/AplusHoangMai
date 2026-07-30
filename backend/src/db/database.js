@@ -295,6 +295,13 @@ function initSchema() {
   if (!csCols.some(c => c.name === 'sort_order')) {
     db.exec('ALTER TABLE class_students ADD COLUMN sort_order INTEGER DEFAULT 0');
   }
+  // Migration: cờ đánh dấu lớp đã được giáo viên tự kéo thả sắp xếp học sinh chưa.
+  // Chưa kéo thả (=0) → LUÔN hiển thị theo bảng chữ cái (tên riêng) tự động, kể cả khi thêm/xóa học sinh.
+  // Đã kéo thả (=1) → giữ đúng thứ tự đã lưu (sort_order), học sinh thêm mới xếp cuối danh sách.
+  const classCols = db.prepare("PRAGMA table_info(classes)").all();
+  if (!classCols.some(c => c.name === 'custom_student_order')) {
+    db.exec('ALTER TABLE classes ADD COLUMN custom_student_order INTEGER DEFAULT 0');
+  }
   // Migration: phân môn của chương — 'algebra' (Đại số) | 'geometry' (Hình học). Đại số hiển thị trước,
   // Hình học sau; số thứ tự (chapter_order) độc lập theo từng môn.
   const chapterCols = db.prepare("PRAGMA table_info(chapters)").all();

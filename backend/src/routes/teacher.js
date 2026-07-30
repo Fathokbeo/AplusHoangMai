@@ -8,6 +8,7 @@ const { authMiddleware, requireRole } = require('../middleware/auth');
 const { uploadVideo, uploadCourseThumbnail, uploadLessonFile, uploadAssistantPhoto } = require('../middleware/upload');
 const { hardDeleteCourse, hardDeleteClass, hardDeleteStudent } = require('../services/cascade');
 const { classRanking, classMonths, ymOf } = require('../services/classRanking');
+const { compareVietnameseName } = require('../services/vietnameseName');
 
 router.use(authMiddleware, requireRole('teacher', 'admin'));
 
@@ -147,10 +148,14 @@ router.get('/classes/:id', (req, res) => {
   if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) {
     return res.status(403).json({ message: 'Không có quyền truy cập' });
   }
+  // Chưa từng kéo thả sắp xếp → LUÔN hiển thị theo bảng chữ cái (tên riêng) tự động, kể cả khi vừa
+  // thêm/xóa học sinh. Đã từng kéo thả → giữ đúng thứ tự đã lưu (sort_order), học sinh mới xếp cuối.
   const students = db.prepare(`
-    SELECT u.id,u.username,u.full_name,u.parent_phone FROM class_students cs
-    JOIN users u ON cs.student_id=u.id WHERE cs.class_id=? AND u.active=1 ORDER BY cs.sort_order, u.full_name
+    SELECT u.id,u.username,u.full_name,u.parent_phone,cs.sort_order FROM class_students cs
+    JOIN users u ON cs.student_id=u.id WHERE cs.class_id=? AND u.active=1
   `).all(req.params.id);
+  students.sort((a, b) => (cls.custom_student_order ? (a.sort_order - b.sort_order) : 0) || compareVietnameseName(a.full_name, b.full_name));
+  students.forEach((s) => { delete s.sort_order; });
   const chapters = db.prepare('SELECT * FROM chapters WHERE class_id=? ORDER BY chapter_order,created_at').all(req.params.id);
   const lessons = db.prepare('SELECT * FROM lessons WHERE class_id=? ORDER BY lesson_order,created_at').all(req.params.id);
   const homework = db.prepare('SELECT * FROM homework WHERE class_id=? ORDER BY hw_order,created_at').all(req.params.id);
@@ -377,6 +382,7 @@ router.put('/classes/:id/students/reorder', (req, res) => {
   const update = db.prepare('UPDATE class_students SET sort_order=? WHERE class_id=? AND student_id=?');
   db.transaction(() => {
     student_ids.forEach((sid, i) => update.run(i + 1, req.params.id, Number(sid)));
+    db.prepare('UPDATE classes SET custom_student_order=1 WHERE id=?').run(req.params.id);
   })();
   res.json({ message: 'Đã cập nhật thứ tự' });
 });
