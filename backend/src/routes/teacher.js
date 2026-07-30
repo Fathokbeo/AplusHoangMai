@@ -5,7 +5,7 @@ const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
-const { uploadVideo, uploadCourseThumbnail, uploadLessonFile } = require('../middleware/upload');
+const { uploadVideo, uploadCourseThumbnail, uploadLessonFile, uploadAssistantPhoto } = require('../middleware/upload');
 const { hardDeleteCourse, hardDeleteClass, hardDeleteStudent } = require('../services/cascade');
 const { classRanking, classMonths, ymOf } = require('../services/classRanking');
 
@@ -154,7 +154,8 @@ router.get('/classes/:id', (req, res) => {
   const chapters = db.prepare('SELECT * FROM chapters WHERE class_id=? ORDER BY chapter_order,created_at').all(req.params.id);
   const lessons = db.prepare('SELECT * FROM lessons WHERE class_id=? ORDER BY lesson_order,created_at').all(req.params.id);
   const homework = db.prepare('SELECT * FROM homework WHERE class_id=? ORDER BY hw_order,created_at').all(req.params.id);
-  res.json({ ...cls, students, chapters, lessons, homework });
+  const assistants = db.prepare('SELECT * FROM class_assistants WHERE class_id=? ORDER BY created_at').all(req.params.id);
+  res.json({ ...cls, students, chapters, lessons, homework, assistants });
 });
 
 // ── Xếp hạng lớp theo THÁNG (giáo viên theo dõi thứ bậc, xem lại các tháng trước) ──
@@ -420,6 +421,73 @@ router.delete('/chapters/:id', (req, res) => {
     db.prepare('DELETE FROM chapters WHERE id=?').run(req.params.id);
   })();
   res.json({ message: 'Đã xóa chương' });
+});
+
+// ── Trợ giảng của lớp (thông tin liên hệ + lịch làm việc trong tuần) ───
+router.post('/classes/:id/assistants', (req, res) => {
+  const { full_name, phone, facebook_url } = req.body;
+  if (!full_name) return res.status(400).json({ message: 'Cần họ tên trợ giảng' });
+  const db = getDb();
+  const cls = db.prepare('SELECT * FROM classes WHERE id=?').get(req.params.id);
+  if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp' });
+  if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  const result = db.prepare(
+    'INSERT INTO class_assistants (class_id,full_name,phone,facebook_url) VALUES (?,?,?,?)'
+  ).run(req.params.id, full_name, phone || null, facebook_url || null);
+  res.status(201).json({ id: result.lastInsertRowid, full_name });
+});
+
+router.put('/assistants/:id', (req, res) => {
+  const { full_name, phone, facebook_url } = req.body;
+  const db = getDb();
+  const a = db.prepare('SELECT ca.*,c.teacher_id FROM class_assistants ca JOIN classes c ON ca.class_id=c.id WHERE ca.id=?').get(req.params.id);
+  if (!a) return res.status(404).json({ message: 'Không tìm thấy' });
+  if (req.user.role === 'teacher' && a.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  const sets = []; const vals = [];
+  if (full_name) { sets.push('full_name=?'); vals.push(full_name); }
+  if (phone !== undefined) { sets.push('phone=?'); vals.push(phone || null); }
+  if (facebook_url !== undefined) { sets.push('facebook_url=?'); vals.push(facebook_url || null); }
+  if (sets.length > 0) { vals.push(req.params.id); db.prepare(`UPDATE class_assistants SET ${sets.join(',')} WHERE id=?`).run(...vals); }
+  res.json({ message: 'Đã cập nhật' });
+});
+
+router.post('/assistants/:id/photo', uploadAssistantPhoto.single('photo'), (req, res) => {
+  if (!req.file) return res.status(400).json({ message: 'Cần file ảnh' });
+  const db = getDb();
+  const a = db.prepare('SELECT ca.*,c.teacher_id FROM class_assistants ca JOIN classes c ON ca.class_id=c.id WHERE ca.id=?').get(req.params.id);
+  if (!a) return res.status(404).json({ message: 'Không tìm thấy' });
+  if (req.user.role === 'teacher' && a.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  if (a.photo) {
+    const old = path.join(__dirname, '../../uploads/assistants', a.photo);
+    if (fs.existsSync(old)) { try { fs.unlinkSync(old); } catch {} }
+  }
+  db.prepare('UPDATE class_assistants SET photo=? WHERE id=?').run(req.file.filename, req.params.id);
+  res.json({ photo: req.file.filename });
+});
+
+// Lưu lịch làm việc: JSON { mon:{s1:'',s2:'',...}, tue:{...}, ... sun:{...} } — 7 ngày × 7 ca cố định
+router.put('/assistants/:id/schedule', (req, res) => {
+  const { schedule } = req.body;
+  if (!schedule || typeof schedule !== 'object') return res.status(400).json({ message: 'Dữ liệu lịch không hợp lệ' });
+  const db = getDb();
+  const a = db.prepare('SELECT ca.*,c.teacher_id FROM class_assistants ca JOIN classes c ON ca.class_id=c.id WHERE ca.id=?').get(req.params.id);
+  if (!a) return res.status(404).json({ message: 'Không tìm thấy' });
+  if (req.user.role === 'teacher' && a.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  db.prepare('UPDATE class_assistants SET schedule=? WHERE id=?').run(JSON.stringify(schedule), req.params.id);
+  res.json({ message: 'Đã lưu lịch làm việc' });
+});
+
+router.delete('/assistants/:id', (req, res) => {
+  const db = getDb();
+  const a = db.prepare('SELECT ca.*,c.teacher_id FROM class_assistants ca JOIN classes c ON ca.class_id=c.id WHERE ca.id=?').get(req.params.id);
+  if (!a) return res.status(404).json({ message: 'Không tìm thấy' });
+  if (req.user.role === 'teacher' && a.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  if (a.photo) {
+    const f = path.join(__dirname, '../../uploads/assistants', a.photo);
+    if (fs.existsSync(f)) { try { fs.unlinkSync(f); } catch {} }
+  }
+  db.prepare('DELETE FROM class_assistants WHERE id=?').run(req.params.id);
+  res.json({ message: 'Đã xóa trợ giảng' });
 });
 
 // ── Lessons ────────────────────────────────────────────────────────────

@@ -10,10 +10,13 @@ import { toast } from '../../components/Toast';
 import { sortByVietnameseName, matchesNameSearch, normalizeVietnamese } from '../../lib/vietnameseName';
 import { parseAttachments, isViewableFile } from '../../lib/attachments';
 import { emptyPartsConfig, normalizePartsConfig, computeMaxScore, anyPartEnabled, type PartsConfig, PART_LABELS, PART_ORDER, type PartKey } from '../../lib/homeworkParts';
+import type { AssistantSchedule } from '../../lib/assistantSchedule';
+import AssistantScheduleModal from '../../components/AssistantScheduleModal';
 import {
   Users, BookOpen, ClipboardList, Edit, Trash2,
   UserPlus, UserMinus, Play, File, ChevronLeft, Upload, Clock, Eye, Layers, Video, Search,
-  ChevronDown, ChevronRight, Trophy, FileSpreadsheet, Download, Paperclip, FileText, X, Plus, GripVertical
+  ChevronDown, ChevronRight, Trophy, FileSpreadsheet, Download, Paperclip, FileText, X, Plus, GripVertical,
+  UserCog, Phone, ExternalLink, Camera, Calendar
 } from 'lucide-react';
 
 // Giờ nhập ở ô datetime-local là GIỜ ĐỊA PHƯƠNG. Lưu dạng ISO (UTC) để khi so "đến hạn"
@@ -60,7 +63,7 @@ export default function ClassDetail() {
   const { id } = useParams();
   const [cls, setCls] = useState<any>(null);
   const [allStudents, setAllStudents] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'students' | 'content' | 'ranking'>('content');
+  const [activeTab, setActiveTab] = useState<'students' | 'content' | 'assistants' | 'ranking'>('content');
   const [lessonModal, setLessonModal] = useState(false);
   const [editingLesson, setEditingLesson] = useState<any>(null);
   const [hwModal, setHwModal] = useState(false);
@@ -102,6 +105,14 @@ export default function ClassDetail() {
   const [excelResult, setExcelResult] = useState<any>(null);
   const excelRef = useRef<HTMLInputElement>(null);
   const isMobile = useIsMobile();
+  // Trợ giảng: thông tin liên hệ + lịch làm việc trong tuần
+  const [assistantModal, setAssistantModal] = useState(false);
+  const [editingAssistant, setEditingAssistant] = useState<any>(null);
+  const [assistantForm, setAssistantForm] = useState({ full_name: '', phone: '', facebook_url: '' });
+  const [assistantPhoto, setAssistantPhoto] = useState<File | null>(null);
+  const [assistantPhotoPreview, setAssistantPhotoPreview] = useState('');
+  const assistantPhotoRef = useRef<HTMLInputElement>(null);
+  const [scheduleAssistantId, setScheduleAssistantId] = useState<number | null>(null);
   useEffect(() => { fetchClass(); }, [id]);
 
   // Tải xếp hạng khi mở tab hoặc đổi tháng
@@ -371,6 +382,63 @@ export default function ClassDetail() {
     if (!confirm('Xóa chương này? Bài giảng và bài tập trong chương sẽ chuyển về "Chưa phân chương" (không bị xóa).')) return;
     await api.delete(`/teacher/chapters/${chapterId}`);
     toast.success('Đã xóa chương');
+    fetchClass();
+  };
+
+  // Trợ giảng CRUD
+  const openCreateAssistant = () => {
+    setEditingAssistant(null);
+    setAssistantForm({ full_name: '', phone: '', facebook_url: '' });
+    setAssistantPhoto(null);
+    setAssistantPhotoPreview('');
+    setAssistantModal(true);
+  };
+
+  const openEditAssistant = (a: any) => {
+    setEditingAssistant(a);
+    setAssistantForm({ full_name: a.full_name, phone: a.phone || '', facebook_url: a.facebook_url || '' });
+    setAssistantPhoto(null);
+    setAssistantPhotoPreview(a.photo ? `/uploads/assistants/${a.photo}` : '');
+    setAssistantModal(true);
+  };
+
+  const saveAssistant = async () => {
+    if (!assistantForm.full_name) { toast.error('Cần họ tên trợ giảng'); return; }
+    setLoading(true);
+    try {
+      let assistantId: number;
+      if (editingAssistant) {
+        await api.put(`/teacher/assistants/${editingAssistant.id}`, assistantForm);
+        assistantId = editingAssistant.id;
+        toast.success('Đã cập nhật trợ giảng');
+      } else {
+        const { data } = await api.post(`/teacher/classes/${id}/assistants`, assistantForm);
+        assistantId = data.id;
+        toast.success('Đã thêm trợ giảng');
+      }
+      if (assistantPhoto) {
+        const fd = new FormData();
+        fd.append('photo', assistantPhoto);
+        await api.post(`/teacher/assistants/${assistantId}/photo`, fd);
+      }
+      setAssistantModal(false);
+      fetchClass();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Lỗi');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteAssistant = async (a: any) => {
+    if (!confirm(`Xóa trợ giảng "${a.full_name}"?`)) return;
+    await api.delete(`/teacher/assistants/${a.id}`);
+    toast.success('Đã xóa trợ giảng');
+    fetchClass();
+  };
+
+  const saveAssistantSchedule = async (assistantId: number, schedule: AssistantSchedule) => {
+    await api.put(`/teacher/assistants/${assistantId}/schedule`, { schedule });
     fetchClass();
   };
 
@@ -679,8 +747,11 @@ export default function ClassDetail() {
   const tabs = [
     { key: 'students', label: `Học sinh (${cls.students?.length || 0})`, icon: Users },
     { key: 'content', label: `Nội dung (${chapters.length} chương)`, icon: Layers },
+    { key: 'assistants', label: `Trợ giảng (${cls.assistants?.length || 0})`, icon: UserCog },
     { key: 'ranking', label: 'Xếp hạng', icon: Trophy },
   ];
+
+  const scheduleAssistant = (cls.assistants || []).find((a: any) => a.id === scheduleAssistantId) || null;
 
   // Nhóm huy chương top 3 của tháng đang xem (đồng hạng → cùng huy chương)
   const rankedStudents: any[] = ranking?.students || [];
@@ -849,6 +920,51 @@ export default function ClassDetail() {
                   {renderChapterAccordion(orphanGroup, 0)}
                 </div>
               )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Assistants tab: trợ giảng của lớp — thông tin liên hệ + lịch làm việc trong tuần */}
+      {activeTab === 'assistants' && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+            <button className="btn btn-primary" onClick={openCreateAssistant}><Plus size={15} /> Thêm trợ giảng</button>
+          </div>
+          {(cls.assistants || []).length === 0 ? (
+            <div style={{ textAlign: 'center', color: '#999', padding: '2rem', background: 'white', borderRadius: 12 }}>
+              <UserCog size={36} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
+              <div>Chưa có trợ giảng nào</div>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>
+              {cls.assistants.map((a: any) => (
+                <div key={a.id} className="card" style={{ padding: '1.1rem', textAlign: 'center' }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4, marginBottom: -6 }}>
+                    <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openEditAssistant(a)}><Edit size={13} /></button>
+                    <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} onClick={() => deleteAssistant(a)}><Trash2 size={13} /></button>
+                  </div>
+                  {a.photo ? (
+                    <img src={`/uploads/assistants/${a.photo}`} alt={a.full_name} style={{ width: 76, height: 76, borderRadius: '50%', objectFit: 'cover', margin: '4px auto 10px' }} />
+                  ) : (
+                    <div style={{ width: 76, height: 76, borderRadius: '50%', background: '#F3E5F5', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '4px auto 10px' }}>
+                      <UserCog size={32} color="#6A1B9A" />
+                    </div>
+                  )}
+                  <h3 style={{ margin: '0 0 6px', fontSize: '0.95rem', fontWeight: 700, color: '#1A1A2E' }}>{a.full_name}</h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center', marginBottom: 12 }}>
+                    {a.phone && <span style={{ fontSize: '0.8rem', color: '#888' }}><Phone size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />{a.phone}</span>}
+                    {a.facebook_url && (
+                      <a href={a.facebook_url} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: '#1565C0', textDecoration: 'none' }}>
+                        <ExternalLink size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Facebook
+                      </a>
+                    )}
+                  </div>
+                  <button className="btn btn-outline btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={() => setScheduleAssistantId(a.id)}>
+                    <Calendar size={13} /> Xem lịch làm việc
+                  </button>
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -1039,6 +1155,45 @@ export default function ClassDetail() {
           <div style={{ fontSize: '0.75rem', color: '#888', marginTop: 4 }}>Số nhỏ hiển thị trước. Đại số và Hình học đánh số độc lập với nhau.</div>
         </div>
       </Modal>
+
+      {/* Assistant Modal */}
+      <Modal open={assistantModal} onClose={() => setAssistantModal(false)} title={editingAssistant ? 'Sửa trợ giảng' : 'Thêm trợ giảng'}
+        footer={<><button className="btn btn-ghost" onClick={() => setAssistantModal(false)}>Hủy</button><button className="btn btn-primary" onClick={saveAssistant} disabled={loading}>{loading ? 'Đang lưu...' : 'Lưu'}</button></>}>
+        <div className="form-group">
+          <label className="label">Họ và tên *</label>
+          <input className="input" placeholder="Nguyễn Văn A" value={assistantForm.full_name} onChange={(e) => setAssistantForm({ ...assistantForm, full_name: e.target.value })} />
+        </div>
+        <div className="form-group">
+          <label className="label">Số điện thoại</label>
+          <input className="input" type="tel" placeholder="vd: 0912 345 678" value={assistantForm.phone} onChange={(e) => setAssistantForm({ ...assistantForm, phone: e.target.value })} />
+        </div>
+        <div className="form-group">
+          <label className="label">Link Facebook</label>
+          <input className="input" placeholder="https://facebook.com/..." value={assistantForm.facebook_url} onChange={(e) => setAssistantForm({ ...assistantForm, facebook_url: e.target.value })} />
+        </div>
+        <div className="form-group">
+          <label className="label">Ảnh đại diện</label>
+          <div className="dropzone" onClick={() => assistantPhotoRef.current?.click()}>
+            {assistantPhotoPreview ? (
+              <img src={assistantPhotoPreview} alt="preview" style={{ maxHeight: 120, borderRadius: '50%', objectFit: 'cover' }} />
+            ) : (
+              <div style={{ fontSize: '0.88rem' }}><Camera size={16} style={{ verticalAlign: 'middle', marginRight: 6 }} />Click để chọn ảnh</div>
+            )}
+          </div>
+          <input ref={assistantPhotoRef} type="file" accept="image/*" hidden onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) { setAssistantPhoto(f); setAssistantPhotoPreview(URL.createObjectURL(f)); }
+          }} />
+        </div>
+      </Modal>
+
+      <AssistantScheduleModal
+        open={scheduleAssistantId !== null}
+        onClose={() => setScheduleAssistantId(null)}
+        assistant={scheduleAssistant}
+        editable
+        onSave={(schedule) => saveAssistantSchedule(scheduleAssistantId as number, schedule)}
+      />
 
       {/* Lesson Modal */}
       <Modal open={lessonModal} onClose={() => setLessonModal(false)} title={editingLesson ? 'Sửa bài giảng' : 'Thêm bài giảng'} size="lg"

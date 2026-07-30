@@ -10,7 +10,11 @@ import useIsMobile from '../../lib/useIsMobile';
 import { toast } from '../../components/Toast';
 import { parsePartsConfig, hasObjectiveParts, hasEssay, emptyStudentAnswers, PART_LABELS, PART_ORDER, type PartKey } from '../../lib/homeworkParts';
 import { parseAttachments, isViewableFile } from '../../lib/attachments';
-import { ChevronLeft, Play, ClipboardList, BookOpen, Upload, CheckCircle, Clock, Eye, Bot, Lock, FileText, X, Plus, Layers, Video, ChevronDown, ChevronRight, ChevronUp, Trophy, Star, Paperclip, Download } from 'lucide-react';
+import AssistantScheduleModal from '../../components/AssistantScheduleModal';
+import {
+  ChevronLeft, Play, ClipboardList, BookOpen, Upload, CheckCircle, Clock, Eye, Bot, Lock, FileText, X, Plus, Layers, Video,
+  ChevronDown, ChevronRight, ChevronUp, Trophy, Star, Paperclip, Download, UserCog, Phone, ExternalLink, Calendar
+} from 'lucide-react';
 
 // Danh sách URL các file đã nộp (hỗ trợ cũ: 1 file, mới: nhiều file dạng JSON)
 function submittedFileUrls(hw: any): string[] {
@@ -23,6 +27,8 @@ function submittedFileUrls(hw: any): string[] {
 export default function StudentClassDetail() {
   const { id } = useParams();
   const [cls, setCls] = useState<any>(null);
+  const [activeTab, setActiveTab] = useState<'content' | 'assistants'>('content');
+  const [scheduleAssistantId, setScheduleAssistantId] = useState<number | null>(null);
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
   const [viewLessonModal, setViewLessonModal] = useState(false);
   const [viewingLesson, setViewingLesson] = useState<any>(null);
@@ -128,6 +134,7 @@ export default function StudentClassDetail() {
   const orphanGroup = (orphanLessons.length || orphanHomework.length)
     ? { key: 'orphan', chapter: null, lessons: orphanLessons, homework: orphanHomework }
     : null;
+  const scheduleAssistant = (cls.assistants || []).find((a: any) => a.id === scheduleAssistantId) || null;
 
   const toggleChapter = (key: string) => setExpandedChapters((prev) => {
     const next = new Set(prev);
@@ -393,37 +400,88 @@ export default function StudentClassDetail() {
         </div>
       </div>
 
+      {/* Tabs: Nội dung / Trợ giảng */}
+      <div style={{ display: 'flex', gap: 4, background: '#F5F5F5', padding: 4, borderRadius: 10, marginBottom: '1.25rem', width: isMobile ? '100%' : 'fit-content' }}>
+        {[
+          { key: 'content' as const, label: 'Nội dung', icon: Layers },
+          { key: 'assistants' as const, label: `Trợ giảng (${cls.assistants?.length || 0})`, icon: UserCog },
+        ].map(({ key, label, icon: Icon }) => (
+          <button key={key} onClick={() => setActiveTab(key)} className="btn"
+            style={{ background: activeTab === key ? 'white' : 'transparent', boxShadow: activeTab === key ? '0 2px 6px rgba(0,0,0,0.08)' : 'none', color: activeTab === key ? '#C62828' : '#888', border: 'none', gap: 6 }}>
+            <Icon size={15} />{label}
+          </button>
+        ))}
+      </div>
+
       {/* Danh sách chương → mở chương ra mới thấy bài giảng & bài tập. Đại số trước, Hình học sau. */}
-      {algebraGroups.length === 0 && geometryGroups.length === 0 && !orphanGroup ? (
-        <div style={{ textAlign: 'center', color: '#999', padding: '2rem', background: 'white', borderRadius: 12 }}>Chưa có nội dung</div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
-          {algebraGroups.length > 0 && (
-            <div>
-              <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#1A1A2E', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 7 }}>
-                <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#1565C0', display: 'inline-block' }} /> Đại số
+      {activeTab === 'content' && (
+        algebraGroups.length === 0 && geometryGroups.length === 0 && !orphanGroup ? (
+          <div style={{ textAlign: 'center', color: '#999', padding: '2rem', background: 'white', borderRadius: 12 }}>Chưa có nội dung</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+            {algebraGroups.length > 0 && (
+              <div>
+                <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#1A1A2E', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 7 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#1565C0', display: 'inline-block' }} /> Đại số
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {algebraGroups.map((g, i) => renderChapterAccordion(g, i))}
+                </div>
               </div>
+            )}
+            {geometryGroups.length > 0 && (
+              <div>
+                <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#1A1A2E', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 7 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#6A1B9A', display: 'inline-block' }} /> Hình học
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {geometryGroups.map((g, i) => renderChapterAccordion(g, i))}
+                </div>
+              </div>
+            )}
+            {orphanGroup && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {algebraGroups.map((g, i) => renderChapterAccordion(g, i))}
+                {renderChapterAccordion(orphanGroup, 0)}
               </div>
-            </div>
-          )}
-          {geometryGroups.length > 0 && (
-            <div>
-              <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#1A1A2E', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 7 }}>
-                <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#6A1B9A', display: 'inline-block' }} /> Hình học
+            )}
+          </div>
+        )
+      )}
+
+      {/* Trợ giảng: chỉ xem thông tin liên hệ + lịch làm việc, không sửa được */}
+      {activeTab === 'assistants' && (
+        (cls.assistants || []).length === 0 ? (
+          <div style={{ textAlign: 'center', color: '#999', padding: '2rem', background: 'white', borderRadius: 12 }}>
+            <UserCog size={36} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
+            <div>Lớp chưa có trợ giảng</div>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>
+            {cls.assistants.map((a: any) => (
+              <div key={a.id} className="card" style={{ padding: '1.1rem', textAlign: 'center' }}>
+                {a.photo ? (
+                  <img src={`/uploads/assistants/${a.photo}`} alt={a.full_name} style={{ width: 76, height: 76, borderRadius: '50%', objectFit: 'cover', margin: '4px auto 10px' }} />
+                ) : (
+                  <div style={{ width: 76, height: 76, borderRadius: '50%', background: '#F3E5F5', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '4px auto 10px' }}>
+                    <UserCog size={32} color="#6A1B9A" />
+                  </div>
+                )}
+                <h3 style={{ margin: '0 0 6px', fontSize: '0.95rem', fontWeight: 700, color: '#1A1A2E' }}>{a.full_name}</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center', marginBottom: 12 }}>
+                  {a.phone && <span style={{ fontSize: '0.8rem', color: '#888' }}><Phone size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />{a.phone}</span>}
+                  {a.facebook_url && (
+                    <a href={a.facebook_url} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: '#1565C0', textDecoration: 'none' }}>
+                      <ExternalLink size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Facebook
+                    </a>
+                  )}
+                </div>
+                <button className="btn btn-outline btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={() => setScheduleAssistantId(a.id)}>
+                  <Calendar size={13} /> Xem lịch làm việc
+                </button>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {geometryGroups.map((g, i) => renderChapterAccordion(g, i))}
-              </div>
-            </div>
-          )}
-          {orphanGroup && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {renderChapterAccordion(orphanGroup, 0)}
-            </div>
-          )}
-        </div>
+            ))}
+          </div>
+        )
       )}
 
       {/* View Lesson Modal */}
@@ -514,6 +572,13 @@ export default function StudentClassDetail() {
 
       {/* File Viewer */}
       {viewFiles && <FileViewer files={viewFiles} onClose={() => setViewFiles(null)} />}
+
+      <AssistantScheduleModal
+        open={scheduleAssistantId !== null}
+        onClose={() => setScheduleAssistantId(null)}
+        assistant={scheduleAssistant}
+        editable={false}
+      />
     </div>
   );
 }

@@ -62,9 +62,11 @@ router.get('/my-classes/:id', (req, res) => {
     };
   });
 
+  const assistants = db.prepare('SELECT * FROM class_assistants WHERE class_id=? ORDER BY created_at').all(req.params.id);
+
   // Điểm TB + xếp hạng của học sinh trong lớp này (quá hạn chưa nộp = 0 điểm)
   const mine = classRanking(db, req.params.id).get(req.user.id) || {};
-  res.json({ ...cls, chapters, lessons, homework, my_avg: mine.avg ?? null, my_rank: mine.rank ?? null, rank_total: mine.total ?? 0 });
+  res.json({ ...cls, chapters, lessons, homework, assistants, my_avg: mine.avg ?? null, my_rank: mine.rank ?? null, rank_total: mine.total ?? 0 });
 });
 
 // Khóa học mà học sinh có ít nhất 1 lớp — dùng cho trang Tổng quan (chỉ hiện khóa học, bấm vào mới thấy lớp)

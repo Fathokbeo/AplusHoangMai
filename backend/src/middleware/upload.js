@@ -83,6 +83,15 @@ const uploadCourseThumbnail = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
 });
 
+const uploadAssistantPhoto = multer({
+  storage: createStorage('assistants'),
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Chỉ chấp nhận file ảnh'));
+  },
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
+
 // Upload ảnh chung cho nội dung trang (học sinh, giáo viên, khóa tiêu biểu, thành tích)
 function makeImageUpload(subDir) {
   return multer({
@@ -102,4 +111,4 @@ const uploadContent = {
   'achievements': makeImageUpload('achievements'),
 };
 
-module.exports = { uploadAd, uploadHomework, uploadSubmission, uploadVideo, uploadCourseThumbnail, uploadContent, uploadLessonFile };
+module.exports = { uploadAd, uploadHomework, uploadSubmission, uploadVideo, uploadCourseThumbnail, uploadContent, uploadLessonFile, uploadAssistantPhoto };

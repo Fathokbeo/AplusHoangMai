@@ -61,6 +61,19 @@ function initSchema() {
       FOREIGN KEY (student_id) REFERENCES users(id)
     );
 
+    -- Trợ giảng của lớp học: thông tin liên hệ + lịch làm việc trong tuần (JSON, 7 ngày × 7 ca)
+    CREATE TABLE IF NOT EXISTS class_assistants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      class_id INTEGER NOT NULL,
+      full_name TEXT NOT NULL,
+      photo TEXT,
+      phone TEXT,
+      facebook_url TEXT,
+      schedule TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (class_id) REFERENCES classes(id)
+    );
+
     -- Chương: nhóm bài giảng & bài tập trong một lớp, có thứ tự
     CREATE TABLE IF NOT EXISTS chapters (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

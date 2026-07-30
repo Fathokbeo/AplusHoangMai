@@ -57,6 +57,11 @@ function hardDeleteClass(db, classId, { purgeStudents = true } = {}) {
   db.prepare('DELETE FROM lessons WHERE class_id=?').run(classId);
 
   db.prepare('DELETE FROM chapters WHERE class_id=?').run(classId);
+
+  const assistants = db.prepare('SELECT photo FROM class_assistants WHERE class_id=?').all(classId);
+  assistants.forEach(a => rmFile('assistants', a.photo));
+  db.prepare('DELETE FROM class_assistants WHERE class_id=?').run(classId);
+
   db.prepare('DELETE FROM class_students WHERE class_id=?').run(classId);
   db.prepare('DELETE FROM classes WHERE id=?').run(classId);
 
