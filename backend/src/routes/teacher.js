@@ -12,6 +12,39 @@ const { compareVietnameseName } = require('../services/vietnameseName');
 
 router.use(authMiddleware, requireRole('teacher', 'admin'));
 
+// Thêm 1 học sinh vào class_students, giữ đúng vị trí trong danh sách của lớp:
+// - Lớp CHƯA từng kéo thả (custom_student_order=0): thứ tự hiển thị luôn tính lại theo bảng chữ cái
+//   ở GET /classes/:id nên sort_order không quan trọng, chỉ cần thêm cuối cho đơn giản.
+// - Lớp ĐÃ từng kéo thả (custom_student_order=1): thứ tự hiển thị = sort_order đã lưu, nên học sinh mới
+//   phải được CHÈN đúng vị trí bảng chữ cái (so khớp compareVietnameseName), không phải luôn đẩy xuống cuối.
+function insertStudentSorted(db, classId, studentId, fullName, customOrder) {
+  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),0) m FROM class_students WHERE class_id=?').get(classId).m;
+  if (!customOrder) {
+    db.prepare('INSERT INTO class_students (class_id,student_id,sort_order) VALUES (?,?,?)').run(classId, studentId, maxOrder + 1);
+    return;
+  }
+  const existing = db.prepare(`
+    SELECT cs.sort_order, u.full_name FROM class_students cs JOIN users u ON cs.student_id=u.id
+    WHERE cs.class_id=? ORDER BY cs.sort_order
+  `).all(classId);
+  if (existing.length === 0) {
+    db.prepare('INSERT INTO class_students (class_id,student_id,sort_order) VALUES (?,?,?)').run(classId, studentId, maxOrder + 1);
+    return;
+  }
+  // Thứ tự đã kéo thả có thể KHÔNG theo bảng chữ cái (giáo viên chỉnh tay), nên không thể dò tuần tự
+  // theo vị trí hiện tại. Thay vào đó tìm "hàng xóm gần nhất về tên" (so toàn bộ danh sách) rồi chèn
+  // ngay sau vị trí hiện tại của hàng xóm đó — luôn cho vị trí hợp lý dù thứ tự gốc có xáo trộn thế nào.
+  let predecessor = null; // học sinh có tên gần nhất, đứng trước fullName theo bảng chữ cái
+  existing.forEach((s) => {
+    if (compareVietnameseName(s.full_name, fullName) < 0) {
+      if (!predecessor || compareVietnameseName(s.full_name, predecessor.full_name) > 0) predecessor = s;
+    }
+  });
+  const insertOrder = predecessor ? predecessor.sort_order + 1 : existing[0].sort_order;
+  db.prepare('UPDATE class_students SET sort_order = sort_order + 1 WHERE class_id=? AND sort_order >= ?').run(classId, insertOrder);
+  db.prepare('INSERT INTO class_students (class_id,student_id,sort_order) VALUES (?,?,?)').run(classId, studentId, insertOrder);
+}
+
 // ── Students ───────────────────────────────────────────────────────────
 router.get('/students', (req, res) => {
   const db = getDb();
@@ -253,8 +286,8 @@ router.post('/classes/:id/students', (req, res) => {
   }
 
   try {
-    const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),0) m FROM class_students WHERE class_id=?').get(req.params.id).m;
-    db.prepare('INSERT INTO class_students (class_id,student_id,sort_order) VALUES (?,?,?)').run(req.params.id, sid, maxOrder + 1);
+    const name = full_name || db.prepare('SELECT full_name FROM users WHERE id=?').get(sid).full_name;
+    insertStudentSorted(db, req.params.id, sid, name, cls.custom_student_order);
     res.status(201).json({ message: 'Đã thêm học sinh vào lớp', student_id: sid });
   } catch (e) {
     if (e.message.includes('UNIQUE')) return res.status(400).json({ message: 'Học sinh đã trong lớp' });
@@ -283,8 +316,6 @@ router.post('/classes/:id/students/bulk', (req, res) => {
   const insertUser = db.prepare(
     'INSERT INTO users (username,password,plain_password,full_name,parent_phone,role,created_by) VALUES (?,?,?,?,?,?,?)'
   );
-  const enroll = db.prepare('INSERT INTO class_students (class_id,student_id,sort_order) VALUES (?,?,?)');
-  let nextOrder = db.prepare('SELECT COALESCE(MAX(sort_order),0) m FROM class_students WHERE class_id=?').get(req.params.id).m + 1;
 
   db.transaction(() => {
     students.forEach((row, i) => {
@@ -303,7 +334,7 @@ router.post('/classes/:id/students/bulk', (req, res) => {
         return;
       }
       const r = insertUser.run(username, bcrypt.hashSync(password, 10), password, full_name, parent_phone, 'student', req.user.id);
-      enroll.run(req.params.id, r.lastInsertRowid, nextOrder++);
+      insertStudentSorted(db, req.params.id, r.lastInsertRowid, full_name, cls.custom_student_order);
       created++;
     });
   })();
@@ -332,8 +363,8 @@ router.put('/students/:studentId/move', (req, res) => {
     if (from_class_id) {
       db.prepare('DELETE FROM class_students WHERE class_id=? AND student_id=?').run(from_class_id, req.params.studentId);
     }
-    const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),0) m FROM class_students WHERE class_id=?').get(to_class_id).m;
-    db.prepare('INSERT INTO class_students (class_id,student_id,sort_order) VALUES (?,?,?)').run(to_class_id, req.params.studentId, maxOrder + 1);
+    const name = db.prepare('SELECT full_name FROM users WHERE id=?').get(req.params.studentId).full_name;
+    insertStudentSorted(db, to_class_id, req.params.studentId, name, target.custom_student_order);
   })();
   res.json({ message: from_class_id ? 'Đã chuyển lớp' : 'Đã chỉ định lớp' });
 });
