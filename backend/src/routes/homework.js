@@ -8,6 +8,7 @@ const { uploadHomework, uploadSubmission } = require('../middleware/upload');
 const { enqueue, gradeOne } = require('../services/gradingQueue');
 const { needsAiGrading, stripAnswers } = require('../services/homeworkParts');
 const { computeMaxScore, DEFAULT_POINTS } = require('../services/homeworkScoring');
+const { compareVietnameseName } = require('../services/vietnameseName');
 
 router.use(authMiddleware);
 
@@ -150,7 +151,7 @@ router.delete('/homework/:id', requireRole('teacher', 'admin'), (req, res) => {
 // ── Get homework detail ────────────────────────────────────────────────
 router.get('/homework/:id', (req, res) => {
   const db = getDb();
-  const hw = db.prepare('SELECT h.*,c.teacher_id,c.title class_title FROM homework h JOIN classes c ON h.class_id=c.id WHERE h.id=?').get(req.params.id);
+  const hw = db.prepare('SELECT h.*,c.teacher_id,c.title class_title,c.custom_student_order FROM homework h JOIN classes c ON h.class_id=c.id WHERE h.id=?').get(req.params.id);
   if (!hw) return res.status(404).json({ message: 'Không tìm thấy' });
 
   if (req.user.role === 'student') {
@@ -188,14 +189,16 @@ router.get('/homework/:id', (req, res) => {
   // Danh sách CẢ LỚP kèm bài nộp (nếu có) → giáo viên thấy cả bạn chưa nộp.
   // Quá hạn mà chưa nộp → giao diện hiện "Chưa nộp bài" + 0 điểm (khớp cách tính xếp hạng).
   const roster = db.prepare(`
-    SELECT u.id student_id, u.username, u.full_name,
+    SELECT u.id student_id, u.username, u.full_name, cs.sort_order,
            s.id submission_id, s.file_path, s.files, s.structured_answers, s.submitted_at,
            s.score, s.feedback, s.graded_at, s.graded_by_ai, s.grading_details, s.grading_status
     FROM class_students cs JOIN users u ON cs.student_id=u.id
     LEFT JOIN submissions s ON s.homework_id=? AND s.student_id=u.id
     WHERE cs.class_id=? AND u.active=1
-    ORDER BY u.full_name
   `).all(req.params.id, hw.class_id);
+  // Khớp thứ tự với danh sách học sinh đã kéo thả trong lớp (xem teacher.js GET /classes/:id)
+  roster.sort((a, b) => (hw.custom_student_order ? (a.sort_order - b.sort_order) : 0) || compareVietnameseName(a.full_name, b.full_name));
+  roster.forEach((s) => { delete s.sort_order; });
 
   res.json({ ...hw, submissions, roster, is_overdue: hw.due_date ? now > hw.due_date : false });
 });

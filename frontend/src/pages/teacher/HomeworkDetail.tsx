@@ -6,7 +6,6 @@ import GradingDetails from '../../components/GradingDetails';
 import StructuredAnswerReview from '../../components/StructuredAnswerReview';
 import FileViewer from '../../components/FileViewer';
 import { toast } from '../../components/Toast';
-import { sortByVietnameseName } from '../../lib/vietnameseName';
 import { parsePartsConfig, hasObjectiveParts } from '../../lib/homeworkParts';
 import { ChevronLeft, Users, CheckCircle, XCircle, Clock, Bot, Star, Eye, Download } from 'lucide-react';
 
@@ -87,8 +86,9 @@ export default function HomeworkDetail() {
   };
 
   // Xuất bảng điểm CẢ LỚP ra file Excel (.xlsx): STT, Họ và tên, Trạng thái, Điểm, Nhận xét
+  // Thứ tự lấy nguyên từ server (đã khớp với thứ tự đã kéo thả trong danh sách học sinh của lớp)
   const exportExcel = async () => {
-    const rowsSrc = sortByVietnameseName((hw.roster || []) as any[], (s: any) => s.full_name || '');
+    const rowsSrc = (hw.roster || []) as any[];
     if (rowsSrc.length === 0) { toast.error('Lớp chưa có học sinh'); return; }
     const XLSX = await import('xlsx');
     const overdue = hw.due_date ? new Date() > new Date(hw.due_date) : false;
@@ -127,8 +127,9 @@ export default function HomeworkDetail() {
 
   if (!hw) return <div style={{ padding: '2rem', color: '#999', textAlign: 'center' }}>Đang tải...</div>;
 
-  // Danh sách CẢ LỚP (kèm bài nộp nếu có); quá hạn mà chưa nộp → "Chưa nộp bài" + 0 điểm
-  const roster = sortByVietnameseName((hw.roster || []) as any[], (s: any) => s.full_name || '');
+  // Danh sách CẢ LỚP (kèm bài nộp nếu có), thứ tự khớp với danh sách học sinh của lớp (server đã sort)
+  // quá hạn mà chưa nộp → "Chưa nộp bài" + 0 điểm
+  const roster: any[] = hw.roster || [];
   const isOverdue = hw.due_date ? new Date() > new Date(hw.due_date) : false;
   const submittedCount = roster.filter((s: any) => s.submission_id).length;
   const missingCount = roster.length - submittedCount;
