@@ -30,8 +30,28 @@ function buildInlinePart(filePath) {
   };
 }
 
-// Thứ tự ưu tiên model: flash trước (rẻ, có free tier), pro làm dự phòng
-const MODELS = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-pro'];
+// Free tier: các model Flash "xịn" chỉ có 20 request/NGÀY mỗi model (5 req/phút),
+// còn Flash Lite 3.x có tới 500 request/ngày (15 req/phút). Gemini Pro free tier = 0, không dùng được.
+// Chiến lược: lần chấm ĐẦU của mỗi bài dùng Flash xịn (chính xác nhất) — 50 bài/ngày vừa khít
+// tổng quota 4 model Flash (4×20=80). Các lần chấm lại dùng Flash Lite (quota 2×500=1000/ngày).
+const STRONG_MODELS = [
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
+  'gemini-3-flash-preview',
+  'gemini-2.5-flash',
+  // Hết sạch quota Flash xịn thì rơi xuống Lite thay vì fail
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-flash-lite',
+];
+const LITE_MODELS = [
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-flash-lite',
+  // Lite hết quota (hiếm) thì mượn Flash xịn
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
+];
+// Trích đáp án từ file là việc dễ (đọc bảng đáp án) → dùng Lite để dành quota Flash xịn cho chấm bài
+const EXTRACT_MODELS = LITE_MODELS;
 
 // Giới hạn đầu ra để tiết kiệm token + ép trả JSON thuần (không markdown)
 const GENERATION_CONFIG = {
@@ -163,7 +183,8 @@ Trả về JSON đúng định dạng sau (chỉ JSON, không kèm chữ nào kh
   let lastErr;
   for (let i = 0; i < n; i++) {
     try {
-      results.push(await callModelOnce(parts, maxScore));
+      // Lần đầu dùng Flash xịn cho chính xác, các lần sau dùng Lite để tiết kiệm quota ngày
+      results.push(await callModelOnce(parts, maxScore, i === 0 ? STRONG_MODELS : LITE_MODELS));
     } catch (err) {
       lastErr = err;
       console.error(`[AI grading] lần ${i + 1}/${n} lỗi: ${err.message}`);
@@ -177,11 +198,17 @@ Trả về JSON đúng định dạng sau (chỉ JSON, không kèm chữ nào kh
   return results[0];
 }
 
-// Gọi AI 1 lần để chấm; tự fallback sang model khác nếu dính quota (429).
+// Lỗi có nên thử model tiếp theo không: hết quota (429), quá tải (503), hoặc model bị gỡ (404).
+function isRetryableModelError(err) {
+  const msg = String(err && err.message);
+  return /429|quota|RESOURCE_EXHAUSTED|503|overloaded|UNAVAILABLE|404|not found/i.test(msg);
+}
+
+// Gọi AI 1 lần để chấm; tự fallback lần lượt qua danh sách models nếu dính quota/quá tải.
 // Trả về { score, feedback, details } đã chuẩn hóa.
-async function callModelOnce(parts, maxScore) {
+async function callModelOnce(parts, maxScore, models) {
   let lastErr;
-  for (const modelName of MODELS) {
+  for (const modelName of models) {
     try {
       const model = genAI.getGenerativeModel({ model: modelName, generationConfig: GENERATION_CONFIG });
       const result = await model.generateContent(parts);
@@ -199,11 +226,12 @@ async function callModelOnce(parts, maxScore) {
           status: ['correct', 'wrong', 'partial'].includes(d.status) ? d.status : 'partial',
           comment: String(d.comment || '').slice(0, 500),
         }));
+      console.log(`[AI grading] chấm bằng ${modelName} → ${parsed.score} điểm`);
       return parsed;
     } catch (err) {
       lastErr = err;
-      // Nếu lỗi quota (429) thì thử model tiếp theo, lỗi khác thì dừng
-      if (!String(err.message).includes('429') && !String(err.message).includes('quota')) throw err;
+      if (!isRetryableModelError(err)) throw err;
+      console.warn(`[AI grading] ${modelName} không khả dụng (${String(err.message).slice(0, 120)}) → thử model tiếp theo`);
     }
   }
   throw lastErr;
@@ -243,7 +271,7 @@ Yêu cầu BẮT BUỘC:
 
   const parts = [prompt, buildInlinePart(answerFilePath)];
   let lastErr;
-  for (const modelName of MODELS) {
+  for (const modelName of EXTRACT_MODELS) {
     try {
       const model = genAI.getGenerativeModel({ model: modelName, generationConfig: EXTRACT_CONFIG });
       const result = await model.generateContent(parts);
@@ -257,7 +285,7 @@ Yêu cầu BẮT BUỘC:
       return out;
     } catch (err) {
       lastErr = err;
-      if (!String(err.message).includes('429') && !String(err.message).includes('quota')) throw err;
+      if (!isRetryableModelError(err)) throw err;
     }
   }
   throw lastErr;
