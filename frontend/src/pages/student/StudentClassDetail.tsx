@@ -315,12 +315,12 @@ export default function StudentClassDetail() {
               </span>
             )}
             {canSubmit ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: isMobile ? 'flex-start' : 'flex-end', gap: 3 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
                 <button className="btn btn-primary btn-sm" onClick={() => openSubmit(hw)}>
                   <Upload size={13} /> {isSubmitted ? 'Nộp lại' : 'Nộp bài'}
                 </button>
                 {hasAttemptLimit && (
-                  <span style={{ fontSize: '0.72rem', color: '#999' }}>còn {hw.attempts_left} lần</span>
+                  <span style={{ fontSize: '0.72rem', color: '#999' }}>Giới hạn (còn {hw.attempts_left} lần nộp)</span>
                 )}
               </div>
             ) : !isSubmitted ? (
