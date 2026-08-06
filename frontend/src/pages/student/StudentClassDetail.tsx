@@ -315,9 +315,14 @@ export default function StudentClassDetail() {
               </span>
             )}
             {canSubmit ? (
-              <button className="btn btn-primary btn-sm" onClick={() => openSubmit(hw)}>
-                <Upload size={13} /> {isSubmitted ? 'Nộp lại' : 'Nộp bài'}{hasAttemptLimit ? ` (còn ${hw.attempts_left} lần)` : ''}
-              </button>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: isMobile ? 'flex-start' : 'flex-end', gap: 3 }}>
+                <button className="btn btn-primary btn-sm" onClick={() => openSubmit(hw)}>
+                  <Upload size={13} /> {isSubmitted ? 'Nộp lại' : 'Nộp bài'}
+                </button>
+                {hasAttemptLimit && (
+                  <span style={{ fontSize: '0.72rem', color: '#999' }}>còn {hw.attempts_left} lần</span>
+                )}
+              </div>
             ) : !isSubmitted ? (
               <span style={{ fontSize: '0.78rem', color: '#C62828' }}>Hết hạn</span>
             ) : !isOverdue && attemptsExhausted && (
