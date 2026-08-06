@@ -176,6 +176,10 @@ export default function StudentClassDetail() {
     const isSubmitted = !!hw.submission_id;
     const hasGrade = hw.score !== null;
     const canSubmit = hw.can_submit;
+    const isOverdue = hw.due_date ? new Date() > new Date(hw.due_date) : false;
+    // attempts_left: null/undefined = không giới hạn số lần nộp
+    const hasAttemptLimit = hw.attempts_left !== null && hw.attempts_left !== undefined;
+    const attemptsExhausted = hasAttemptLimit && hw.attempts_left <= 0;
 
     return (
       <div key={hw.id} className="card" style={{ padding: '1.25rem' }}>
@@ -190,12 +194,14 @@ export default function StudentClassDetail() {
               <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>{hw.title}</span>
               {isSubmitted && <span className="badge badge-green">Đã nộp</span>}
               {!canSubmit && !isSubmitted && <span className="badge badge-gray">Hết hạn</span>}
+              {!canSubmit && isSubmitted && !isOverdue && attemptsExhausted && <span className="badge badge-gray">Hết lượt nộp</span>}
             </div>
             {hw.description && <p style={{ margin: '0 0 8px', fontSize: '0.82rem', color: '#888', lineHeight: 1.5 }}>{hw.description}</p>}
 
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: '0.78rem', color: '#888' }}>
               <span>Thang điểm: {hw.max_score}</span>
               {hw.due_date && <span><Clock size={11} style={{ verticalAlign: 'middle' }} /> HH: {new Date(hw.due_date).toLocaleString('vi-VN')}</span>}
+              {hasAttemptLimit && <span><Upload size={11} style={{ verticalAlign: 'middle' }} /> Lượt nộp: {hw.max_attempts - hw.attempts_left}/{hw.max_attempts}</span>}
             </div>
             {(() => {
               const cfg = parsePartsConfig(hw.parts_config);
@@ -310,9 +316,13 @@ export default function StudentClassDetail() {
             )}
             {canSubmit ? (
               <button className="btn btn-primary btn-sm" onClick={() => openSubmit(hw)}>
-                <Upload size={13} /> {isSubmitted ? 'Nộp lại' : 'Nộp bài'}
+                <Upload size={13} /> {isSubmitted ? 'Nộp lại' : 'Nộp bài'}{hasAttemptLimit ? ` (còn ${hw.attempts_left} lần)` : ''}
               </button>
-            ) : !isSubmitted && <span style={{ fontSize: '0.78rem', color: '#C62828' }}>Hết hạn</span>}
+            ) : !isSubmitted ? (
+              <span style={{ fontSize: '0.78rem', color: '#C62828' }}>Hết hạn</span>
+            ) : !isOverdue && attemptsExhausted && (
+              <span style={{ fontSize: '0.78rem', color: '#C62828' }}>Đã hết lượt nộp lại (tối đa {hw.max_attempts} lần)</span>
+            )}
           </div>
         </div>
       </div>

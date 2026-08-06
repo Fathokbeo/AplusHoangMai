@@ -7,7 +7,7 @@ import StructuredAnswerReview from '../../components/StructuredAnswerReview';
 import FileViewer from '../../components/FileViewer';
 import { toast } from '../../components/Toast';
 import { parsePartsConfig, hasObjectiveParts } from '../../lib/homeworkParts';
-import { ChevronLeft, Users, CheckCircle, XCircle, Clock, Bot, Star, Eye, Download } from 'lucide-react';
+import { ChevronLeft, Users, CheckCircle, XCircle, Clock, Bot, Star, Eye, Download, Repeat } from 'lucide-react';
 
 // Danh sách URL file của một bài nộp (hỗ trợ cũ: 1 file, mới: nhiều file dạng JSON)
 function submissionFileUrls(s: any): string[] {
@@ -188,6 +188,12 @@ export default function HomeworkDetail() {
             <div><div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#6A1B9A' }}>{new Date(hw.due_date).toLocaleDateString('vi-VN')}</div><div className="stat-label">Hạn nộp</div></div>
           </div>
         )}
+        {hw.max_attempts && (
+          <div className="stat-card">
+            <div className="stat-icon" style={{ background: '#EDE7F6' }}><Repeat size={18} color="#5E35B1" /></div>
+            <div><div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#5E35B1' }}>{hw.max_attempts} lần</div><div className="stat-label">Giới hạn nộp bài</div></div>
+          </div>
+        )}
       </div>
 
       {/* PDF buttons */}
@@ -235,6 +241,7 @@ export default function HomeworkDetail() {
               <th>Học sinh</th>
               <th>Trạng thái</th>
               <th>Thời gian nộp</th>
+              <th>Số lần nộp</th>
               <th>File bài</th>
               <th>Điểm</th>
               <th>Chấm bởi</th>
@@ -257,6 +264,9 @@ export default function HomeworkDetail() {
                         : <span className="badge badge-gray">Chưa nộp</span>}
                   </td>
                   <td style={{ fontSize: '0.82rem', color: '#888' }}>{submitted ? new Date(s.submitted_at).toLocaleString('vi-VN') : '—'}</td>
+                  <td style={{ fontSize: '0.82rem' }}>
+                    {submitted ? `${s.submit_count || 1}${hw.max_attempts ? `/${hw.max_attempts}` : ''}` : '—'}
+                  </td>
                   <td>
                     {fileUrls.length > 0 ? (
                       <button className="btn btn-ghost btn-sm" onClick={() => setViewFiles(fileUrls)}>
@@ -310,10 +320,10 @@ export default function HomeworkDetail() {
               );
             })}
             {roster.length === 0 && (
-              <tr><td colSpan={7} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Lớp chưa có học sinh</td></tr>
+              <tr><td colSpan={8} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Lớp chưa có học sinh</td></tr>
             )}
             {roster.length > 0 && visibleRoster.length === 0 && (
-              <tr><td colSpan={7} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Không có học sinh nào trong nhóm lọc này</td></tr>
+              <tr><td colSpan={8} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Không có học sinh nào trong nhóm lọc này</td></tr>
             )}
           </tbody>
         </table>

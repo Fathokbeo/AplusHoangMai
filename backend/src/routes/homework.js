@@ -63,7 +63,7 @@ router.post(
   requireRole('teacher', 'admin'),
   uploadHomework.fields([{ name: 'pdf_file', maxCount: 1 }, { name: 'answer_file', maxCount: 1 }]),
   (req, res) => {
-    const { title, description, due_date, answer_visible_date, max_score, grading_note, chapter_id, solution_video_url, parts_config, hw_order } = req.body;
+    const { title, description, due_date, answer_visible_date, max_score, grading_note, chapter_id, solution_video_url, parts_config, hw_order, max_attempts } = req.body;
     if (!title) return res.status(400).json({ message: 'Cần tiêu đề bài tập' });
     const db = getDb();
     const cls = db.prepare('SELECT * FROM classes WHERE id=?').get(req.params.classId);
@@ -75,17 +75,20 @@ router.post(
     const rawSum = computeMaxScore(partsJson);
     const provided = parseFloat(max_score);
     const finalMax = isFinite(provided) && provided > 0 ? provided : (rawSum != null ? rawSum : 10);
+    // Giới hạn số lần nộp bài: số nguyên dương, để trống/0 = không giới hạn
+    const attemptsLimit = parseInt(max_attempts);
+    const finalMaxAttempts = Number.isFinite(attemptsLimit) && attemptsLimit > 0 ? attemptsLimit : null;
 
     const result = db.prepare(`
-      INSERT INTO homework (class_id,title,description,pdf_file,answer_file,due_date,answer_visible_date,max_score,grading_note,chapter_id,solution_video_url,parts_config,hw_order)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+      INSERT INTO homework (class_id,title,description,pdf_file,answer_file,due_date,answer_visible_date,max_score,grading_note,chapter_id,solution_video_url,parts_config,hw_order,max_attempts)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       req.params.classId, title, description || null,
       req.files?.pdf_file?.[0]?.filename || null,
       req.files?.answer_file?.[0]?.filename || null,
       due_date || null, answer_visible_date || null, finalMax,
       grading_note || null, chapter_id || null, solution_video_url || null,
-      partsJson, parseInt(hw_order) || 0
+      partsJson, parseInt(hw_order) || 0, finalMaxAttempts
     );
     res.status(201).json({ id: result.lastInsertRowid, title });
   }
@@ -97,7 +100,7 @@ router.put(
   requireRole('teacher', 'admin'),
   uploadHomework.fields([{ name: 'pdf_file', maxCount: 1 }, { name: 'answer_file', maxCount: 1 }]),
   (req, res) => {
-    const { title, description, due_date, answer_visible_date, max_score, grading_note, chapter_id, solution_video_url, parts_config, hw_order } = req.body;
+    const { title, description, due_date, answer_visible_date, max_score, grading_note, chapter_id, solution_video_url, parts_config, hw_order, max_attempts } = req.body;
     const db = getDb();
     const hw = db.prepare('SELECT h.*,c.teacher_id FROM homework h JOIN classes c ON h.class_id=c.id WHERE h.id=?').get(req.params.id);
     if (!hw) return res.status(404).json({ message: 'Không tìm thấy' });
@@ -112,6 +115,10 @@ router.put(
     if (chapter_id !== undefined) { sets.push('chapter_id=?'); vals.push(chapter_id || null); }
     if (solution_video_url !== undefined) { sets.push('solution_video_url=?'); vals.push(solution_video_url || null); }
     if (hw_order !== undefined) { sets.push('hw_order=?'); vals.push(parseInt(hw_order) || 0); }
+    if (max_attempts !== undefined) {
+      const attemptsLimit = parseInt(max_attempts);
+      sets.push('max_attempts=?'); vals.push(Number.isFinite(attemptsLimit) && attemptsLimit > 0 ? attemptsLimit : null);
+    }
 
     // parts_config + max_score: thang điểm = thang giáo viên chọn (để quy đổi),
     // mặc định = tổng điểm thô các câu nếu giáo viên không nhập.
@@ -169,14 +176,18 @@ router.get('/homework/:id', (req, res) => {
     const safeSubmission = submission
       ? { ...submission, feedback: canSeeAnswer ? submission.feedback : null, grading_details: canSeeAnswer ? submission.grading_details : null }
       : null;
+    // Giới hạn số lần nộp bài (nếu giáo viên có đặt): hết hạn hoặc hết lượt đều không cho nộp nữa.
+    const attemptsUsed = submission?.submit_count || 0;
+    const attemptsLeft = hw.max_attempts ? Math.max(0, hw.max_attempts - attemptsUsed) : null;
     return res.json({
       ...hwPublic,
       parts_config: stripAnswers(hw.parts_config), // ẩn đáp án (key) khỏi học sinh
       answer_file: canSeeAnswer ? hw.answer_file : null,
       solution_video_url: canSeeAnswer ? hw.solution_video_url : null,
       submission: safeSubmission,
-      can_submit: !hw.due_date || now <= hw.due_date,
+      can_submit: (!hw.due_date || now <= hw.due_date) && (attemptsLeft === null || attemptsLeft > 0),
       can_see_answer: canSeeAnswer,
+      attempts_left: attemptsLeft,
     });
   }
 
@@ -191,7 +202,7 @@ router.get('/homework/:id', (req, res) => {
   const roster = db.prepare(`
     SELECT u.id student_id, u.username, u.full_name, cs.sort_order,
            s.id submission_id, s.file_path, s.files, s.structured_answers, s.submitted_at,
-           s.score, s.feedback, s.graded_at, s.graded_by_ai, s.grading_details, s.grading_status
+           s.score, s.feedback, s.graded_at, s.graded_by_ai, s.grading_details, s.grading_status, s.submit_count
     FROM class_students cs JOIN users u ON cs.student_id=u.id
     LEFT JOIN submissions s ON s.homework_id=? AND s.student_id=u.id
     WHERE cs.class_id=? AND u.active=1
@@ -241,10 +252,18 @@ router.post(
     const enrolled = db.prepare('SELECT * FROM class_students WHERE class_id=? AND student_id=?').get(hw.class_id, req.user.id);
     if (!enrolled) { cleanup(); return res.status(403).json({ message: 'Bạn không thuộc lớp này' }); }
 
+    const existing = db.prepare('SELECT * FROM submissions WHERE homework_id=? AND student_id=?').get(req.params.id, req.user.id);
+
+    // Giới hạn số lần nộp bài (nếu giáo viên có đặt max_attempts) — mỗi lần nộp/nộp lại đều tính 1 lượt
+    const attemptsUsed = existing?.submit_count || 0;
+    if (hw.max_attempts && attemptsUsed >= hw.max_attempts) {
+      cleanup();
+      return res.status(400).json({ message: `Đã hết số lần nộp bài cho phép (tối đa ${hw.max_attempts} lần)` });
+    }
+
     const filenames = uploaded.map(f => f.filename);
     const filesJson = filenames.length ? JSON.stringify(filenames) : null;
 
-    const existing = db.prepare('SELECT * FROM submissions WHERE homework_id=? AND student_id=?').get(req.params.id, req.user.id);
     if (existing) {
       // Xóa các file của lần nộp trước
       submissionFilenames(existing).forEach(name => {
@@ -256,15 +275,16 @@ router.post(
     // Có đáp án (file tự luận hoặc key objective) → đưa vào hàng đợi chấm AI ('pending'); không có → giáo viên chấm tay (NULL)
     const aiGrade = needsAiGrading(hw);
     const initialStatus = aiGrade ? 'pending' : null;
+    const newSubmitCount = attemptsUsed + 1;
 
     let submissionId;
     if (existing) {
-      db.prepare('UPDATE submissions SET file_path=?,files=?,structured_answers=?,submitted_at=?,score=NULL,feedback=NULL,grading_details=NULL,graded_at=NULL,graded_by_ai=0,grading_status=?,grading_attempts=0 WHERE id=?')
-        .run(filenames[0] || null, filesJson, structuredJson, now, initialStatus, existing.id);
+      db.prepare('UPDATE submissions SET file_path=?,files=?,structured_answers=?,submitted_at=?,score=NULL,feedback=NULL,grading_details=NULL,graded_at=NULL,graded_by_ai=0,grading_status=?,grading_attempts=0,submit_count=? WHERE id=?')
+        .run(filenames[0] || null, filesJson, structuredJson, now, initialStatus, newSubmitCount, existing.id);
       submissionId = existing.id;
     } else {
-      const r = db.prepare('INSERT INTO submissions (homework_id,student_id,file_path,files,structured_answers,submitted_at,grading_status,grading_attempts) VALUES (?,?,?,?,?,?,?,0)')
-        .run(req.params.id, req.user.id, filenames[0] || null, filesJson, structuredJson, now, initialStatus);
+      const r = db.prepare('INSERT INTO submissions (homework_id,student_id,file_path,files,structured_answers,submitted_at,grading_status,grading_attempts,submit_count) VALUES (?,?,?,?,?,?,?,0,?)')
+        .run(req.params.id, req.user.id, filenames[0] || null, filesJson, structuredJson, now, initialStatus, newSubmitCount);
       submissionId = r.lastInsertRowid;
     }
 
@@ -272,9 +292,10 @@ router.post(
     if (aiGrade) enqueue(submissionId);
 
     const sub = db.prepare('SELECT * FROM submissions WHERE id=?').get(submissionId);
-    const message = aiGrade
+    let message = aiGrade
       ? 'Nộp bài thành công. Hệ thống đang tự động chấm, kết quả sẽ hiển thị sau ít phút.'
       : 'Nộp bài thành công.';
+    if (hw.max_attempts) message += ` (đã dùng ${newSubmitCount}/${hw.max_attempts} lần nộp)`;
     res.json({ message, submission: sub });
   }
 );

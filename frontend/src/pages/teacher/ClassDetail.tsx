@@ -17,7 +17,7 @@ import {
   Users, BookOpen, ClipboardList, Edit, Trash2,
   UserPlus, UserMinus, Play, File, ChevronLeft, Upload, Clock, Eye, Layers, Video, Search,
   ChevronDown, ChevronRight, Trophy, FileSpreadsheet, Download, Paperclip, FileText, X, Plus, GripVertical,
-  UserCog, Phone, Camera, Calendar
+  UserCog, Phone, Camera, Calendar, Repeat
 } from 'lucide-react';
 
 // Giờ nhập ở ô datetime-local là GIỜ ĐỊA PHƯƠNG. Lưu dạng ISO (UTC) để khi so "đến hạn"
@@ -76,7 +76,7 @@ export default function ClassDetail() {
   const [viewingLesson, setViewingLesson] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [lessonForm, setLessonForm] = useState({ title: '', description: '', video_url: '', video_type: 'youtube', lesson_order: '0', chapter_id: '' });
-  const [hwForm, setHwForm] = useState({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '', chapter_id: '', solution_video_url: '', hw_order: '0' });
+  const [hwForm, setHwForm] = useState({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '', chapter_id: '', solution_video_url: '', hw_order: '0', max_attempts: '' });
   const [hwParts, setHwParts] = useState<PartsConfig>(emptyPartsConfig());
   const [hwFiles, setHwFiles] = useState<{ pdf?: File; answer?: File }>({});
   const [chapterForm, setChapterForm] = useState({ title: '', chapter_order: '0', subject: 'algebra' as 'algebra' | 'geometry' });
@@ -526,7 +526,7 @@ export default function ClassDetail() {
     setEditingHw(null);
     setHwForm({
       title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '',
-      chapter_id: chapterId ? String(chapterId) : '', solution_video_url: '',
+      chapter_id: chapterId ? String(chapterId) : '', solution_video_url: '', max_attempts: '',
       hw_order: String(nextOrderInChapter(cls?.homework, chapterId ?? null)),
     });
     setHwParts(emptyPartsConfig());
@@ -544,6 +544,7 @@ export default function ClassDetail() {
       grading_note: h.grading_note || '',
       chapter_id: h.chapter_id ? String(h.chapter_id) : '',
       solution_video_url: h.solution_video_url || '',
+      max_attempts: h.max_attempts ? String(h.max_attempts) : '',
       hw_order: String(positionInChapter(cls?.homework, h.chapter_id, h.id)),
     });
     setHwParts(normalizePartsConfig(h.parts_config));
@@ -677,6 +678,7 @@ export default function ClassDetail() {
             {h.pdf_file && <span className="badge badge-orange"><File size={10} style={{ marginRight: 3 }} />Có đề</span>}
             {h.answer_file && <span className="badge badge-green"><Eye size={10} style={{ marginRight: 3 }} />Có đáp án</span>}
             {h.solution_video_url && <span className="badge badge-red"><Video size={10} style={{ marginRight: 3 }} />Video chữa</span>}
+            {h.max_attempts && <span className="badge badge-gray"><Repeat size={10} style={{ marginRight: 3 }} />Tối đa {h.max_attempts} lần nộp</span>}
             {partBadges(h.parts_config)}
           </div>
         </div>
@@ -1399,9 +1401,17 @@ export default function ClassDetail() {
             <input className="input" type="datetime-local" value={hwForm.due_date} onChange={(e) => setHwForm({ ...hwForm, due_date: e.target.value })} />
           </div>
         </div>
-        <div className="form-group">
-          <label className="label">Thời gian xem đáp án</label>
-          <input className="input" type="datetime-local" value={hwForm.answer_visible_date} onChange={(e) => setHwForm({ ...hwForm, answer_visible_date: e.target.value })} />
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12 }}>
+          <div className="form-group">
+            <label className="label">Thời gian xem đáp án</label>
+            <input className="input" type="datetime-local" value={hwForm.answer_visible_date} onChange={(e) => setHwForm({ ...hwForm, answer_visible_date: e.target.value })} />
+          </div>
+          <div className="form-group">
+            <label className="label">Số lần nộp tối đa</label>
+            <input className="input" type="number" min={1} step={1} placeholder="Không giới hạn"
+              value={hwForm.max_attempts} onChange={(e) => setHwForm({ ...hwForm, max_attempts: e.target.value })} />
+            <div style={{ fontSize: '0.72rem', color: '#888', marginTop: 4 }}>Để trống = học sinh được nộp lại không giới hạn.</div>
+          </div>
         </div>
         <div className="form-group">
           <label className="label">Link video chữa bài (YouTube)</label>

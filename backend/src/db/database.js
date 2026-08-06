@@ -282,6 +282,14 @@ function initSchema() {
   if (!hwCols.some(c => c.name === 'hw_order')) {
     db.exec('ALTER TABLE homework ADD COLUMN hw_order INTEGER DEFAULT 0');
   }
+  // Migration: giới hạn số lần nộp bài của học sinh (NULL = không giới hạn)
+  if (!hwCols.some(c => c.name === 'max_attempts')) {
+    db.exec('ALTER TABLE homework ADD COLUMN max_attempts INTEGER');
+  }
+  // Migration: đếm số lần học sinh đã nộp bài (đối chiếu với homework.max_attempts)
+  if (!subCols.some(c => c.name === 'submit_count')) {
+    db.exec('ALTER TABLE submissions ADD COLUMN submit_count INTEGER DEFAULT 0');
+  }
   // Migration: link Facebook + SĐT của giáo viên/trợ giảng để học sinh liên hệ
   const staffCols = db.prepare("PRAGMA table_info(staff)").all();
   if (!staffCols.some(c => c.name === 'facebook_url')) {
