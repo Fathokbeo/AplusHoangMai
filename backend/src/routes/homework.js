@@ -13,10 +13,11 @@ const { generateFeedbackRubric } = require('../services/aiGrading');
 
 router.use(authMiddleware);
 
-// Đọc FILE ĐÁP ÁN đúng 1 LẦN (chạy nền, không chặn request) để soạn "quy chuẩn nhận xét" cho các
-// phần trắc nghiệm/đúng-sai/trả lời ngắn — dùng khi chấm tự động sau này để ra nhận xét khái quát
-// mà KHÔNG cần gọi AI mỗi lần chấm (xem homeworkScoring.composeAutoFeedback + gradingQueue.js).
-// Chỉ chạy khi có file đáp án + ít nhất 1 phần khách quan đã có đáp án (key) sẵn.
+// Đọc FILE ĐÁP ÁN đúng 1 LẦN (chạy nền, không chặn request) để soạn "quy chuẩn nhận xét" (1 câu mô tả
+// khái quát nội dung đề) — dùng khi chấm tự động sau này để ghép vào mẫu nhận xét theo thang điểm mà
+// KHÔNG cần gọi AI mỗi lần chấm (xem homeworkScoring.composeAutoFeedback + gradingQueue.js).
+// Chỉ chạy khi có file đáp án + ít nhất 1 phần khách quan đã có đáp án (key) sẵn (nếu không thì
+// composeAutoFeedback không có gì để chấm/nhận xét, tạo rubric lúc này sẽ phí lượt AI).
 function scheduleRubricGeneration(homeworkId, answerFilename, partsJson) {
   const cfg = parsePartsConfig(partsJson);
   if (!cfg || !answerFilename) return;
@@ -25,7 +26,7 @@ function scheduleRubricGeneration(homeworkId, answerFilename, partsJson) {
   );
   if (!hasObjectiveKey) return;
   const answerPath = path.join(__dirname, '../../uploads/homework', answerFilename);
-  generateFeedbackRubric(answerPath, cfg)
+  generateFeedbackRubric(answerPath)
     .then((rubric) => {
       if (!rubric) return;
       getDb().prepare('UPDATE homework SET feedback_rubric=? WHERE id=?').run(JSON.stringify(rubric), homeworkId);

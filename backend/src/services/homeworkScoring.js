@@ -140,7 +140,9 @@ function scoreStructured(rawCfg, rawAns) {
     else {
       result.gradedParts.true_false = true;
       const ladder = tfLadder(cfg);
-      const stat = { total: 0, correct: 0, wrongIdx: [] };
+      // wrongSub: tổng số Ý (a,b,c,d) sai TRÊN CẢ PHẦN — dùng để quyết định có nhắc "Đúng/Sai" trong
+      // nhận xét khái quát hay không (xem composeAutoFeedback), khác wrongIdx (đếm theo CÂU).
+      const stat = { total: 0, correct: 0, wrongIdx: [], wrongSub: 0 };
       key.forEach((krow, i) => {
         if (!keyIsSet('true_false', krow)) { result.unresolved.push(['true_false', i]); result.details.push(unresolvedDetail('Đúng/Sai', i)); return; }
         stat.total++;
@@ -157,6 +159,7 @@ function scoreStructured(rawCfg, rawAns) {
         }
         const earned = round2((pts[i] || 0) * ladder[correct]);
         result.score += earned;
+        stat.wrongSub += 4 - correct;
         if (correct === 4) stat.correct++; else stat.wrongIdx.push(i);
         const status = correct === 4 ? 'correct' : correct === 0 ? 'wrong' : 'partial';
         result.details.push({
@@ -214,25 +217,42 @@ function scaleToTarget(rawEarned, rawMax, scale) {
 
 const PART_LABEL_TXT = { multiple_choice: 'Trắc nghiệm', true_false: 'Đúng/Sai', short_answer: 'Trả lời ngắn' };
 
-// Tạo nhận xét khái quát cho các phần khách quan — KHÔNG dùng AI ở đây. Dựa trên partStats (đúng/sai
-// từng câu, xem scoreStructured) và rubric (ghi chú do AI soạn sẵn ĐÚNG 1 LẦN khi tạo/cập nhật đáp án,
-// xem aiGrading.generateFeedbackRubric + routes/homework.js). rubric có thể null (chưa tạo/lỗi) →
-// vẫn ra được nhận xét, chỉ thiếu phần ghi chú "cần cẩn thận hơn dạng nào".
-function composeAutoFeedback(partStats, rubric) {
-  const lines = [];
-  ['multiple_choice', 'true_false', 'short_answer'].forEach((k) => {
-    const st = partStats && partStats[k];
-    if (!st || st.total === 0) return;
-    if (st.wrongIdx.length === 0) {
-      lines.push(`${PART_LABEL_TXT[k]}: đúng hết ${st.total}/${st.total} câu.`);
-      return;
-    }
-    const notesArr = rubric && Array.isArray(rubric[k]) ? rubric[k] : [];
-    const notes = [...new Set(st.wrongIdx.map((i) => notesArr[i]).filter(Boolean))].slice(0, 3);
-    const noteTxt = notes.length ? ` Cần cẩn thận hơn: ${notes.join('; ')}.` : '';
-    lines.push(`${PART_LABEL_TXT[k]}: đúng ${st.correct}/${st.total} câu.${noteTxt}`);
-  });
-  return lines.join(' ');
+// Nhận xét khái quát cho phần khách quan (trắc nghiệm/đúng-sai/trả lời ngắn) — KHÔNG dùng AI ở đây,
+// chọn theo MẪU + thang điểm (quy đổi thang 10), theo đúng yêu cầu giáo viên:
+//   >=9đ: khen, không liệt kê lỗi.
+//   >=8đ / >=7đ: khen có điều kiện — liệt kê phần còn sai (nếu đạt ngưỡng) + nhắc chủ đề bài.
+//   >=5đ: nhắc chung cả 3 phần + luyện tập thêm.
+//   <5đ: nhắc học lại + luyện tập thêm.
+// Ngưỡng liệt kê 1 phần vào câu nhận xét: Trắc nghiệm sai ≥2 câu; Đúng/Sai sai ≥2 Ý (không phải câu);
+// Trả lời ngắn sai ≥1 câu.
+// pct10: điểm phần khách quan quy đổi thang 10 (điểm thô / điểm tối đa phần khách quan × 10).
+// partStats: xem scoreStructured. topic: rubric.overview do AI soạn sẵn ĐÚNG 1 LẦN khi tạo/cập nhật
+// đáp án (xem aiGrading.generateFeedbackRubric + routes/homework.js) — có thể null nếu chưa có/lỗi.
+function composeAutoFeedback(pct10, partStats, topic) {
+  const topicTxt = topic || 'các dạng bài trong bài tập này';
+  const mc = partStats && partStats.multiple_choice;
+  const tf = partStats && partStats.true_false;
+  const sa = partStats && partStats.short_answer;
+  const wrongParts = [];
+  if (mc && mc.wrongIdx.length >= 2) wrongParts.push(PART_LABEL_TXT.multiple_choice);
+  if (tf && (tf.wrongSub || 0) >= 2) wrongParts.push(PART_LABEL_TXT.true_false);
+  if (sa && sa.wrongIdx.length >= 1) wrongParts.push(PART_LABEL_TXT.short_answer);
+
+  if (pct10 >= 9) return 'Con làm bài tốt, cố gắng phát huy.';
+  if (pct10 >= 8) {
+    return wrongParts.length
+      ? `Con làm bài khá tốt tuy nhiên còn sai phần ${wrongParts.join(', ')} và cẩn thận hơn khi làm các dạng bài về ${topicTxt}.`
+      : 'Con làm bài khá tốt, cố gắng phát huy hơn nữa.';
+  }
+  if (pct10 >= 7) {
+    return wrongParts.length
+      ? `Con làm bài khá ổn tuy nhiên còn sai phần ${wrongParts.join(', ')} và cẩn thận hơn khi làm các dạng bài về ${topicTxt}.`
+      : 'Con làm bài khá ổn, cố gắng phát huy hơn nữa.';
+  }
+  if (pct10 >= 5) {
+    return `Con đã nắm được kiến thức tuy nhiên còn nhiều sai sót, cần cẩn thận hơn khi làm Trắc nghiệm, Đúng/Sai, Trả lời ngắn và luyện tập thêm các bài tập về ${topicTxt}.`;
+  }
+  return `Con còn sai sót nhiều khi làm bài tập, cần chú ý học lại và luyện tập thêm các bài toán về ${topicTxt}.`;
 }
 
 module.exports = {

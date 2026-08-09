@@ -177,11 +177,16 @@ async function gradeOne(submissionId, { force = false } = {}) {
     let total = cfg ? scaleToTarget(rawEarned, rawMaxScore(cfg), sub.max_score) : rawEarned;
     if (sub.max_score != null) total = Math.max(0, Math.min(sub.max_score, total));
     const details = [...det.details, ...aiDetails];
-    // Nhận xét khái quát cho phần chấm tự động (KHÔNG dùng AI) — dựa trên partStats + rubric đã soạn sẵn
-    // 1 lần khi tạo/cập nhật đáp án (xem homework.js). Ghép với nhận xét AI (nếu có phần AI chấm, vd tự luận).
+    // Nhận xét khái quát cho phần khách quan chấm tự động (KHÔNG dùng AI) — chọn mẫu theo điểm phần
+    // khách quan quy đổi thang 10 + chủ đề bài (overview đã soạn sẵn 1 lần, xem homework.js).
+    // Ghép với nhận xét AI (nếu có phần AI chấm, vd tự luận).
     let rubric = null;
     try { rubric = sub.feedback_rubric ? JSON.parse(sub.feedback_rubric) : null; } catch { rubric = null; }
-    const detFeedback = composeAutoFeedback(det.partStats, rubric);
+    const objMaxPts = ['multiple_choice', 'true_false', 'short_answer']
+      .reduce((s, k) => s + (det.gradedParts[k] ? partMax(cfg, k) : 0), 0);
+    const detFeedback = objMaxPts > 0
+      ? composeAutoFeedback((det.score / objMaxPts) * 10, det.partStats, rubric && rubric.overview)
+      : '';
     const feedback = [detFeedback, aiFeedback].filter(Boolean).join(' ') || `Tổng điểm: ${total}/${sub.max_score}.`;
 
     db.prepare("UPDATE submissions SET score=?,feedback=?,grading_details=?,graded_at=?,graded_by_ai=?,grading_status='done' WHERE id=?")

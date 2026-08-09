@@ -341,28 +341,17 @@ Yêu cầu BẮT BUỘC:
   throw lastErr;
 }
 
-// ── Tạo "quy chuẩn nhận xét" (rubric) cho các phần khách quan — ĐỌC FILE ĐÁP ÁN ĐÚNG 1 LẦN khi
-// giáo viên tạo/cập nhật đáp án bài tập (xem routes/homework.js). Rubric lưu lại dưới dạng text
-// (KHÔNG hiển thị trên web), để lúc chấm tự động từng bài nộp KHÔNG cần gọi AI nữa mà vẫn ra được
-// nhận xét khái quát: câu nào sai thì lấy đúng ghi chú tương ứng đã soạn sẵn (xem homeworkScoring.js).
-// cfg: parts_config đã parse. Trả về { overview, multiple_choice:[...], true_false:[...], short_answer:[...] }
-// (mỗi mảng cùng độ dài số câu của phần; phần tử là ghi chú ngắn, hoặc '' nếu câu không có gì đặc biệt).
-async function generateFeedbackRubric(answerFilePath, cfg) {
+// ── Tạo "quy chuẩn nhận xét" (rubric) — ĐỌC FILE ĐÁP ÁN ĐÚNG 1 LẦN khi giáo viên tạo/cập nhật đáp án
+// bài tập (xem routes/homework.js). Chỉ cần 1 câu mô tả khái quát chủ đề/nội dung của đề, lưu lại
+// dưới dạng text (KHÔNG hiển thị trên web) để lúc chấm tự động từng bài nộp KHÔNG cần gọi AI nữa mà
+// vẫn ghép được vào mẫu nhận xét theo thang điểm (xem homeworkScoring.composeAutoFeedback).
+async function generateFeedbackRubric(answerFilePath) {
   if (!answerFilePath || !fs.existsSync(answerFilePath)) return null;
 
-  const wants = [];
-  if (partEnabled(cfg, 'multiple_choice')) wants.push(`- "multiple_choice": mảng ${cfg.multiple_choice.count} chuỗi — ghi chú cho câu 1..${cfg.multiple_choice.count} (đúng thứ tự).`);
-  if (partEnabled(cfg, 'true_false')) wants.push(`- "true_false": mảng ${cfg.true_false.count} chuỗi — ghi chú cho câu 1..${cfg.true_false.count} (đúng thứ tự).`);
-  if (partEnabled(cfg, 'short_answer')) wants.push(`- "short_answer": mảng ${cfg.short_answer.count} chuỗi — ghi chú cho câu 1..${cfg.short_answer.count} (đúng thứ tự).`);
-  if (wants.length === 0) return null;
+  const prompt = `Đây là FILE ĐÁP ÁN (bảng đáp án hoặc bài giải đầy đủ) của một đề bài tập.
+NHIỆM VỤ: đọc khái quát toàn bộ tài liệu và cho biết chủ đề/nội dung/dạng bài CHÍNH của cả đề, viết ĐÚNG 1 CÂU NGẮN GỌN (dưới 25 từ, tiếng Việt). Câu này sẽ được dùng để tự động nhắc học sinh kiểu "cần cẩn thận hơn khi làm các dạng bài về ...", nên hãy viết sao cho ghép được sau cụm đó (ví dụ: "phương trình bậc hai và định lý Vi-ét", "hình học tọa độ trong mặt phẳng").
 
-  const prompt = `Đây là FILE ĐÁP ÁN (bảng đáp án hoặc bài giải đầy đủ) của một đề trắc nghiệm/đúng-sai/trả lời ngắn.
-NHIỆM VỤ: đọc kỹ để chuẩn bị GHI CHÚ dùng cho việc CHẤM TỰ ĐỘNG SAU NÀY (không phải chấm ngay bây giờ) — mỗi khi có học sinh làm SAI một câu, hệ thống sẽ tự động hiện đúng ghi chú của câu đó để nhắc học sinh cần cẩn thận điều gì, KHÔNG dùng AI ở bước chấm nữa.
-Với MỖI câu của các phần dưới đây, viết 1 ghi chú CỰC NGẮN GỌN (dưới 15 từ, tiếng Việt) nêu dạng bài/kiến thức của câu đó và điều học sinh hay nhầm lẫn/sai sót nhất; nếu câu đơn giản không có gì đặc biệt thì để chuỗi rỗng "".
-${wants.join('\n')}
-- "overview": 1 câu mô tả khái quát chủ đề/nội dung chung của cả đề (dưới 25 từ).
-
-Chỉ trả về JSON THUẦN (không kèm giải thích, không markdown), đúng các khóa trên.`;
+Chỉ trả về JSON THUẦN (không kèm giải thích, không markdown): {"overview": "<câu mô tả>"}`;
 
   const parts = [prompt, buildInlinePart(answerFilePath)];
   let lastErr;
@@ -374,15 +363,9 @@ Chỉ trả về JSON THUẦN (không kèm giải thích, không markdown), đú
       const m = text.match(/\{[\s\S]*\}/);
       if (!m) throw new Error('AI không trả về JSON rubric hợp lệ');
       const parsed = JSON.parse(m[0]);
-      const out = { overview: String(parsed.overview || '').slice(0, 200) };
-      ['multiple_choice', 'true_false', 'short_answer'].forEach((k) => {
-        if (!partEnabled(cfg, k)) return;
-        const n = cfg[k].count;
-        const arr = Array.isArray(parsed[k]) ? parsed[k] : [];
-        out[k] = Array.from({ length: n }, (_, i) => String(arr[i] || '').trim().slice(0, 120));
-      });
-      console.log(`[aiGrading] Đã tạo quy chuẩn nhận xét (${modelName})`);
-      return out;
+      const overview = String(parsed.overview || '').trim().slice(0, 150);
+      console.log(`[aiGrading] Đã tạo quy chuẩn nhận xét (${modelName}): "${overview}"`);
+      return overview ? { overview } : null;
     } catch (err) {
       lastErr = err;
       if (!isRetryableModelError(err)) throw err;
