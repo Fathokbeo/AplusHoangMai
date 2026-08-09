@@ -46,9 +46,11 @@ const STRONG_MODELS = [
 const LITE_MODELS = [
   'gemini-3.5-flash-lite',
   'gemini-3.1-flash-lite',
-  // Lite hết quota (hiếm) thì mượn Flash xịn
+  // Lite hết quota (hiếm) thì mượn Flash xịn — đủ cả 4 model để tối đa khả năng chấm được (không dừng giữa chừng)
   'gemini-3.6-flash',
   'gemini-3.5-flash',
+  'gemini-3-flash-preview',
+  'gemini-2.5-flash',
 ];
 // Trích đáp án từ file là việc dễ (đọc bảng đáp án) → dùng Lite để dành quota Flash xịn cho chấm bài
 const EXTRACT_MODELS = LITE_MODELS;
@@ -67,7 +69,7 @@ const EXTRACT_CONFIG = {
   responseMimeType: 'application/json',
 };
 
-async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 10, gradingNote = '', attempts = 3, opts = {}) {
+async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 10, gradingNote = '', opts = {}) {
   const { partsConfig = null, scope = null, studentAnswers = null } = opts;
   const cfg = parsePartsConfig(partsConfig);
 
@@ -137,7 +139,11 @@ async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 1
       : '- ĐÚNG/SAI (mỗi câu 4 ý a,b,c,d): chấm theo CHUẨN THPT — trong 1 câu: đúng 1 ý = 0.1, đúng 2 ý = 0.25, đúng 3 ý = 0.5, đúng cả 4 ý = 1.0 (TỈ LỆ trên điểm câu, quy đổi sang điểm thực tế).');
   }
   if (objOnly.short_answer) ruleLines.push('- TRẢ LỜI NGẮN: khớp LINH HOẠT, chấp nhận biến thể tương đương về mặt toán học (vd "1/2" = "0,5" = "0.5"; "2" = "2,0"; bỏ qua khác biệt khoảng trắng, dấu phẩy/chấm thập phân, hoa/thường).');
-  if (gradeEssay) ruleLines.push('- TỰ LUẬN: chấm như bài tự luận, so kết quả cuối cùng và các bước lập luận chính với đáp án; cho điểm một phần khi đúng một phần.');
+  if (gradeEssay) ruleLines.push(
+    '- TỰ LUẬN: chấm CHẶT CHẼ như giáo viên chấm thi thật — đọc và đối chiếu TỪNG BƯỚC lập luận với đáp án, KHÔNG chỉ nhìn đáp số cuối. Chỉ chấm "correct" khi lập luận đủ căn cứ (nêu rõ định lý/công thức/tính chất áp dụng) VÀ kết quả đúng; không suy diễn có lợi cho học sinh khi chữ viết khó đọc hay lập luận mập mờ — trường hợp đó chấm "partial"/"wrong" chứ không mặc định "correct".\n'
+    + '  • BÀI ĐẠI (tự luận KHÔNG phải hình học — đại số, giải tích, xác suất...): có lời giải/các bước tính toán ĐẦY ĐỦ + đáp số đúng → điểm tối đa. Nếu học sinh CHỈ ghi đáp số/kết quả cuối, KHÔNG trình bày lời giải/các bước tính → dù đáp số đúng cũng CHỈ được TỐI ĐA 50% điểm câu đó.\n'
+    + '  • BÀI HÌNH (có vẽ hình, chứng minh, tính toán hình học — tam giác, đường tròn, tọa độ, thể tích...): điểm tối đa CHỈ khi có ĐỦ CẢ 3: hình vẽ minh họa + lời giải/chứng minh chi tiết (giả thiết/kết luận, dựng hình phụ nếu có, định lý/tính chất/công thức dùng ở từng bước) + đáp số đúng. THIẾU HÌNH VẼ minh họa (dù lời giải và đáp số đúng) → CHỈ được TỐI ĐA 50% điểm câu. CHỈ có hình vẽ, KHÔNG có lời giải/chứng minh → CHỈ được TỐI ĐA 25% (1/4) điểm câu. Không có cả hình vẽ lẫn lời giải (chỉ ghi đáp số) → chấm như trường hợp nặng nhất, CHỈ được TỐI ĐA 25% điểm câu dù đáp số đúng. Khi vi phạm nhiều lỗi cùng lúc, lấy mức trần THẤP NHẤT trong các mức trên (không cộng dồn, không vượt mức trần).'
+  );
   const objectiveRules = ruleLines.length ? `\nLUẬT CHẤM TỪNG PHẦN:\n${ruleLines.join('\n')}\n` : '';
 
   // Hướng dẫn AI lấy bài làm khách quan từ đâu: từ đáp án đã điền sẵn, hay tự dò trong ảnh.
@@ -147,7 +153,9 @@ async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 1
         : '\nLƯU Ý: Học sinh KHÔNG điền đáp án ở giao diện cho các phần khách quan cần chấm — hãy TỰ DÒ bài làm các phần đó ngay trong ẢNH rồi so với đáp án để chấm. Câu nào chưa có đáp án đúng sẵn thì TÌM trong FILE ĐÁP ÁN.\n')
     : '';
 
-  const prompt = `Bạn là giáo viên chấm bài. Hãy chấm điểm bài làm của học sinh dựa trên đáp án, trên thang ${maxScore} điểm.
+  // promptBody: toàn bộ ngữ cảnh + luật chấm (dùng chung cho cả 3 lần). jsonFormatBlock tách riêng
+  // để có thể chèn thêm reviewBlock (kết quả 2 lần đầu) vào GIỮA cho lần chấm thứ 3.
+  const promptBody = `Bạn là giáo viên chấm bài. Hãy chấm điểm bài làm của học sinh dựa trên đáp án, trên thang ${maxScore} điểm.
 ${docBlock}${scopeBlock}${answerKeyBlock}${studentBlock}${noteBlock}${objectiveRules}${imageScanNote}
 CÁCH ĐỌC BÀI LÀM (ảnh, nếu có):
 - Thứ tự các ảnh bài làm gửi lên CÓ THỂ KHÔNG đúng thứ tự thực tế (học sinh chụp có thể lộn trang). Hãy tự xác định thứ tự đọc hợp lý dựa vào số thứ tự câu/trang và tính liên tục của lời giải — KHÔNG mặc định thứ tự ảnh là đúng.
@@ -157,8 +165,11 @@ CÁCH ĐỌC BÀI LÀM (ảnh, nếu có):
 CÁCH CHẤM CHUNG:
 - CHỈ chấm các phần được giao ở trên. Tổng điểm các phần = điểm trả về, KHÔNG vượt quá ${maxScore}.
 - Phân chia điểm giữa các phần: theo HƯỚNG DẪN của giáo viên ở trên; nếu không nói rõ, hãy chia hợp lý.
-- Với MỖI câu, xác định trạng thái: "correct" (đúng), "wrong" (sai), hoặc "partial" (đúng một phần) kèm giải thích NGẮN GỌN bằng tiếng Việt.
-- Viết nhận xét tổng quan bằng tiếng Việt.
+- Chấm NGHIÊM TÚC, CHẶT CHẼ như giáo viên chấm thi thật: không ưu ái, không "du di" cho điểm khi không chắc chắn hay chữ viết khó đọc, không cho điểm tối đa nếu lập luận thiếu căn cứ hoặc trình bày sơ sài. Nghi ngờ đúng/sai thì đọc lại kỹ trước khi kết luận thay vì đoán có lợi cho học sinh.
+- Với MỖI câu, xác định trạng thái: "correct" (đúng), "wrong" (sai), hoặc "partial" (đúng một phần) kèm giải thích NGẮN GỌN bằng tiếng Việt — nêu RÕ lý do trừ điểm nếu không cho điểm tối đa (thiếu bước nào, sai đâu, thiếu lời giải chi tiết...).
+- Viết nhận xét tổng quan bằng tiếng Việt.`;
+
+  const jsonFormatBlock = `
 
 Trả về JSON đúng định dạng sau (chỉ JSON, không kèm chữ nào khác):
 {
@@ -169,33 +180,72 @@ Trả về JSON đúng định dạng sau (chỉ JSON, không kèm chữ nào kh
   ]
 }`;
 
-  const parts = [
-    prompt,
+  const buildParts = (promptText) => [
+    promptText,
     ...(hasAnswerFile ? [buildInlinePart(answerFilePath)] : []),
     ...subPaths.map(buildInlinePart),
   ];
 
-  // Chấm nhiều lần (mặc định 3) rồi LẤY KẾT QUẢ CÓ ĐIỂM CAO NHẤT.
-  // Chạy TUẦN TỰ (không song song) để: tránh lỗi quota 429 do bắn nhiều request cùng lúc,
-  // và để Gemini tái dùng phần dữ liệu giống nhau ở các lần sau (tiết kiệm token).
-  const n = Math.max(1, attempts);
-  const results = [];
-  let lastErr;
-  for (let i = 0; i < n; i++) {
-    try {
-      // Lần đầu dùng Flash xịn cho chính xác, các lần sau dùng Lite để tiết kiệm quota ngày
-      results.push(await callModelOnce(parts, maxScore, i === 0 ? STRONG_MODELS : LITE_MODELS));
-    } catch (err) {
-      lastErr = err;
-      console.error(`[AI grading] lần ${i + 1}/${n} lỗi: ${err.message}`);
-    }
+  // Mô tả 1 kết quả chấm trước đó để đưa vào prompt rà soát lần 3.
+  const describeResult = (label, r) => `${label} — điểm: ${r.score}/${maxScore}\nNhận xét: ${r.feedback}\nChi tiết từng câu:\n${r.details.map((d) => `  • ${d.question}: ${d.status} — ${d.comment}`).join('\n') || '  (không có)'}`;
+
+  // ── QUY TRÌNH CHẤM 3 LẦN ─────────────────────────────────────────────
+  // Lần 1: chấm ĐỘC LẬP bằng model mạnh nhất.
+  // Lần 2: chấm ĐỘC LẬP thêm 1 lần nữa bằng model nhẹ hơn (không thấy kết quả lần 1).
+  // Lần 3: KHÔNG chấm lại từ đầu mà RÀ SOÁT kết quả lần 1 và 2 (kèm xem lại bài làm gốc),
+  //        ưu tiên nghiêng theo lần 1 khi có bất đồng, đảm bảo tuân đủ luật chấm ở trên,
+  //        rồi CHỐT điểm cuối cùng chính thức trả cho học sinh. Không còn lấy max/trung bình trọng số.
+  const basePrompt = promptBody + jsonFormatBlock;
+  const baseParts = buildParts(basePrompt);
+
+  let result1 = null;
+  let result2 = null;
+  try {
+    result1 = await callModelOnce(baseParts, maxScore, STRONG_MODELS);
+  } catch (err) {
+    console.error(`[AI grading] lần 1 (model mạnh) lỗi: ${err.message}`);
   }
-  if (results.length === 0) {
-    throw lastErr || new Error('Chấm bài thất bại');
+  try {
+    result2 = await callModelOnce(baseParts, maxScore, LITE_MODELS);
+  } catch (err) {
+    console.error(`[AI grading] lần 2 (model nhẹ) lỗi: ${err.message}`);
   }
-  results.sort((a, b) => b.score - a.score);
-  console.log(`[AI grading] ${results.length}/${n} lần thành công, điểm: [${results.map(r => r.score).join(', ')}] → lấy cao nhất ${results[0].score}`);
-  return results[0];
+
+  if (!result1 && !result2) {
+    throw new Error('Chấm bài thất bại (cả 2 lần chấm đầu đều lỗi)');
+  }
+  // Chỉ 1 trong 2 lần đầu thành công → không đủ dữ liệu để rà soát, dùng luôn kết quả đó.
+  if (!result1 || !result2) {
+    const only = result1 || result2;
+    console.log(`[AI grading] chỉ 1/2 lần đầu thành công → dùng điểm ${only.score}, bỏ qua lần rà soát cuối`);
+    return only;
+  }
+
+  const reviewBlock = `
+
+HAI LẦN CHẤM ĐỘC LẬP ĐÃ THỰC HIỆN TRƯỚC ĐÓ (để bạn đối chiếu, KHÔNG được chép nguyên mà không tự kiểm tra lại với bài làm và luật chấm):
+
+${describeResult('LẦN 1 (model mạnh — ƯU TIÊN hơn khi có bất đồng)', result1)}
+
+${describeResult('LẦN 2 (model nhẹ — tham khảo thêm)', result2)}
+
+NHIỆM VỤ CỦA BẠN — ĐÂY LÀ LẦN CHẤM THỨ 3, LÀ LẦN CHỐT ĐIỂM CHÍNH THỨC CUỐI CÙNG CỦA HỌC SINH:
+- Tự mình xem lại bài làm (ảnh/PDF đính kèm) và đáp án, rà soát lại TỪNG câu theo ĐÚNG các luật chấm đã nêu ở trên (đặc biệt: bài hình phải có hình vẽ + lời giải chi tiết mới được điểm tối đa, thiếu hình/thiếu lời giải bị giới hạn trần điểm theo đúng luật; bài đại chỉ ghi đáp số không giải tối đa 50%; không du di khi không chắc chắn).
+- Khi LẦN 1 và LẦN 2 đồng thuận (điểm và nhận xét từng câu khớp nhau) → giữ nguyên kết luận đó, trừ khi bạn tự phát hiện cả hai đều sai so với luật chấm.
+- Khi LẦN 1 và LẦN 2 bất đồng ở câu nào → tự chấm lại câu đó dựa trên bài làm thực tế và luật chấm; ƯU TIÊN nghiêng theo LẦN 1 (model mạnh hơn) nếu cả hai cách chấm đều hợp lý và không rõ ràng bên nào sai; CHỈ chọn theo LẦN 2 khi LẦN 1 thực sự sai hoặc vi phạm luật chấm.
+- Kết quả bạn trả về là điểm CHÍNH THỨC, CUỐI CÙNG gửi cho học sinh — hãy quyết đoán, nhất quán và đúng luật chấm.`;
+
+  const reviewPrompt = promptBody + reviewBlock + jsonFormatBlock;
+  const reviewParts = buildParts(reviewPrompt);
+
+  try {
+    const final = await callModelOnce(reviewParts, maxScore, LITE_MODELS);
+    console.log(`[AI grading] lần 1=${result1.score}, lần 2=${result2.score} → lần 3 (rà soát, chốt điểm cuối) = ${final.score}`);
+    return final;
+  } catch (err) {
+    console.error(`[AI grading] lần 3 (rà soát cuối) lỗi: ${err.message} → dùng kết quả lần 1 (model mạnh) làm điểm cuối`);
+    return result1;
+  }
 }
 
 // Lỗi có nên thử model tiếp theo không: hết quota (429), quá tải (503), hoặc model bị gỡ (404).
@@ -291,6 +341,56 @@ Yêu cầu BẮT BUỘC:
   throw lastErr;
 }
 
+// ── Tạo "quy chuẩn nhận xét" (rubric) cho các phần khách quan — ĐỌC FILE ĐÁP ÁN ĐÚNG 1 LẦN khi
+// giáo viên tạo/cập nhật đáp án bài tập (xem routes/homework.js). Rubric lưu lại dưới dạng text
+// (KHÔNG hiển thị trên web), để lúc chấm tự động từng bài nộp KHÔNG cần gọi AI nữa mà vẫn ra được
+// nhận xét khái quát: câu nào sai thì lấy đúng ghi chú tương ứng đã soạn sẵn (xem homeworkScoring.js).
+// cfg: parts_config đã parse. Trả về { overview, multiple_choice:[...], true_false:[...], short_answer:[...] }
+// (mỗi mảng cùng độ dài số câu của phần; phần tử là ghi chú ngắn, hoặc '' nếu câu không có gì đặc biệt).
+async function generateFeedbackRubric(answerFilePath, cfg) {
+  if (!answerFilePath || !fs.existsSync(answerFilePath)) return null;
+
+  const wants = [];
+  if (partEnabled(cfg, 'multiple_choice')) wants.push(`- "multiple_choice": mảng ${cfg.multiple_choice.count} chuỗi — ghi chú cho câu 1..${cfg.multiple_choice.count} (đúng thứ tự).`);
+  if (partEnabled(cfg, 'true_false')) wants.push(`- "true_false": mảng ${cfg.true_false.count} chuỗi — ghi chú cho câu 1..${cfg.true_false.count} (đúng thứ tự).`);
+  if (partEnabled(cfg, 'short_answer')) wants.push(`- "short_answer": mảng ${cfg.short_answer.count} chuỗi — ghi chú cho câu 1..${cfg.short_answer.count} (đúng thứ tự).`);
+  if (wants.length === 0) return null;
+
+  const prompt = `Đây là FILE ĐÁP ÁN (bảng đáp án hoặc bài giải đầy đủ) của một đề trắc nghiệm/đúng-sai/trả lời ngắn.
+NHIỆM VỤ: đọc kỹ để chuẩn bị GHI CHÚ dùng cho việc CHẤM TỰ ĐỘNG SAU NÀY (không phải chấm ngay bây giờ) — mỗi khi có học sinh làm SAI một câu, hệ thống sẽ tự động hiện đúng ghi chú của câu đó để nhắc học sinh cần cẩn thận điều gì, KHÔNG dùng AI ở bước chấm nữa.
+Với MỖI câu của các phần dưới đây, viết 1 ghi chú CỰC NGẮN GỌN (dưới 15 từ, tiếng Việt) nêu dạng bài/kiến thức của câu đó và điều học sinh hay nhầm lẫn/sai sót nhất; nếu câu đơn giản không có gì đặc biệt thì để chuỗi rỗng "".
+${wants.join('\n')}
+- "overview": 1 câu mô tả khái quát chủ đề/nội dung chung của cả đề (dưới 25 từ).
+
+Chỉ trả về JSON THUẦN (không kèm giải thích, không markdown), đúng các khóa trên.`;
+
+  const parts = [prompt, buildInlinePart(answerFilePath)];
+  let lastErr;
+  for (const modelName of LITE_MODELS) {
+    try {
+      const model = genAI.getGenerativeModel({ model: modelName, generationConfig: EXTRACT_CONFIG });
+      const result = await model.generateContent(parts);
+      const text = result.response.text().trim();
+      const m = text.match(/\{[\s\S]*\}/);
+      if (!m) throw new Error('AI không trả về JSON rubric hợp lệ');
+      const parsed = JSON.parse(m[0]);
+      const out = { overview: String(parsed.overview || '').slice(0, 200) };
+      ['multiple_choice', 'true_false', 'short_answer'].forEach((k) => {
+        if (!partEnabled(cfg, k)) return;
+        const n = cfg[k].count;
+        const arr = Array.isArray(parsed[k]) ? parsed[k] : [];
+        out[k] = Array.from({ length: n }, (_, i) => String(arr[i] || '').trim().slice(0, 120));
+      });
+      console.log(`[aiGrading] Đã tạo quy chuẩn nhận xét (${modelName})`);
+      return out;
+    } catch (err) {
+      lastErr = err;
+      if (!isRetryableModelError(err)) throw err;
+    }
+  }
+  throw lastErr;
+}
+
 // Chuẩn hóa kết quả AI trả về → đúng kiểu mong đợi cho từng phần.
 function normalizeExtractedKey(parsed, cfg) {
   const out = {};
@@ -313,4 +413,4 @@ function normalizeExtractedKey(parsed, cfg) {
   return out;
 }
 
-module.exports = { gradeSubmission, extractAnswerKey };
+module.exports = { gradeSubmission, extractAnswerKey, generateFeedbackRubric };

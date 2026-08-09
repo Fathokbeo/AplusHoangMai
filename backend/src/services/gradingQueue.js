@@ -4,7 +4,7 @@ const path = require('path');
 const { getDb } = require('../db/database');
 const { gradeSubmission, extractAnswerKey } = require('./aiGrading');
 const { needsAiGrading, hasAnswerKey, parsePartsConfig, partEnabled, missingKeyIndices, applyExtractedKeys, PART_LABELS } = require('./homeworkParts');
-const { scoreStructured, partMax, round2, rawMaxScore, scaleToTarget } = require('./homeworkScoring');
+const { scoreStructured, partMax, round2, rawMaxScore, scaleToTarget, composeAutoFeedback } = require('./homeworkScoring');
 
 const MAX_ATTEMPTS = 5;            // số lần thử chấm tối đa trước khi đánh dấu thất bại
 const RETRY_DELAY_MS = 30_000;     // chờ trước khi thử lại một bài bị lỗi
@@ -55,7 +55,7 @@ async function processQueue() {
 async function gradeOne(submissionId, { force = false } = {}) {
   const db = getDb();
   const sub = db.prepare(`
-    SELECT s.*, h.id hw_id, h.answer_file, h.max_score, h.grading_note, h.parts_config
+    SELECT s.*, h.id hw_id, h.answer_file, h.max_score, h.grading_note, h.parts_config, h.feedback_rubric
     FROM submissions s JOIN homework h ON s.homework_id = h.id
     WHERE s.id = ?
   `).get(submissionId);
@@ -156,7 +156,7 @@ async function gradeOne(submissionId, { force = false } = {}) {
         essay: aiEssay,
       } : null;
 
-      const aiResult = await gradeSubmission(answerPath, subPaths, aiMax || sub.max_score, sub.grading_note, 3, {
+      const aiResult = await gradeSubmission(answerPath, subPaths, aiMax || sub.max_score, sub.grading_note, {
         partsConfig: cfg || sub.parts_config, // cfg đã ghép đáp án để AI có sẵn key
         scope,
         studentAnswers: sub.structured_answers, // để AI chấm phần khách quan từ đáp án HS điền (không cần ảnh)
@@ -177,9 +177,12 @@ async function gradeOne(submissionId, { force = false } = {}) {
     let total = cfg ? scaleToTarget(rawEarned, rawMaxScore(cfg), sub.max_score) : rawEarned;
     if (sub.max_score != null) total = Math.max(0, Math.min(sub.max_score, total));
     const details = [...det.details, ...aiDetails];
-    const feedback = needAi
-      ? (aiFeedback || `Tổng điểm: ${total}/${sub.max_score}.`)
-      : `Đã chấm tự động theo đáp án. Tổng điểm: ${total}/${sub.max_score}.`;
+    // Nhận xét khái quát cho phần chấm tự động (KHÔNG dùng AI) — dựa trên partStats + rubric đã soạn sẵn
+    // 1 lần khi tạo/cập nhật đáp án (xem homework.js). Ghép với nhận xét AI (nếu có phần AI chấm, vd tự luận).
+    let rubric = null;
+    try { rubric = sub.feedback_rubric ? JSON.parse(sub.feedback_rubric) : null; } catch { rubric = null; }
+    const detFeedback = composeAutoFeedback(det.partStats, rubric);
+    const feedback = [detFeedback, aiFeedback].filter(Boolean).join(' ') || `Tổng điểm: ${total}/${sub.max_score}.`;
 
     db.prepare("UPDATE submissions SET score=?,feedback=?,grading_details=?,graded_at=?,graded_by_ai=?,grading_status='done' WHERE id=?")
       .run(total, feedback, JSON.stringify(details), new Date().toISOString(), needAi ? 1 : 0, submissionId);

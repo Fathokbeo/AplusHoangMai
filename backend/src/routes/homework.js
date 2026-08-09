@@ -6,11 +6,33 @@ const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { uploadHomework, uploadSubmission } = require('../middleware/upload');
 const { enqueue, gradeOne } = require('../services/gradingQueue');
-const { needsAiGrading, stripAnswers } = require('../services/homeworkParts');
+const { needsAiGrading, stripAnswers, parsePartsConfig, partEnabled, keyIsSet } = require('../services/homeworkParts');
 const { computeMaxScore, DEFAULT_POINTS } = require('../services/homeworkScoring');
 const { compareVietnameseName } = require('../services/vietnameseName');
+const { generateFeedbackRubric } = require('../services/aiGrading');
 
 router.use(authMiddleware);
+
+// Đọc FILE ĐÁP ÁN đúng 1 LẦN (chạy nền, không chặn request) để soạn "quy chuẩn nhận xét" cho các
+// phần trắc nghiệm/đúng-sai/trả lời ngắn — dùng khi chấm tự động sau này để ra nhận xét khái quát
+// mà KHÔNG cần gọi AI mỗi lần chấm (xem homeworkScoring.composeAutoFeedback + gradingQueue.js).
+// Chỉ chạy khi có file đáp án + ít nhất 1 phần khách quan đã có đáp án (key) sẵn.
+function scheduleRubricGeneration(homeworkId, answerFilename, partsJson) {
+  const cfg = parsePartsConfig(partsJson);
+  if (!cfg || !answerFilename) return;
+  const hasObjectiveKey = ['multiple_choice', 'true_false', 'short_answer'].some(
+    (k) => partEnabled(cfg, k) && Array.isArray(cfg[k].answers) && cfg[k].answers.some((v) => keyIsSet(k, v))
+  );
+  if (!hasObjectiveKey) return;
+  const answerPath = path.join(__dirname, '../../uploads/homework', answerFilename);
+  generateFeedbackRubric(answerPath, cfg)
+    .then((rubric) => {
+      if (!rubric) return;
+      getDb().prepare('UPDATE homework SET feedback_rubric=? WHERE id=?').run(JSON.stringify(rubric), homeworkId);
+      console.log(`[homework] 📝 Đã tạo quy chuẩn nhận xét cho bài tập #${homeworkId}`);
+    })
+    .catch((err) => console.error(`[homework] Tạo quy chuẩn nhận xét lỗi (#${homeworkId}): ${err.message}`));
+}
 
 // Chuẩn hóa parts_config nhận từ form (chuỗi JSON) → chuỗi JSON để lưu, hoặc null.
 function sanitizePartsConfig(raw) {
@@ -90,6 +112,7 @@ router.post(
       grading_note || null, chapter_id || null, solution_video_url || null,
       partsJson, parseInt(hw_order) || 0, finalMaxAttempts
     );
+    scheduleRubricGeneration(result.lastInsertRowid, req.files?.answer_file?.[0]?.filename || null, partsJson);
     res.status(201).json({ id: result.lastInsertRowid, title });
   }
 );
@@ -123,8 +146,9 @@ router.put(
     // parts_config + max_score: thang điểm = thang giáo viên chọn (để quy đổi),
     // mặc định = tổng điểm thô các câu nếu giáo viên không nhập.
     let rawSum = null;
+    let partsJson; // hoisted: dùng lại bên dưới để biết có cần soạn lại "quy chuẩn nhận xét" không
     if (parts_config !== undefined) {
-      const partsJson = sanitizePartsConfig(parts_config);
+      partsJson = sanitizePartsConfig(parts_config);
       sets.push('parts_config=?'); vals.push(partsJson);
       rawSum = computeMaxScore(partsJson);
     }
@@ -132,10 +156,17 @@ router.put(
     if (isFinite(provided) && provided > 0) { sets.push('max_score=?'); vals.push(provided); }
     else if (rawSum != null) { sets.push('max_score=?'); vals.push(rawSum); }
 
+    const newAnswerFile = req.files?.answer_file?.[0]?.filename;
     if (req.files?.pdf_file?.[0]) { sets.push('pdf_file=?'); vals.push(req.files.pdf_file[0].filename); }
-    if (req.files?.answer_file?.[0]) { sets.push('answer_file=?'); vals.push(req.files.answer_file[0].filename); }
+    if (newAnswerFile) { sets.push('answer_file=?'); vals.push(newAnswerFile); }
 
     if (sets.length > 0) { vals.push(req.params.id); db.prepare(`UPDATE homework SET ${sets.join(',')} WHERE id=?`).run(...vals); }
+
+    // Đáp án (file hoặc key objective) vừa đổi → soạn lại "quy chuẩn nhận xét" (đọc file đáp án đúng 1 lần).
+    // Không đổi gì liên quan đáp án → giữ nguyên quy chuẩn cũ, không tốn thêm lượt AI nào.
+    if (partsJson !== undefined || newAnswerFile) {
+      scheduleRubricGeneration(hw.id, newAnswerFile || hw.answer_file, partsJson !== undefined ? partsJson : hw.parts_config);
+    }
     res.json({ message: 'Đã cập nhật' });
   }
 );
@@ -160,6 +191,7 @@ router.get('/homework/:id', (req, res) => {
   const db = getDb();
   const hw = db.prepare('SELECT h.*,c.teacher_id,c.title class_title,c.custom_student_order FROM homework h JOIN classes c ON h.class_id=c.id WHERE h.id=?').get(req.params.id);
   if (!hw) return res.status(404).json({ message: 'Không tìm thấy' });
+  delete hw.feedback_rubric; // nội bộ, không hiển thị trên web dù giáo viên hay học sinh
 
   if (req.user.role === 'student') {
     const enrolled = db.prepare('SELECT * FROM class_students WHERE class_id=? AND student_id=?').get(hw.class_id, req.user.id);

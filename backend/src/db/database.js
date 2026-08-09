@@ -316,6 +316,12 @@ function initSchema() {
   if (!chapterCols.some(c => c.name === 'subject')) {
     db.exec("ALTER TABLE chapters ADD COLUMN subject TEXT DEFAULT 'algebra'");
   }
+  // Migration: "quy chuẩn nhận xét" (JSON) do AI soạn ĐÚNG 1 LẦN khi giáo viên tạo/cập nhật đáp án —
+  // dùng để chấm tự động (không dùng AI) tạo nhận xét khái quát cho phần trắc nghiệm/đúng-sai/trả lời ngắn.
+  // KHÔNG hiển thị trên web, chỉ dùng nội bộ khi chấm bài (xem gradingQueue.js).
+  if (!hwCols.some(c => c.name === 'feedback_rubric')) {
+    db.exec('ALTER TABLE homework ADD COLUMN feedback_rubric TEXT');
+  }
 
   const admin = db.prepare("SELECT id FROM users WHERE role='admin' LIMIT 1").get();
   if (!admin) {

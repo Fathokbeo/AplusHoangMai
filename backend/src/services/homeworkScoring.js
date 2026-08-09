@@ -96,7 +96,8 @@ function setKeyCount(key, arr) {
 function scoreStructured(rawCfg, rawAns) {
   const cfg = parsePartsConfig(rawCfg);
   // pendingAi: HS không điền giao diện (AI dò ảnh). aiKeyless: HS có điền nhưng cả phần CHƯA có đáp án (AI đọc file đáp án + đáp án HS điền).
-  const result = { score: 0, details: [], gradedParts: {}, pendingAi: [], aiKeyless: [], unresolved: [] };
+  // partStats: thống kê đúng/sai từng câu mỗi phần (để tạo nhận xét khái quát KHÔNG dùng AI, xem composeAutoFeedback).
+  const result = { score: 0, details: [], gradedParts: {}, pendingAi: [], aiKeyless: [], unresolved: [], partStats: {} };
   if (!cfg) return result;
 
   let ans = rawAns;
@@ -112,17 +113,20 @@ function scoreStructured(rawCfg, rawAns) {
     else if (setKeyCount('multiple_choice', key) === 0) { result.aiKeyless.push('multiple_choice'); }
     else {
       result.gradedParts.multiple_choice = true;
+      const stat = { total: 0, correct: 0, wrongIdx: [] };
       key.forEach((k, i) => {
         if (!keyIsSet('multiple_choice', k)) { result.unresolved.push(['multiple_choice', i]); result.details.push(unresolvedDetail('Trắc nghiệm', i)); return; }
+        stat.total++;
         const got = up1(stud[i]);
         const ok = got !== '' && got === up1(k);
-        if (ok) result.score += pts[i];
+        if (ok) { result.score += pts[i]; stat.correct++; } else { stat.wrongIdx.push(i); }
         result.details.push({
           question: `Trắc nghiệm câu ${i + 1}`,
           status: ok ? 'correct' : 'wrong',
           comment: ok ? `Đúng (+${round2(pts[i])}đ)` : `Chọn ${up1(stud[i]) || '—'}, đáp án đúng ${String(k).toUpperCase()}`,
         });
       });
+      result.partStats.multiple_choice = stat;
     }
   }
 
@@ -136,8 +140,10 @@ function scoreStructured(rawCfg, rawAns) {
     else {
       result.gradedParts.true_false = true;
       const ladder = tfLadder(cfg);
+      const stat = { total: 0, correct: 0, wrongIdx: [] };
       key.forEach((krow, i) => {
         if (!keyIsSet('true_false', krow)) { result.unresolved.push(['true_false', i]); result.details.push(unresolvedDetail('Đúng/Sai', i)); return; }
+        stat.total++;
         const srow = Array.isArray(stud[i]) ? stud[i] : [];
         const k = Array.isArray(krow) ? krow : [];
         let correct = 0;
@@ -151,6 +157,7 @@ function scoreStructured(rawCfg, rawAns) {
         }
         const earned = round2((pts[i] || 0) * ladder[correct]);
         result.score += earned;
+        if (correct === 4) stat.correct++; else stat.wrongIdx.push(i);
         const status = correct === 4 ? 'correct' : correct === 0 ? 'wrong' : 'partial';
         result.details.push({
           question: `Đúng/Sai câu ${i + 1}`,
@@ -158,6 +165,7 @@ function scoreStructured(rawCfg, rawAns) {
           comment: `Đúng ${correct}/4 ý (+${earned}đ) — ${subTxt.join(' ')}`,
         });
       });
+      result.partStats.true_false = stat;
     }
   }
 
@@ -170,17 +178,20 @@ function scoreStructured(rawCfg, rawAns) {
     else if (setKeyCount('short_answer', key) === 0) { result.aiKeyless.push('short_answer'); }
     else {
       result.gradedParts.short_answer = true;
+      const stat = { total: 0, correct: 0, wrongIdx: [] };
       key.forEach((k, i) => {
         if (!keyIsSet('short_answer', k)) { result.unresolved.push(['short_answer', i]); result.details.push(unresolvedDetail('Trả lời ngắn', i)); return; }
+        stat.total++;
         const got = stud[i];
         const ok = saMatch(got, k);
-        if (ok) result.score += pts[i];
+        if (ok) { result.score += pts[i]; stat.correct++; } else { stat.wrongIdx.push(i); }
         result.details.push({
           question: `Trả lời ngắn câu ${i + 1}`,
           status: ok ? 'correct' : 'wrong',
           comment: ok ? `Đúng (+${round2(pts[i])}đ)` : `Trả lời "${String(got == null ? '' : got).trim() || '—'}", đáp án "${k}"`,
         });
       });
+      result.partStats.short_answer = stat;
     }
   }
 
@@ -201,6 +212,29 @@ function scaleToTarget(rawEarned, rawMax, scale) {
   return round2((Number(rawEarned) || 0) * s / rawMax);
 }
 
+const PART_LABEL_TXT = { multiple_choice: 'Trắc nghiệm', true_false: 'Đúng/Sai', short_answer: 'Trả lời ngắn' };
+
+// Tạo nhận xét khái quát cho các phần khách quan — KHÔNG dùng AI ở đây. Dựa trên partStats (đúng/sai
+// từng câu, xem scoreStructured) và rubric (ghi chú do AI soạn sẵn ĐÚNG 1 LẦN khi tạo/cập nhật đáp án,
+// xem aiGrading.generateFeedbackRubric + routes/homework.js). rubric có thể null (chưa tạo/lỗi) →
+// vẫn ra được nhận xét, chỉ thiếu phần ghi chú "cần cẩn thận hơn dạng nào".
+function composeAutoFeedback(partStats, rubric) {
+  const lines = [];
+  ['multiple_choice', 'true_false', 'short_answer'].forEach((k) => {
+    const st = partStats && partStats[k];
+    if (!st || st.total === 0) return;
+    if (st.wrongIdx.length === 0) {
+      lines.push(`${PART_LABEL_TXT[k]}: đúng hết ${st.total}/${st.total} câu.`);
+      return;
+    }
+    const notesArr = rubric && Array.isArray(rubric[k]) ? rubric[k] : [];
+    const notes = [...new Set(st.wrongIdx.map((i) => notesArr[i]).filter(Boolean))].slice(0, 3);
+    const noteTxt = notes.length ? ` Cần cẩn thận hơn: ${notes.join('; ')}.` : '';
+    lines.push(`${PART_LABEL_TXT[k]}: đúng ${st.correct}/${st.total} câu.${noteTxt}`);
+  });
+  return lines.join(' ');
+}
+
 module.exports = {
   TF_LADDER,
   TF_LADDER_EVEN,
@@ -215,4 +249,5 @@ module.exports = {
   scaleToTarget,
   saMatch,
   scoreStructured,
+  composeAutoFeedback,
 };
