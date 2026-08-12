@@ -213,12 +213,23 @@ router.put('/courses/:id', (req, res) => {
   if (description !== undefined) { sets.push('description=?'); vals.push(description); }
   if (active !== undefined) { sets.push('active=?'); vals.push(active ? 1 : 0); }
   // Chỉ định lại giáo viên phụ trách khóa (created_by). Bỏ trống → admin quản lý.
+  let newTeacherId;
   if (teacher_id !== undefined) {
     const tid = resolveTeacherId(db, teacher_id);
     if (tid === undefined) return res.status(400).json({ message: 'Giáo viên không hợp lệ' });
-    sets.push('created_by=?'); vals.push(tid || req.user.id);
+    newTeacherId = tid || req.user.id;
+    sets.push('created_by=?'); vals.push(newTeacherId);
   }
-  if (sets.length > 0) { vals.push(req.params.id); db.prepare(`UPDATE courses SET ${sets.join(',')} WHERE id=?`).run(...vals); }
+  if (sets.length > 0) {
+    vals.push(req.params.id);
+    db.transaction(() => {
+      db.prepare(`UPDATE courses SET ${sets.join(',')} WHERE id=?`).run(...vals);
+      // Một khóa học chỉ do 1 giáo viên phụ trách → mọi lớp trong khóa luôn theo giáo viên của khóa.
+      if (newTeacherId !== undefined) {
+        db.prepare('UPDATE classes SET teacher_id=? WHERE course_id=?').run(newTeacherId, req.params.id);
+      }
+    })();
+  }
   res.json({ message: 'Đã cập nhật' });
 });
 
@@ -268,12 +279,13 @@ router.get('/courses/:id/detail', (req, res) => {
 
 // Admin: add class to course
 router.post('/courses/:id/classes', (req, res) => {
-  const { title, description, teacher_id } = req.body;
+  const { title, description } = req.body;
   if (!title) return res.status(400).json({ message: 'Cần tiêu đề lớp học' });
   const db = getDb();
   const course = db.prepare('SELECT * FROM courses WHERE id=? AND active=1').get(req.params.id);
   if (!course) return res.status(404).json({ message: 'Không tìm thấy khóa học' });
-  const tid = teacher_id || req.user.id;
+  // Lớp luôn do giáo viên phụ trách khóa học đảm nhận, kể cả khi admin là người tạo lớp.
+  const tid = course.created_by || req.user.id;
   const result = db.prepare(
     'INSERT INTO classes (course_id,title,description,teacher_id) VALUES (?,?,?,?)'
   ).run(req.params.id, title, description || null, tid);

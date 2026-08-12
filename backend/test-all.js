@@ -250,8 +250,16 @@ function fileForm(fields, fileField, filePath, mime) {
   log('Admin tạo khóa học', r.ok && r.data.id, JSON.stringify(r.data));
   const adminCourseId = r.data?.id;
 
-  r = await req('POST', `/admin/courses/${adminCourseId}/classes`, { token: adminTok, json: { title: 'Lớp do Admin tạo', teacher_id: newTeacherId } });
-  log('Admin thêm lớp vào khóa (gán GV)', r.ok && r.data.id, JSON.stringify(r.data));
+  r = await req('POST', `/admin/courses/${adminCourseId}/classes`, { token: adminTok, json: { title: 'Lớp do Admin tạo' } });
+  log('Admin thêm lớp vào khóa', r.ok && r.data.id, JSON.stringify(r.data));
+
+  // Admin thêm lớp vào khóa của GIÁO VIÊN khác (courseId, do teacherTok/newTeacherId phụ trách)
+  // → lớp phải theo giáo viên phụ trách khóa đó, không phải bị gán cho admin.
+  r = await req('POST', `/admin/courses/${courseId}/classes`, { token: adminTok, json: { title: 'Lớp do Admin thêm vào khóa GV' } });
+  const adminAddedClassId = r.data?.id;
+  r = await req('GET', '/admin/classes', { token: adminTok });
+  const adminAddedClass = r.data?.find(c => c.id === adminAddedClassId);
+  log('Lớp do admin thêm vào khóa GV vẫn thuộc GV phụ trách khóa (không phải admin)', adminAddedClass && adminAddedClass.teacher_id === newTeacherId, `teacher_id=${adminAddedClass?.teacher_id}, expected=${newTeacherId}`);
 
   r = await req('GET', `/admin/courses/${adminCourseId}/detail`, { token: adminTok });
   log('Admin xem chi tiết khóa + lớp', r.ok && Array.isArray(r.data.classes) && r.data.classes.length > 0, `classes=${r.data?.classes?.length}`);

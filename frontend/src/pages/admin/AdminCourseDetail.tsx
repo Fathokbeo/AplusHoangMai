@@ -9,14 +9,12 @@ export default function AdminCourseDetail() {
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
   const [course, setCourse] = useState<any>(null);
-  const [teachers, setTeachers] = useState<any[]>([]);
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ title: '', description: '', teacher_id: '' });
+  const [form, setForm] = useState({ title: '', description: '' });
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     fetchCourse();
-    api.get('/admin/users?role=teacher').then((r) => setTeachers(r.data));
   }, [courseId]);
 
   const fetchCourse = async () => {
@@ -36,11 +34,10 @@ export default function AdminCourseDetail() {
       await api.post(`/admin/courses/${courseId}/classes`, {
         title: form.title,
         description: form.description,
-        teacher_id: form.teacher_id || undefined,
       });
       toast.success('Đã tạo lớp học');
       setModal(false);
-      setForm({ title: '', description: '', teacher_id: '' });
+      setForm({ title: '', description: '' });
       fetchCourse();
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Lỗi');
@@ -159,14 +156,8 @@ export default function AdminCourseDetail() {
           <textarea className="input" placeholder="Mô tả..." value={form.description}
             onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} />
         </div>
-        <div className="form-group">
-          <label className="label">Giáo viên phụ trách</label>
-          <select className="input" value={form.teacher_id} onChange={(e) => setForm({ ...form, teacher_id: e.target.value })}>
-            <option value="">-- Chọn giáo viên --</option>
-            {teachers.map((t) => (
-              <option key={t.id} value={t.id}>{t.full_name} ({t.username})</option>
-            ))}
-          </select>
+        <div style={{ fontSize: '0.78rem', color: '#888' }}>
+          Lớp học sẽ do <strong>{course.creator_name}</strong> — giáo viên phụ trách khóa học này — quản lý.
         </div>
       </Modal>
     </div>

@@ -164,9 +164,11 @@ router.post('/courses/:courseId/classes', (req, res) => {
   const course = db.prepare('SELECT * FROM courses WHERE id=? AND active=1').get(req.params.courseId);
   if (!course) return res.status(404).json({ message: 'Không tìm thấy khóa học' });
   if (req.user.role === 'teacher' && course.created_by !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  // Lớp luôn do giáo viên phụ trách khóa học đảm nhận, kể cả khi admin là người tạo lớp.
+  const tid = course.created_by || req.user.id;
   const result = db.prepare(
     'INSERT INTO classes (course_id,title,description,teacher_id) VALUES (?,?,?,?)'
-  ).run(req.params.courseId, title, description || null, req.user.id);
+  ).run(req.params.courseId, title, description || null, tid);
   res.status(201).json({ id: result.lastInsertRowid, title });
 });
 

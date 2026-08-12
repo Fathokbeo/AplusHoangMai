@@ -323,6 +323,16 @@ function initSchema() {
     db.exec('ALTER TABLE homework ADD COLUMN feedback_rubric TEXT');
   }
 
+  // Đồng bộ dữ liệu: mỗi khóa học chỉ do 1 giáo viên phụ trách (courses.created_by) nên mọi lớp trong khóa
+  // phải theo đúng giáo viên đó — trước đây admin có thể tạo lớp gán cho giáo viên khác, gây lệch dữ liệu.
+  db.exec(`
+    UPDATE classes SET teacher_id = (SELECT created_by FROM courses WHERE courses.id = classes.course_id)
+    WHERE course_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM courses c JOIN users u ON u.id = c.created_by
+      WHERE c.id = classes.course_id AND u.role = 'teacher' AND c.created_by <> classes.teacher_id
+    )
+  `);
+
   const admin = db.prepare("SELECT id FROM users WHERE role='admin' LIMIT 1").get();
   if (!admin) {
     const hash = bcrypt.hashSync('admin123', 10);
