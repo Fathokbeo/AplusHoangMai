@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../../lib/api';
 import VideoPlayer from '../../components/VideoPlayer';
 import Modal from '../../components/Modal';
 import GradingDetails from '../../components/GradingDetails';
 import FileViewer from '../../components/FileViewer';
-import PartsSolver, { type StudentAnswers } from '../../components/PartsSolver';
+import SubmitHomeworkView from '../../components/SubmitHomeworkView';
+import { type StudentAnswers } from '../../components/PartsSolver';
 import useIsMobile from '../../lib/useIsMobile';
 import { toast } from '../../components/Toast';
 import { parsePartsConfig, hasObjectiveParts, hasEssay, emptyStudentAnswers, PART_LABELS, PART_ORDER, type PartKey } from '../../lib/homeworkParts';
@@ -13,9 +14,12 @@ import { parseAttachments, isViewableFile } from '../../lib/attachments';
 import AssistantScheduleModal from '../../components/AssistantScheduleModal';
 import FacebookIcon from '../../components/FacebookIcon';
 import {
-  ChevronLeft, Play, ClipboardList, BookOpen, Upload, CheckCircle, Clock, Eye, Bot, Lock, FileText, X, Plus, Layers, Video,
+  ChevronLeft, Play, ClipboardList, BookOpen, Upload, CheckCircle, Clock, Eye, Bot, Lock, FileText, Layers, Video,
   ChevronDown, ChevronRight, ChevronUp, Trophy, Star, Paperclip, Download, UserCog, Phone, Calendar
 } from 'lucide-react';
+
+// Khóa lưu tạm đáp án đang làm dở của 1 bài, để không mất khi lỡ thoát ra giữa chừng.
+const draftKey = (hwId: number) => `homework_draft_${hwId}`;
 
 // Danh sách URL các file đã nộp (hỗ trợ cũ: 1 file, mới: nhiều file dạng JSON)
 function submittedFileUrls(hw: any): string[] {
@@ -42,7 +46,6 @@ export default function StudentClassDetail() {
   const [viewFiles, setViewFiles] = useState<string[] | null>(null);
   // Bài tập nào đang mở "Chi tiết" điểm (nhận xét + kết quả từng câu); mặc định ẩn hết
   const [openGradeDetails, setOpenGradeDetails] = useState<Set<number>>(new Set());
-  const fileRef = useRef<HTMLInputElement>(null);
   const isMobile = useIsMobile();
 
   useEffect(() => { fetchClass(); }, [id]);
@@ -73,14 +76,24 @@ export default function StudentClassDetail() {
     // Nạp lại đáp án đã nộp (nếu nộp lại) hoặc khởi tạo rỗng theo cấu hình bài
     let prev: any = null;
     if (hw.structured_answers) { try { prev = JSON.parse(hw.structured_answers); } catch { /* ignore */ } }
+    // Ưu tiên đáp án đang làm dở lưu tạm trên máy (nếu có) — tránh mất bài khi lỡ thoát ra
+    let draft: any = null;
+    const draftRaw = localStorage.getItem(draftKey(hw.id));
+    if (draftRaw) { try { draft = JSON.parse(draftRaw); } catch { /* ignore */ } }
     const empty = emptyStudentAnswers(cfg);
     setStudentAnswers({
-      multiple_choice: prev?.multiple_choice || empty.multiple_choice,
-      true_false: prev?.true_false || empty.true_false,
-      short_answer: prev?.short_answer || empty.short_answer,
+      multiple_choice: draft?.multiple_choice || prev?.multiple_choice || empty.multiple_choice,
+      true_false: draft?.true_false || prev?.true_false || empty.true_false,
+      short_answer: draft?.short_answer || prev?.short_answer || empty.short_answer,
     });
     setSubmitModal(true);
   };
+
+  // Tự lưu tạm đáp án đang điền để không mất khi lỡ thoát ra giữa chừng
+  useEffect(() => {
+    if (!submitModal || !submitting) return;
+    localStorage.setItem(draftKey(submitting.id), JSON.stringify(studentAnswers));
+  }, [studentAnswers, submitModal, submitting]);
 
   // Thêm file vào danh sách (gộp với file đã chọn, loại trùng tên+kích thước)
   const addFiles = (incoming: FileList | File[]) => {
@@ -106,6 +119,7 @@ export default function StudentClassDetail() {
       if (objective) body.append('structured_answers', JSON.stringify(studentAnswers));
       const { data } = await api.post(`/homework/${submitting.id}/submit`, body);
       toast.success(data.message);
+      localStorage.removeItem(draftKey(submitting.id));
       setSubmitModal(false);
       fetchClass();
     } catch (err: any) {
@@ -543,59 +557,24 @@ export default function StudentClassDetail() {
         {solutionVideo && <VideoPlayer url={solutionVideo.url} type="youtube" />}
       </Modal>
 
-      {/* Submit Homework Modal */}
-      <Modal open={submitModal} onClose={() => setSubmitModal(false)} title={`Làm bài: ${submitting?.title}`} size={submitObjective ? 'lg' : undefined}
-        footer={<><button className="btn btn-ghost" onClick={() => setSubmitModal(false)}>Hủy</button><button className="btn btn-primary" onClick={doSubmit} disabled={loading || !canDoSubmit}>{loading ? 'Đang nộp...' : `Nộp bài${submitFiles.length > 0 ? ` (${submitFiles.length} file)` : ''}`}</button></>}>
-        {submitObjective && (
-          <div style={{ marginBottom: '1.25rem' }}>
-            <PartsSolver cfg={submitCfg!} value={studentAnswers} onChange={setStudentAnswers} />
-          </div>
-        )}
-        <div style={{ marginBottom: '1rem', padding: '0.75rem', background: '#F5F5F5', borderRadius: 8, fontSize: '0.82rem', color: '#666' }}>
-          {submitObjective
-            ? <>Chọn/điền đáp án các phần ở trên{submitEssay ? ', rồi chụp ảnh phần TỰ LUẬN nộp bên dưới' : ''}. Hệ thống AI sẽ tự động chấm và cho kết quả ngay sau khi nộp.</>
-            : <>Nộp bài dạng ảnh chụp (JPG, PNG) hoặc file PDF. Có thể chọn <strong>nhiều ảnh</strong> cho một bài. Hệ thống AI sẽ tự động chấm điểm và cho kết quả ngay sau khi nộp.</>}
-        </div>
-        {submitEssay && (
-        <div className="form-group">
-          <label className="label">{submitObjective ? 'Phần IV — Tự luận: ảnh bài làm (PDF hoặc ảnh) *' : 'File bài làm (PDF hoặc ảnh) *'}</label>
-          <div className="dropzone" onClick={() => fileRef.current?.click()}
-            onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }}
-            onDragLeave={(e) => e.currentTarget.classList.remove('drag-over')}
-            onDrop={(e) => { e.preventDefault(); e.currentTarget.classList.remove('drag-over'); if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files); }}>
-            <div>
-              <Upload size={28} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
-              <div style={{ fontWeight: 500 }}>Kéo thả hoặc click để chọn file</div>
-              <div style={{ fontSize: '0.75rem', color: '#aaa', marginTop: 4 }}>PDF, JPG, PNG · chọn được nhiều ảnh · tối đa 20MB/file</div>
-            </div>
-          </div>
-          <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple hidden
-            onChange={(e) => { if (e.target.files?.length) addFiles(e.target.files); e.target.value = ''; }} />
-
-          {submitFiles.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
-              {submitFiles.map((f, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0.5rem 0.7rem', background: '#F1F8E9', borderRadius: 8 }}>
-                  {f.type === 'application/pdf'
-                    ? <FileText size={16} color="#C62828" style={{ flexShrink: 0 }} />
-                    : <CheckCircle size={16} color="#2E7D32" style={{ flexShrink: 0 }} />}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '0.83rem', fontWeight: 600, color: '#2E7D32', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</div>
-                    <div style={{ fontSize: '0.72rem', color: '#888' }}>{(f.size / 1024 / 1024).toFixed(1)} MB</div>
-                  </div>
-                  <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} onClick={() => removeFile(i)} title="Xóa">
-                    <X size={14} />
-                  </button>
-                </div>
-              ))}
-              <button className="btn btn-ghost btn-sm" style={{ alignSelf: 'flex-start' }} onClick={() => fileRef.current?.click()}>
-                <Plus size={14} /> Thêm file
-              </button>
-            </div>
-          )}
-        </div>
-        )}
-      </Modal>
+      {/* Submit Homework — toàn màn hình, chia đôi đề/bài làm trên máy tính */}
+      <SubmitHomeworkView
+        open={submitModal}
+        onClose={() => setSubmitModal(false)}
+        title={`Làm bài: ${submitting?.title || ''}`}
+        pdfUrl={submitting?.pdf_file ? `/uploads/homework/${submitting.pdf_file}` : null}
+        submitObjective={submitObjective}
+        submitEssay={submitEssay}
+        cfg={submitCfg}
+        studentAnswers={studentAnswers}
+        onAnswersChange={setStudentAnswers}
+        submitFiles={submitFiles}
+        onAddFiles={addFiles}
+        onRemoveFile={removeFile}
+        loading={loading}
+        canDoSubmit={canDoSubmit}
+        onSubmit={doSubmit}
+      />
 
       {/* File Viewer */}
       {viewFiles && <FileViewer files={viewFiles} onClose={() => setViewFiles(null)} />}

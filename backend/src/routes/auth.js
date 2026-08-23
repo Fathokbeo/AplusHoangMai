@@ -15,8 +15,11 @@ router.post('/login', (req, res) => {
   const db = getDb();
   const user = db.prepare("SELECT * FROM users WHERE username=? AND active=1").get(username);
 
-  if (!user || !bcrypt.compareSync(password, user.password)) {
-    return res.status(401).json({ message: 'Tên đăng nhập hoặc mật khẩu không đúng' });
+  if (!user) {
+    return res.status(401).json({ field: 'username', message: 'Tên đăng nhập không tồn tại' });
+  }
+  if (!bcrypt.compareSync(password, user.password)) {
+    return res.status(401).json({ field: 'password', message: 'Sai mật khẩu' });
   }
 
   const token = jwt.sign(

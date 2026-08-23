@@ -10,11 +10,15 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [usernameError, setUsernameError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
   const { login } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    setUsernameError('');
+    setPasswordError('');
     if (!username || !password) { toast.error('Vui lòng nhập đầy đủ thông tin'); return; }
     setLoading(true);
     try {
@@ -24,7 +28,11 @@ export default function Login() {
       else if (user.role === 'teacher') navigate('/teacher');
       else navigate('/student');
     } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Đăng nhập thất bại');
+      const field = err.response?.data?.field;
+      const message = err.response?.data?.message || 'Đăng nhập thất bại';
+      if (field === 'username') setUsernameError(message);
+      else if (field === 'password') setPasswordError(message);
+      else toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -78,13 +86,16 @@ export default function Login() {
                 <User size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#999' }} />
                 <input
                   className="input"
-                  style={{ paddingLeft: 36, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: 'white' }}
+                  style={{ paddingLeft: 36, background: 'rgba(255,255,255,0.08)', border: usernameError ? '1px solid #EF5350' : '1px solid rgba(255,255,255,0.15)', color: 'white' }}
                   placeholder="Nhập tên đăng nhập"
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  onChange={(e) => { setUsername(e.target.value); if (usernameError) setUsernameError(''); }}
                   autoComplete="username"
                 />
               </div>
+              {usernameError && (
+                <p style={{ color: '#EF5350', fontSize: '0.78rem', margin: '4px 0 0' }}>{usernameError}</p>
+              )}
             </div>
 
             <div className="form-group">
@@ -94,10 +105,10 @@ export default function Login() {
                 <input
                   className="input"
                   type={showPw ? 'text' : 'password'}
-                  style={{ paddingLeft: 36, paddingRight: 40, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: 'white' }}
+                  style={{ paddingLeft: 36, paddingRight: 40, background: 'rgba(255,255,255,0.08)', border: passwordError ? '1px solid #EF5350' : '1px solid rgba(255,255,255,0.15)', color: 'white' }}
                   placeholder="Nhập mật khẩu"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => { setPassword(e.target.value); if (passwordError) setPasswordError(''); }}
                   autoComplete="current-password"
                 />
                 <button
@@ -108,6 +119,9 @@ export default function Login() {
                   {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
+              {passwordError && (
+                <p style={{ color: '#EF5350', fontSize: '0.78rem', margin: '4px 0 0' }}>{passwordError}</p>
+              )}
             </div>
 
             <button
