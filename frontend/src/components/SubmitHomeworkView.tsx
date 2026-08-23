@@ -1,13 +1,17 @@
 // Giao diện "Nộp bài" toàn màn hình.
-// Máy tính: chia đôi màn hình — trái là đề, phải là chỗ làm bài.
-// Điện thoại: toàn màn chỉ có chỗ làm bài; bấm "Xem đề" mới hiện đề ở trên.
+// Máy tính: chia đôi màn hình — trái là đề (chỉ nội dung, tự phóng to/nhỏ bằng nút +/-, kéo được thanh
+// chia để đổi tỉ lệ 2 bên), phải là chỗ làm bài như cũ.
+// Điện thoại: toàn màn chỉ có chỗ làm bài; bấm "Xem đề" mới hiện đề ở trên (không kéo chia được).
 import { useEffect, useRef, useState } from 'react';
-import { X, FileText, Upload, Plus, CheckCircle } from 'lucide-react';
+import { X, FileText, Upload, Plus, Minus, CheckCircle } from 'lucide-react';
 import PartsSolver, { type StudentAnswers } from './PartsSolver';
-import type { PartsConfig } from '../lib/homeworkParts';
+import HsaSolver from './HsaSolver';
+import PdfCanvasViewer from './PdfCanvasViewer';
+import type { PartsConfig, HsaConfig, ExamType } from '../lib/homeworkParts';
 import useIsMobile from '../lib/useIsMobile';
 
-const isPdfUrl = (url: string) => url.split('?')[0].toLowerCase().endsWith('.pdf');
+const round2 = (n: number) => Math.round(n * 100) / 100;
+const ZOOM_MIN = 0.5, ZOOM_MAX = 3, ZOOM_STEP = 0.25;
 
 interface Props {
   open: boolean;
@@ -19,6 +23,10 @@ interface Props {
   cfg: PartsConfig | null;
   studentAnswers: StudentAnswers;
   onAnswersChange: (next: StudentAnswers) => void;
+  examType: ExamType;
+  hsaCfg: HsaConfig | null;
+  hsaAnswers: string[];
+  onHsaAnswersChange: (next: string[]) => void;
   submitFiles: File[];
   onAddFiles: (files: FileList | File[]) => void;
   onRemoveFile: (idx: number) => void;
@@ -29,36 +37,81 @@ interface Props {
 
 export default function SubmitHomeworkView({
   open, onClose, title, pdfUrl, submitObjective, submitEssay, cfg,
-  studentAnswers, onAnswersChange, submitFiles, onAddFiles, onRemoveFile,
-  loading, canDoSubmit, onSubmit,
+  studentAnswers, onAnswersChange, examType, hsaCfg, hsaAnswers, onHsaAnswersChange,
+  submitFiles, onAddFiles, onRemoveFile, loading, canDoSubmit, onSubmit,
 }: Props) {
   const isMobile = useIsMobile();
   const [showDe, setShowDe] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [splitPct, setSplitPct] = useState(50); // % chiều rộng dành cho đề (chỉ máy tính, kéo được)
+  const splitRowRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     document.body.style.overflow = open ? 'hidden' : '';
-    if (open) setShowDe(false);
+    if (open) { setShowDe(false); setZoom(1); setSplitPct(50); }
     return () => { document.body.style.overflow = ''; };
   }, [open]);
+
+  // Kéo thanh chia tỉ lệ đề/bài làm (chỉ máy tính) — theo dõi chuột trên toàn trang khi đang kéo
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!draggingRef.current || !splitRowRef.current) return;
+      const rect = splitRowRef.current.getBoundingClientRect();
+      const pct = ((e.clientX - rect.left) / rect.width) * 100;
+      setSplitPct(Math.min(80, Math.max(20, pct)));
+    };
+    const onUp = () => {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, []);
+
+  const startDrag = (e: React.MouseEvent) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
 
   if (!open) return null;
 
   const dePanel = pdfUrl && (
-    isPdfUrl(pdfUrl)
-      ? <iframe src={pdfUrl} title="Đề bài" style={{ width: '100%', height: '100%', border: 'none', background: 'white' }} />
-      : <img src={pdfUrl} alt="Đề bài" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <PdfCanvasViewer url={pdfUrl} zoom={zoom} />
+      <div style={{ position: 'absolute', bottom: 12, right: 12, display: 'flex', alignItems: 'center', gap: 2, background: 'white', borderRadius: 99, boxShadow: '0 2px 10px rgba(0,0,0,0.25)', padding: 4 }}>
+        <button type="button" className="btn btn-ghost btn-sm btn-icon" onClick={() => setZoom((z) => Math.max(ZOOM_MIN, round2(z - ZOOM_STEP)))} title="Thu nhỏ" disabled={zoom <= ZOOM_MIN}>
+          <Minus size={14} />
+        </button>
+        <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#666', minWidth: 36, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
+        <button type="button" className="btn btn-ghost btn-sm btn-icon" onClick={() => setZoom((z) => Math.min(ZOOM_MAX, round2(z + ZOOM_STEP)))} title="Phóng to" disabled={zoom >= ZOOM_MAX}>
+          <Plus size={14} />
+        </button>
+      </div>
+    </div>
   );
 
   const answerPanel = (
     <div style={{ padding: isMobile ? '1rem' : '1.5rem', overflowY: 'auto', height: '100%' }}>
-      {submitObjective && cfg && (
+      {examType === 'hsa' && hsaCfg ? (
+        <div style={{ marginBottom: '1.25rem' }}>
+          <HsaSolver cfg={hsaCfg} value={hsaAnswers} onChange={onHsaAnswersChange} />
+        </div>
+      ) : submitObjective && cfg && (
         <div style={{ marginBottom: '1.25rem' }}>
           <PartsSolver cfg={cfg} value={studentAnswers} onChange={onAnswersChange} />
         </div>
       )}
       <div style={{ marginBottom: '1rem', padding: '0.75rem', background: '#F5F5F5', borderRadius: 8, fontSize: '0.82rem', color: '#666' }}>
-        {submitObjective
+        {examType === 'hsa'
+          ? <>Chọn/điền đáp án các câu ở trên. Hệ thống tự động chấm và cho kết quả ngay sau khi nộp.</>
+          : submitObjective
           ? <>Chọn/điền đáp án các phần ở trên{submitEssay ? ', rồi chụp ảnh phần TỰ LUẬN nộp bên dưới' : ''}. Hệ thống AI sẽ tự động chấm và cho kết quả ngay sau khi nộp.</>
           : <>Nộp bài dạng ảnh chụp (JPG, PNG) hoặc file PDF. Có thể chọn <strong>nhiều ảnh</strong> cho một bài. Hệ thống AI sẽ tự động chấm điểm và cho kết quả ngay sau khi nộp.</>}
       </div>
@@ -129,13 +182,17 @@ export default function SubmitHomeworkView({
           <div style={{ flex: 1, minHeight: 0 }}>{answerPanel}</div>
         </div>
       ) : (
-        <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        <div ref={splitRowRef} style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
           {pdfUrl && (
-            <div style={{ width: '50%', borderRight: '1px solid #EEE', background: '#2A2A35', flexShrink: 0 }}>
-              {dePanel}
-            </div>
+            <>
+              <div style={{ width: `${splitPct}%`, background: '#2A2A35', flexShrink: 0 }}>
+                {dePanel}
+              </div>
+              <div onMouseDown={startDrag} title="Kéo để đổi tỉ lệ"
+                style={{ width: 6, flexShrink: 0, cursor: 'col-resize', background: '#EEE', borderLeft: '1px solid #E0E0E0', borderRight: '1px solid #E0E0E0' }} />
+            </>
           )}
-          <div style={{ width: pdfUrl ? '50%' : '100%' }}>{answerPanel}</div>
+          <div style={{ width: pdfUrl ? `${100 - splitPct}%` : '100%' }}>{answerPanel}</div>
         </div>
       )}
     </div>

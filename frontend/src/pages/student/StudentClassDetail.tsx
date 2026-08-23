@@ -9,7 +9,7 @@ import SubmitHomeworkView from '../../components/SubmitHomeworkView';
 import { type StudentAnswers } from '../../components/PartsSolver';
 import useIsMobile from '../../lib/useIsMobile';
 import { toast } from '../../components/Toast';
-import { parsePartsConfig, hasObjectiveParts, hasEssay, emptyStudentAnswers, PART_LABELS, PART_ORDER, type PartKey } from '../../lib/homeworkParts';
+import { parsePartsConfig, hasObjectiveParts, hasEssay, emptyStudentAnswers, PART_LABELS, PART_ORDER, type PartKey, parseHsaConfig, emptyHsaStudentAnswers, type HsaConfig } from '../../lib/homeworkParts';
 import { parseAttachments, isViewableFile } from '../../lib/attachments';
 import AssistantScheduleModal from '../../components/AssistantScheduleModal';
 import FacebookIcon from '../../components/FacebookIcon';
@@ -42,6 +42,7 @@ export default function StudentClassDetail() {
   const [submitting, setSubmitting] = useState<any>(null);
   const [submitFiles, setSubmitFiles] = useState<File[]>([]);
   const [studentAnswers, setStudentAnswers] = useState<StudentAnswers>({ multiple_choice: [], true_false: [], short_answer: [] });
+  const [hsaAnswers, setHsaAnswers] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [viewFiles, setViewFiles] = useState<string[] | null>(null);
   // Bài tập nào đang mở "Chi tiết" điểm (nhận xét + kết quả từng câu); mặc định ẩn hết
@@ -72,28 +73,36 @@ export default function StudentClassDetail() {
   const openSubmit = (hw: any) => {
     setSubmitting(hw);
     setSubmitFiles([]);
-    const cfg = parsePartsConfig(hw.parts_config);
-    // Nạp lại đáp án đã nộp (nếu nộp lại) hoặc khởi tạo rỗng theo cấu hình bài
+    // Đáp án đã nộp trước đó (nếu nộp lại) — dùng chung cho cả 2 kiểu bài, hình dạng khác nhau theo exam_type
     let prev: any = null;
     if (hw.structured_answers) { try { prev = JSON.parse(hw.structured_answers); } catch { /* ignore */ } }
     // Ưu tiên đáp án đang làm dở lưu tạm trên máy (nếu có) — tránh mất bài khi lỡ thoát ra
     let draft: any = null;
     const draftRaw = localStorage.getItem(draftKey(hw.id));
     if (draftRaw) { try { draft = JSON.parse(draftRaw); } catch { /* ignore */ } }
-    const empty = emptyStudentAnswers(cfg);
-    setStudentAnswers({
-      multiple_choice: draft?.multiple_choice || prev?.multiple_choice || empty.multiple_choice,
-      true_false: draft?.true_false || prev?.true_false || empty.true_false,
-      short_answer: draft?.short_answer || prev?.short_answer || empty.short_answer,
-    });
+
+    if (hw.exam_type === 'hsa') {
+      const cfg = parseHsaConfig(hw.hsa_config);
+      const empty = emptyHsaStudentAnswers(cfg);
+      setHsaAnswers((Array.isArray(draft?.hsa) && draft.hsa) || (Array.isArray(prev?.hsa) && prev.hsa) || empty);
+    } else {
+      const cfg = parsePartsConfig(hw.parts_config);
+      const empty = emptyStudentAnswers(cfg);
+      setStudentAnswers({
+        multiple_choice: draft?.multiple_choice || prev?.multiple_choice || empty.multiple_choice,
+        true_false: draft?.true_false || prev?.true_false || empty.true_false,
+        short_answer: draft?.short_answer || prev?.short_answer || empty.short_answer,
+      });
+    }
     setSubmitModal(true);
   };
 
   // Tự lưu tạm đáp án đang điền để không mất khi lỡ thoát ra giữa chừng
   useEffect(() => {
     if (!submitModal || !submitting) return;
-    localStorage.setItem(draftKey(submitting.id), JSON.stringify(studentAnswers));
-  }, [studentAnswers, submitModal, submitting]);
+    const draft = submitting.exam_type === 'hsa' ? { hsa: hsaAnswers } : studentAnswers;
+    localStorage.setItem(draftKey(submitting.id), JSON.stringify(draft));
+  }, [studentAnswers, hsaAnswers, submitModal, submitting]);
 
   // Thêm file vào danh sách (gộp với file đã chọn, loại trùng tên+kích thước)
   const addFiles = (incoming: FileList | File[]) => {
@@ -108,15 +117,17 @@ export default function StudentClassDetail() {
   const removeFile = (idx: number) => setSubmitFiles((prev) => prev.filter((_, i) => i !== idx));
 
   const doSubmit = async () => {
-    const cfg = parsePartsConfig(submitting?.parts_config);
-    const objective = hasObjectiveParts(cfg);
+    const isHsa = submitting?.exam_type === 'hsa';
+    const cfg = isHsa ? null : parsePartsConfig(submitting?.parts_config);
+    const objective = isHsa ? true : hasObjectiveParts(cfg);
     // Phải có bài làm: đáp án objective đã điền HOẶC ít nhất một file (cho phần tự luận / bài cũ)
-    if (submitFiles.length === 0 && !objective) { toast.error('Chọn ít nhất một file bài làm'); return; }
+    if (!isHsa && submitFiles.length === 0 && !objective) { toast.error('Chọn ít nhất một file bài làm'); return; }
     setLoading(true);
     try {
       const body = new FormData();
       submitFiles.forEach((f) => body.append('files', f));
-      if (objective) body.append('structured_answers', JSON.stringify(studentAnswers));
+      if (isHsa) body.append('structured_answers', JSON.stringify({ hsa: hsaAnswers }));
+      else if (objective) body.append('structured_answers', JSON.stringify(studentAnswers));
       const { data } = await api.post(`/homework/${submitting.id}/submit`, body);
       toast.success(data.message);
       localStorage.removeItem(draftKey(submitting.id));
@@ -217,7 +228,19 @@ export default function StudentClassDetail() {
               {hw.due_date && <span><Clock size={11} style={{ verticalAlign: 'middle' }} /> HH: {new Date(hw.due_date).toLocaleString('vi-VN')}</span>}
               {hasAttemptLimit && <span><Upload size={11} style={{ verticalAlign: 'middle' }} /> Lượt nộp: {hw.max_attempts - hw.attempts_left}/{hw.max_attempts}</span>}
             </div>
-            {(() => {
+            {hw.exam_type === 'hsa' ? (() => {
+              const cfg = parseHsaConfig(hw.hsa_config);
+              if (!cfg) return null;
+              const mcCount = cfg.questions.filter((q) => q.kind === 'multiple_choice').length;
+              const saCount = cfg.questions.length - mcCount;
+              return (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                  <span className="badge badge-purple">HSA</span>
+                  {mcCount > 0 && <span className="badge badge-purple">Trắc nghiệm ×{mcCount}</span>}
+                  {saCount > 0 && <span className="badge badge-purple">Trả lời ngắn ×{saCount}</span>}
+                </div>
+              );
+            })() : (() => {
               const cfg = parsePartsConfig(hw.parts_config);
               if (!cfg) return null;
               const active = PART_ORDER.filter((k: PartKey) => (k === 'essay' ? cfg.essay.enabled : (cfg as any)[k].enabled));
@@ -385,10 +408,12 @@ export default function StudentClassDetail() {
   };
 
   // Cấu hình các phần của bài đang nộp (cho modal làm bài)
-  const submitCfg = parsePartsConfig(submitting?.parts_config);
-  const submitObjective = hasObjectiveParts(submitCfg);
-  const submitEssay = hasEssay(submitCfg) || !submitCfg; // bài cũ (không cfg) coi như chỉ tự luận
-  const canDoSubmit = submitObjective || submitFiles.length > 0;
+  const isHsaSubmit = submitting?.exam_type === 'hsa';
+  const hsaCfg: HsaConfig | null = isHsaSubmit ? parseHsaConfig(submitting?.hsa_config) : null;
+  const submitCfg = isHsaSubmit ? null : parsePartsConfig(submitting?.parts_config);
+  const submitObjective = isHsaSubmit ? true : hasObjectiveParts(submitCfg);
+  const submitEssay = isHsaSubmit ? false : (hasEssay(submitCfg) || !submitCfg); // bài cũ (không cfg) coi như chỉ tự luận
+  const canDoSubmit = isHsaSubmit ? true : (submitObjective || submitFiles.length > 0);
 
   return (
     <div className="fade-in">
@@ -568,6 +593,10 @@ export default function StudentClassDetail() {
         cfg={submitCfg}
         studentAnswers={studentAnswers}
         onAnswersChange={setStudentAnswers}
+        examType={submitting?.exam_type === 'hsa' ? 'hsa' : 'thpt'}
+        hsaCfg={hsaCfg}
+        hsaAnswers={hsaAnswers}
+        onHsaAnswersChange={setHsaAnswers}
         submitFiles={submitFiles}
         onAddFiles={addFiles}
         onRemoveFile={removeFile}

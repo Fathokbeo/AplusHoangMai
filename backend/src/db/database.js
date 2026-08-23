@@ -322,6 +322,14 @@ function initSchema() {
   if (!hwCols.some(c => c.name === 'feedback_rubric')) {
     db.exec('ALTER TABLE homework ADD COLUMN feedback_rubric TEXT');
   }
+  // Kiểu bài: 'thpt' (mặc định, nộp bài như cũ — 4 phần TN/ĐS/TLN/TL, điểm quy đổi về "Thang điểm")
+  // hoặc 'hsa' (mỗi câu TN hoặc TLN tự chọn, mỗi câu 1 điểm, điểm cuối = tổng điểm thô, KHÔNG quy đổi).
+  if (!hwCols.some(c => c.name === 'exam_type')) {
+    db.exec("ALTER TABLE homework ADD COLUMN exam_type TEXT DEFAULT 'thpt'");
+  }
+  if (!hwCols.some(c => c.name === 'hsa_config')) {
+    db.exec('ALTER TABLE homework ADD COLUMN hsa_config TEXT');
+  }
 
   // Đồng bộ dữ liệu: mỗi khóa học chỉ do 1 giáo viên phụ trách (courses.created_by) nên mọi lớp trong khóa
   // phải theo đúng giáo viên đó — trước đây admin có thể tạo lớp gán cho giáo viên khác, gây lệch dữ liệu.

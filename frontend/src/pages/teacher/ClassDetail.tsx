@@ -5,11 +5,12 @@ import Modal from '../../components/Modal';
 import VideoPlayer from '../../components/VideoPlayer';
 import FileViewer from '../../components/FileViewer';
 import PartsEditor from '../../components/PartsEditor';
+import HsaEditor from '../../components/HsaEditor';
 import useIsMobile from '../../lib/useIsMobile';
 import { toast } from '../../components/Toast';
 import { sortByVietnameseName, matchesNameSearch, normalizeVietnamese } from '../../lib/vietnameseName';
 import { parseAttachments, isViewableFile } from '../../lib/attachments';
-import { emptyPartsConfig, normalizePartsConfig, computeMaxScore, anyPartEnabled, type PartsConfig, PART_LABELS, PART_ORDER, type PartKey } from '../../lib/homeworkParts';
+import { emptyPartsConfig, normalizePartsConfig, computeMaxScore, anyPartEnabled, type PartsConfig, PART_LABELS, PART_ORDER, type PartKey, emptyHsaConfig, parseHsaConfig, hsaMaxScore, type HsaConfig, type ExamType } from '../../lib/homeworkParts';
 import type { AssistantSchedule } from '../../lib/assistantSchedule';
 import AssistantScheduleModal from '../../components/AssistantScheduleModal';
 import FacebookIcon from '../../components/FacebookIcon';
@@ -76,8 +77,9 @@ export default function ClassDetail() {
   const [viewingLesson, setViewingLesson] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [lessonForm, setLessonForm] = useState({ title: '', description: '', video_url: '', video_type: 'youtube', lesson_order: '0', chapter_id: '' });
-  const [hwForm, setHwForm] = useState({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '', chapter_id: '', solution_video_url: '', hw_order: '0', max_attempts: '' });
+  const [hwForm, setHwForm] = useState({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '', chapter_id: '', solution_video_url: '', hw_order: '0', max_attempts: '', exam_type: 'thpt' as ExamType });
   const [hwParts, setHwParts] = useState<PartsConfig>(emptyPartsConfig());
+  const [hsaConfig, setHsaConfig] = useState<HsaConfig>(emptyHsaConfig());
   const [hwFiles, setHwFiles] = useState<{ pdf?: File; answer?: File }>({});
   const [chapterForm, setChapterForm] = useState({ title: '', chapter_order: '0', subject: 'algebra' as 'algebra' | 'geometry' });
   const [studentSearch, setStudentSearch] = useState('');
@@ -527,9 +529,10 @@ export default function ClassDetail() {
     setHwForm({
       title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '',
       chapter_id: chapterId ? String(chapterId) : '', solution_video_url: '', max_attempts: '',
-      hw_order: String(nextOrderInChapter(cls?.homework, chapterId ?? null)),
+      hw_order: String(nextOrderInChapter(cls?.homework, chapterId ?? null)), exam_type: 'thpt',
     });
     setHwParts(emptyPartsConfig());
+    setHsaConfig(emptyHsaConfig());
     setHwFiles({});
     setHwModal(true);
   };
@@ -546,8 +549,10 @@ export default function ClassDetail() {
       solution_video_url: h.solution_video_url || '',
       max_attempts: h.max_attempts ? String(h.max_attempts) : '',
       hw_order: String(positionInChapter(cls?.homework, h.chapter_id, h.id)),
+      exam_type: h.exam_type === 'hsa' ? 'hsa' : 'thpt',
     });
     setHwParts(normalizePartsConfig(h.parts_config));
+    setHsaConfig(parseHsaConfig(h.hsa_config) || emptyHsaConfig());
     setHwFiles({});
     setHwModal(true);
   };
@@ -557,11 +562,12 @@ export default function ClassDetail() {
     setLoading(true);
     try {
       const body = new FormData();
-      // Thang điểm = thang giáo viên chọn (để quy đổi). Mặc định đã bám theo tổng điểm các câu.
+      // Thang điểm = thang giáo viên chọn (để quy đổi, chỉ áp dụng THPT). Mặc định bám theo tổng điểm các câu.
       // Mốc thời gian: đổi giờ địa phương -> ISO để so "đến hạn" đúng múi giờ.
       Object.entries(hwForm).forEach(([k, v]) =>
         body.append(k, (k === 'due_date' || k === 'answer_visible_date') ? localInputToISO(v) : v));
       body.append('parts_config', JSON.stringify(hwParts));
+      body.append('hsa_config', JSON.stringify(hsaConfig));
       if (hwFiles.pdf) body.append('pdf_file', hwFiles.pdf);
       if (hwFiles.answer) body.append('answer_file', hwFiles.answer);
 
@@ -1369,22 +1375,57 @@ export default function ClassDetail() {
           <textarea className="input" rows={3} value={hwForm.description} onChange={(e) => setHwForm({ ...hwForm, description: e.target.value })} />
         </div>
         <div className="form-group">
-          <label className="label">Kiểu nộp bài</label>
-          <div style={{ fontSize: '0.75rem', color: '#888', margin: '2px 0 10px', lineHeight: 1.6 }}>
-            Chọn các phần học sinh sẽ làm. Thứ tự khi làm bài: Trắc nghiệm → Đúng/Sai → Trả lời ngắn → Tự luận.
-            Trắc nghiệm/Đúng-Sai/Trả lời ngắn được <strong>chấm tự động</strong> theo đáp án &amp; điểm bạn đặt.
-            Câu nào <strong>để trống đáp án</strong> → AI tự đọc từ <strong>File đáp án (PDF)</strong> bên dưới để chấm. Phần tự luận do AI chấm theo file đáp án.
+          <label className="label">Kiểu bài</label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {([
+              { key: 'thpt' as ExamType, title: 'Lựa chọn 1 — THPT (mặc định)', desc: 'Nộp bài như hiện tại: Trắc nghiệm / Đúng-Sai / Trả lời ngắn / Tự luận, điểm quy đổi về Thang điểm.' },
+              { key: 'hsa' as ExamType, title: 'Lựa chọn 2 — HSA', desc: 'Mỗi câu tự chọn Trắc nghiệm hoặc Trả lời ngắn, luôn 1 điểm/câu. Điểm cuối = tổng điểm đạt được, không quy đổi.' },
+            ]).map((o) => {
+              const active = hwForm.exam_type === o.key;
+              return (
+                <button key={o.key} type="button" onClick={() => setHwForm({ ...hwForm, exam_type: o.key })}
+                  style={{
+                    textAlign: 'left', flex: '1 1 260px', minWidth: 220, cursor: 'pointer',
+                    border: `1.5px solid ${active ? '#C62828' : '#DDD'}`, background: active ? '#FFF4F4' : 'white',
+                    borderRadius: 10, padding: '8px 12px',
+                  }}>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#1A1A2E' }}>{o.title}</div>
+                  <div style={{ fontSize: '0.74rem', color: '#777', marginTop: 4, lineHeight: 1.5 }}>{o.desc}</div>
+                </button>
+              );
+            })}
           </div>
-          <PartsEditor value={hwParts} onChange={setHwParts}
-            gradingNote={hwForm.grading_note} onGradingNoteChange={(v) => setHwForm({ ...hwForm, grading_note: v })} />
         </div>
+        {hwForm.exam_type === 'hsa' ? (
+          <div className="form-group">
+            <label className="label">Cấu hình câu hỏi (HSA)</label>
+            <HsaEditor value={hsaConfig} onChange={setHsaConfig} />
+          </div>
+        ) : (
+          <div className="form-group">
+            <label className="label">Kiểu nộp bài</label>
+            <div style={{ fontSize: '0.75rem', color: '#888', margin: '2px 0 10px', lineHeight: 1.6 }}>
+              Chọn các phần học sinh sẽ làm. Thứ tự khi làm bài: Trắc nghiệm → Đúng/Sai → Trả lời ngắn → Tự luận.
+              Trắc nghiệm/Đúng-Sai/Trả lời ngắn được <strong>chấm tự động</strong> theo đáp án &amp; điểm bạn đặt.
+              Câu nào <strong>để trống đáp án</strong> → AI tự đọc từ <strong>File đáp án (PDF)</strong> bên dưới để chấm. Phần tự luận do AI chấm theo file đáp án.
+            </div>
+            <PartsEditor value={hwParts} onChange={setHwParts}
+              gradingNote={hwForm.grading_note} onGradingNoteChange={(v) => setHwForm({ ...hwForm, grading_note: v })} />
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12 }}>
           <div className="form-group">
-            <label className="label">Thang điểm{anyPartEnabled(hwParts) ? ' (quy đổi về)' : ''}</label>
+            <label className="label">Thang điểm{hwForm.exam_type === 'thpt' && anyPartEnabled(hwParts) ? ' (quy đổi về)' : ''}</label>
+            {hwForm.exam_type === 'hsa' ? (
+              <div className="input" style={{ background: '#F5F5F5', color: '#666', display: 'flex', alignItems: 'center' }}>
+                {hsaMaxScore(hsaConfig)} điểm (tự động = số câu, không quy đổi)
+              </div>
+            ) : (
             <input className="input" type="number" min={1} step={0.5}
               value={hwForm.max_score}
               onChange={(e) => setHwForm({ ...hwForm, max_score: e.target.value })} />
-            {anyPartEnabled(hwParts) && (
+            )}
+            {hwForm.exam_type === 'thpt' && anyPartEnabled(hwParts) && (
               <div style={{ fontSize: '0.72rem', color: '#888', marginTop: 4, lineHeight: 1.5 }}>
                 Tổng điểm các câu: <strong>{computeMaxScore(hwParts)}</strong>. Điểm cuối = (điểm đạt ÷ tổng) × thang điểm.{' '}
                 {computeMaxScore(hwParts) > 0 && String(computeMaxScore(hwParts)) !== String(hwForm.max_score) && (

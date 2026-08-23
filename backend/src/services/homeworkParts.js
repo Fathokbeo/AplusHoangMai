@@ -78,8 +78,43 @@ function hasAnswerKey(raw) {
   );
 }
 
-// Bài cần học sinh chấm AI (có đáp án objective hoặc có file đáp án tự luận).
+// ── HSA: mỗi câu tự chọn Trắc nghiệm/Trả lời ngắn, luôn 1 điểm/câu, chấm hoàn toàn tự động
+//    (KHÔNG dùng AI — không hỗ trợ "để trống đáp án → AI đọc file" như THPT). ─────────────
+// Parse hsa_config (chuỗi JSON hoặc object) → { questions: [{kind,answer,note?}] }, hoặc null.
+function parseHsaConfig(raw) {
+  if (!raw) return null;
+  let obj = raw;
+  if (typeof raw === 'string') {
+    try { obj = JSON.parse(raw); } catch { return null; }
+  }
+  if (!obj || typeof obj !== 'object' || !Array.isArray(obj.questions) || obj.questions.length === 0) return null;
+  return obj;
+}
+
+// Một câu HSA đã có đáp án chưa (theo đúng kiểu TN/TLN của câu đó)?
+function hsaKeyIsSet(q) {
+  if (!q) return false;
+  if (q.kind === 'multiple_choice') return typeof q.answer === 'string' && /^[ABCD]$/i.test(q.answer.trim());
+  return typeof q.answer === 'string' && q.answer.trim() !== '';
+}
+
+// Bài HSA có ít nhất 1 câu đã đặt đáp án → có thể chấm tự động (câu nào chưa có đáp án sẽ báo
+// "chưa có đáp án" cho giáo viên kiểm tra, xem homeworkScoring.scoreHsa).
+function hasHsaAnswerKey(raw) {
+  const cfg = parseHsaConfig(raw);
+  return !!cfg && cfg.questions.some((q) => hsaKeyIsSet(q));
+}
+
+// Ẩn đáp án khỏi học sinh — chỉ giữ kiểu câu (TN/TLN) + ghi chú cách điền.
+function stripHsaAnswers(raw) {
+  const cfg = parseHsaConfig(raw);
+  if (!cfg) return null;
+  return { questions: cfg.questions.map((q) => ({ kind: q.kind === 'short_answer' ? 'short_answer' : 'multiple_choice', note: q.note || '' })) };
+}
+
+// Bài cần học sinh chấm tự động (THPT: AI; HSA: tự chấm theo đáp án, không AI).
 function needsAiGrading(homework) {
+  if (homework.exam_type === 'hsa') return hasHsaAnswerKey(homework.hsa_config);
   return !!homework.answer_file || hasAnswerKey(homework.parts_config);
 }
 
@@ -161,4 +196,8 @@ module.exports = {
   stripAnswers,
   describeAnswerKey,
   describeStudentAnswers,
+  parseHsaConfig,
+  hsaKeyIsSet,
+  hasHsaAnswerKey,
+  stripHsaAnswers,
 };

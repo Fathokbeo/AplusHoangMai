@@ -6,7 +6,7 @@ const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { uploadHomework, uploadSubmission } = require('../middleware/upload');
 const { enqueue, gradeOne } = require('../services/gradingQueue');
-const { needsAiGrading, stripAnswers, parsePartsConfig, partEnabled, keyIsSet } = require('../services/homeworkParts');
+const { needsAiGrading, stripAnswers, stripHsaAnswers, parsePartsConfig, partEnabled, keyIsSet } = require('../services/homeworkParts');
 const { computeMaxScore, DEFAULT_POINTS } = require('../services/homeworkScoring');
 const { compareVietnameseName } = require('../services/vietnameseName');
 const { generateFeedbackRubric } = require('../services/aiGrading');
@@ -72,6 +72,29 @@ function sanitizePartsConfig(raw) {
   return Object.keys(out).length ? JSON.stringify(out) : null;
 }
 
+// Chuẩn hóa hsa_config nhận từ form (chuỗi JSON) → chuỗi JSON để lưu, hoặc null.
+// Mỗi câu: { kind: 'multiple_choice'|'short_answer', answer, note? } — luôn 1 điểm/câu.
+function sanitizeHsaConfig(raw) {
+  if (raw === undefined || raw === null || raw === '') return null;
+  let obj = raw;
+  if (typeof raw === 'string') {
+    try { obj = JSON.parse(raw); } catch { return null; }
+  }
+  if (!obj || typeof obj !== 'object' || !Array.isArray(obj.questions)) return null;
+  const count = Math.max(0, Math.min(50, obj.questions.length));
+  const questions = [];
+  for (let i = 0; i < count; i++) {
+    const q = obj.questions[i] || {};
+    const kind = q.kind === 'short_answer' ? 'short_answer' : 'multiple_choice';
+    questions.push({
+      kind,
+      answer: typeof q.answer === 'string' ? q.answer : '',
+      note: kind === 'short_answer' ? String(q.note == null ? '' : q.note) : '',
+    });
+  }
+  return questions.length ? JSON.stringify({ questions }) : null;
+}
+
 // Lấy danh sách tên file của một bài nộp (hỗ trợ cũ: file_path đơn, mới: files JSON)
 function submissionFilenames(sub) {
   if (sub && sub.files) {
@@ -86,32 +109,43 @@ router.post(
   requireRole('teacher', 'admin'),
   uploadHomework.fields([{ name: 'pdf_file', maxCount: 1 }, { name: 'answer_file', maxCount: 1 }]),
   (req, res) => {
-    const { title, description, due_date, answer_visible_date, max_score, grading_note, chapter_id, solution_video_url, parts_config, hw_order, max_attempts } = req.body;
+    const { title, description, due_date, answer_visible_date, max_score, grading_note, chapter_id, solution_video_url, parts_config, hw_order, max_attempts, exam_type, hsa_config } = req.body;
     if (!title) return res.status(400).json({ message: 'Cần tiêu đề bài tập' });
     const db = getDb();
     const cls = db.prepare('SELECT * FROM classes WHERE id=?').get(req.params.classId);
     if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp' });
     if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
 
-    const partsJson = sanitizePartsConfig(parts_config);
-    // Thang điểm = thang giáo viên chọn (để quy đổi). Nếu không nhập → mặc định = tổng điểm thô các câu.
-    const rawSum = computeMaxScore(partsJson);
-    const provided = parseFloat(max_score);
-    const finalMax = isFinite(provided) && provided > 0 ? provided : (rawSum != null ? rawSum : 10);
+    const examType = exam_type === 'hsa' ? 'hsa' : 'thpt';
+    let partsJson = null;
+    let hsaJson = null;
+    let finalMax;
+    if (examType === 'hsa') {
+      // HSA: mỗi câu 1 điểm, thang điểm = số câu — KHÔNG cho giáo viên chọn/quy đổi.
+      hsaJson = sanitizeHsaConfig(hsa_config);
+      const hsaCfg = hsaJson ? JSON.parse(hsaJson) : null;
+      finalMax = hsaCfg ? hsaCfg.questions.length : 0;
+    } else {
+      partsJson = sanitizePartsConfig(parts_config);
+      // Thang điểm = thang giáo viên chọn (để quy đổi). Nếu không nhập → mặc định = tổng điểm thô các câu.
+      const rawSum = computeMaxScore(partsJson);
+      const provided = parseFloat(max_score);
+      finalMax = isFinite(provided) && provided > 0 ? provided : (rawSum != null ? rawSum : 10);
+    }
     // Giới hạn số lần nộp bài: số nguyên dương, để trống/0 = không giới hạn
     const attemptsLimit = parseInt(max_attempts);
     const finalMaxAttempts = Number.isFinite(attemptsLimit) && attemptsLimit > 0 ? attemptsLimit : null;
 
     const result = db.prepare(`
-      INSERT INTO homework (class_id,title,description,pdf_file,answer_file,due_date,answer_visible_date,max_score,grading_note,chapter_id,solution_video_url,parts_config,hw_order,max_attempts)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      INSERT INTO homework (class_id,title,description,pdf_file,answer_file,due_date,answer_visible_date,max_score,grading_note,chapter_id,solution_video_url,parts_config,hw_order,max_attempts,exam_type,hsa_config)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       req.params.classId, title, description || null,
       req.files?.pdf_file?.[0]?.filename || null,
       req.files?.answer_file?.[0]?.filename || null,
       due_date || null, answer_visible_date || null, finalMax,
       grading_note || null, chapter_id || null, solution_video_url || null,
-      partsJson, parseInt(hw_order) || 0, finalMaxAttempts
+      partsJson, parseInt(hw_order) || 0, finalMaxAttempts, examType, hsaJson
     );
     scheduleRubricGeneration(result.lastInsertRowid, req.files?.answer_file?.[0]?.filename || null, partsJson);
     res.status(201).json({ id: result.lastInsertRowid, title });
@@ -124,7 +158,7 @@ router.put(
   requireRole('teacher', 'admin'),
   uploadHomework.fields([{ name: 'pdf_file', maxCount: 1 }, { name: 'answer_file', maxCount: 1 }]),
   (req, res) => {
-    const { title, description, due_date, answer_visible_date, max_score, grading_note, chapter_id, solution_video_url, parts_config, hw_order, max_attempts } = req.body;
+    const { title, description, due_date, answer_visible_date, max_score, grading_note, chapter_id, solution_video_url, parts_config, hw_order, max_attempts, exam_type, hsa_config } = req.body;
     const db = getDb();
     const hw = db.prepare('SELECT h.*,c.teacher_id FROM homework h JOIN classes c ON h.class_id=c.id WHERE h.id=?').get(req.params.id);
     if (!hw) return res.status(404).json({ message: 'Không tìm thấy' });
@@ -144,18 +178,39 @@ router.put(
       sets.push('max_attempts=?'); vals.push(Number.isFinite(attemptsLimit) && attemptsLimit > 0 ? attemptsLimit : null);
     }
 
-    // parts_config + max_score: thang điểm = thang giáo viên chọn (để quy đổi),
-    // mặc định = tổng điểm thô các câu nếu giáo viên không nhập.
-    let rawSum = null;
+    // Kiểu bài (THPT/HSA) + cấu hình câu hỏi + thang điểm: cập nhật ATOMIC khi request có "exam_type"
+    // (form giáo viên luôn gửi kèm cả 3) — tránh lẫn cấu hình THPT/HSA cũ khi đổi kiểu bài giữa 2 lần lưu.
     let partsJson; // hoisted: dùng lại bên dưới để biết có cần soạn lại "quy chuẩn nhận xét" không
-    if (parts_config !== undefined) {
+    if (exam_type !== undefined) {
+      const newExamType = exam_type === 'hsa' ? 'hsa' : 'thpt';
+      sets.push('exam_type=?'); vals.push(newExamType);
+      if (newExamType === 'hsa') {
+        const hsaJson = sanitizeHsaConfig(hsa_config);
+        sets.push('hsa_config=?'); vals.push(hsaJson);
+        sets.push('parts_config=?'); vals.push(null);
+        partsJson = null;
+        const hsaCfg = hsaJson ? JSON.parse(hsaJson) : null;
+        sets.push('max_score=?'); vals.push(hsaCfg ? hsaCfg.questions.length : 0);
+      } else {
+        partsJson = sanitizePartsConfig(parts_config);
+        sets.push('parts_config=?'); vals.push(partsJson);
+        sets.push('hsa_config=?'); vals.push(null);
+        const rawSum = computeMaxScore(partsJson);
+        const provided = parseFloat(max_score);
+        sets.push('max_score=?'); vals.push(isFinite(provided) && provided > 0 ? provided : (rawSum != null ? rawSum : 10));
+      }
+    } else if (parts_config !== undefined) {
+      // Gọi không kèm exam_type (vd tích hợp cũ): giữ hành vi trước đây, chỉ cập nhật parts_config + max_score
       partsJson = sanitizePartsConfig(parts_config);
       sets.push('parts_config=?'); vals.push(partsJson);
-      rawSum = computeMaxScore(partsJson);
+      const rawSum = computeMaxScore(partsJson);
+      const provided = parseFloat(max_score);
+      if (isFinite(provided) && provided > 0) { sets.push('max_score=?'); vals.push(provided); }
+      else if (rawSum != null) { sets.push('max_score=?'); vals.push(rawSum); }
+    } else {
+      const provided = parseFloat(max_score);
+      if (isFinite(provided) && provided > 0) { sets.push('max_score=?'); vals.push(provided); }
     }
-    const provided = parseFloat(max_score);
-    if (isFinite(provided) && provided > 0) { sets.push('max_score=?'); vals.push(provided); }
-    else if (rawSum != null) { sets.push('max_score=?'); vals.push(rawSum); }
 
     const newAnswerFile = req.files?.answer_file?.[0]?.filename;
     if (req.files?.pdf_file?.[0]) { sets.push('pdf_file=?'); vals.push(req.files.pdf_file[0].filename); }
@@ -215,6 +270,7 @@ router.get('/homework/:id', (req, res) => {
     return res.json({
       ...hwPublic,
       parts_config: stripAnswers(hw.parts_config), // ẩn đáp án (key) khỏi học sinh
+      hsa_config: stripHsaAnswers(hw.hsa_config),   // HSA: ẩn đáp án, chỉ giữ kiểu câu (TN/TLN) + ghi chú
       answer_file: canSeeAnswer ? hw.answer_file : null,
       solution_video_url: canSeeAnswer ? hw.solution_video_url : null,
       submission: safeSubmission,
@@ -345,7 +401,7 @@ router.put('/submissions/:id/grade', requireRole('teacher', 'admin'), (req, res)
 // ── Re-grade with AI (giáo viên bấm chấm lại — chờ kết quả ngay) ─────────
 router.post('/submissions/:id/regrade', requireRole('teacher', 'admin'), async (req, res) => {
   const db = getDb();
-  const sub = db.prepare('SELECT s.*,h.answer_file,h.parts_config FROM submissions s JOIN homework h ON s.homework_id=h.id WHERE s.id=?').get(req.params.id);
+  const sub = db.prepare('SELECT s.*,h.answer_file,h.parts_config,h.exam_type,h.hsa_config FROM submissions s JOIN homework h ON s.homework_id=h.id WHERE s.id=?').get(req.params.id);
   if (!sub) return res.status(404).json({ message: 'Không tìm thấy' });
   if (!needsAiGrading(sub)) return res.status(400).json({ message: 'Bài này không có đáp án để AI chấm' });
   if (submissionFilenames(sub).length === 0 && !sub.structured_answers) return res.status(400).json({ message: 'Học sinh chưa nộp bài' });

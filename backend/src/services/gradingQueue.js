@@ -3,8 +3,8 @@
 const path = require('path');
 const { getDb } = require('../db/database');
 const { gradeSubmission, extractAnswerKey } = require('./aiGrading');
-const { needsAiGrading, hasAnswerKey, parsePartsConfig, partEnabled, missingKeyIndices, applyExtractedKeys, PART_LABELS } = require('./homeworkParts');
-const { scoreStructured, partMax, round2, rawMaxScore, scaleToTarget, composeAutoFeedback } = require('./homeworkScoring');
+const { needsAiGrading, hasAnswerKey, parsePartsConfig, partEnabled, missingKeyIndices, applyExtractedKeys, PART_LABELS, parseHsaConfig, hasHsaAnswerKey } = require('./homeworkParts');
+const { scoreStructured, scoreHsa, partMax, round2, rawMaxScore, scaleToTarget, composeAutoFeedback } = require('./homeworkScoring');
 
 const MAX_ATTEMPTS = 5;            // số lần thử chấm tối đa trước khi đánh dấu thất bại
 const RETRY_DELAY_MS = 30_000;     // chờ trước khi thử lại một bài bị lỗi
@@ -49,23 +49,46 @@ async function processQueue() {
   running = false;
 }
 
+// Chấm 1 bài nộp kiểu HSA: hoàn toàn tự động theo đáp án giáo viên nhập, KHÔNG dùng AI,
+// mỗi câu 1 điểm, điểm cuối = tổng điểm thô (không quy đổi thang 10).
+function gradeHsaSubmission(db, sub, submissionId) {
+  const cfg = parseHsaConfig(sub.hsa_config);
+  if (!cfg) { db.prepare('UPDATE submissions SET grading_status=NULL WHERE id=?').run(submissionId); return null; }
+  const det = scoreHsa(cfg, sub.structured_answers);
+  const total = Math.max(0, Math.min(cfg.questions.length, det.score));
+  const correct = det.details.filter((d) => d.status === 'correct').length;
+  const graded = det.details.filter((d) => d.status !== 'partial').length;
+  const feedback = graded < cfg.questions.length
+    ? `Đúng ${correct}/${graded} câu đã có đáp án — tổng điểm ${total}/${cfg.questions.length}. Còn ${cfg.questions.length - graded} câu chưa có đáp án, cần giáo viên kiểm tra.`
+    : `Đúng ${correct}/${cfg.questions.length} câu — tổng điểm ${total}/${cfg.questions.length}.`;
+  db.prepare("UPDATE submissions SET score=?,feedback=?,grading_details=?,graded_at=?,graded_by_ai=0,grading_status='done' WHERE id=?")
+    .run(total, feedback, JSON.stringify(det.details), new Date().toISOString(), submissionId);
+  console.log(`[grading-queue] ✅ Đã chấm bài nộp #${submissionId} (HSA): ${total}/${cfg.questions.length}`);
+  return { score: total, feedback, details: det.details };
+}
+
 // Chấm 1 bài nộp rồi lưu kết quả.
 // force=true (giáo viên chấm lại): bỏ qua giới hạn số lần thử.
 // Trả về kết quả chấm; ném lỗi nếu chấm thất bại (để nơi gọi xử lý/thử lại).
 async function gradeOne(submissionId, { force = false } = {}) {
   const db = getDb();
   const sub = db.prepare(`
-    SELECT s.*, h.id hw_id, h.answer_file, h.max_score, h.grading_note, h.parts_config, h.feedback_rubric
+    SELECT s.*, h.id hw_id, h.answer_file, h.max_score, h.grading_note, h.parts_config, h.feedback_rubric, h.exam_type, h.hsa_config
     FROM submissions s JOIN homework h ON s.homework_id = h.id
     WHERE s.id = ?
   `).get(submissionId);
 
   if (!sub) return null;
 
-  // Không có đáp án nào (file tự luận lẫn key objective) → không chấm AI được, để giáo viên chấm tay
+  // Không có đáp án nào (file tự luận lẫn key objective/HSA) → không chấm tự động được, để giáo viên chấm tay
   if (!needsAiGrading(sub)) {
     db.prepare('UPDATE submissions SET grading_status=NULL WHERE id=?').run(submissionId);
     return null;
+  }
+
+  // HSA: chấm hoàn toàn tự động (không AI, không quy đổi thang điểm) — tách riêng khỏi luồng THPT bên dưới.
+  if (sub.exam_type === 'hsa') {
+    return gradeHsaSubmission(db, sub, submissionId);
   }
 
   const subFiles = submissionFilenames(sub);
@@ -212,12 +235,12 @@ function sweepPending() {
   try {
     const db = getDb();
     const rows = db.prepare(`
-      SELECT s.id, h.answer_file, h.parts_config FROM submissions s JOIN homework h ON s.homework_id = h.id
+      SELECT s.id, h.answer_file, h.parts_config, h.hsa_config FROM submissions s JOIN homework h ON s.homework_id = h.id
       WHERE s.grading_status='pending' AND COALESCE(s.grading_attempts,0) < ?
-        AND (h.answer_file IS NOT NULL OR h.parts_config IS NOT NULL)
+        AND (h.answer_file IS NOT NULL OR h.parts_config IS NOT NULL OR h.hsa_config IS NOT NULL)
     `).all(MAX_ATTEMPTS);
-    // Lọc thêm: chỉ chấm bài thực sự có đáp án (file tự luận hoặc key objective)
-    rows.filter(r => r.answer_file || hasAnswerKey(r.parts_config)).forEach(r => enqueue(r.id));
+    // Lọc thêm: chỉ chấm bài thực sự có đáp án (file tự luận, key objective, hoặc key HSA)
+    rows.filter(r => r.answer_file || hasAnswerKey(r.parts_config) || hasHsaAnswerKey(r.hsa_config)).forEach(r => enqueue(r.id));
   } catch (err) {
     console.error('[grading-queue] sweep lỗi:', err.message);
   }

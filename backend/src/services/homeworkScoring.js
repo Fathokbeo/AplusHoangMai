@@ -1,6 +1,6 @@
 // Chấm điểm tự động (deterministic) cho các phần khách quan: trắc nghiệm, đúng/sai, trả lời ngắn.
 // Phần tự luận do AI chấm (xem aiGrading.js). Tệp này KHÔNG gọi AI.
-const { parsePartsConfig, partEnabled, keyIsSet } = require('./homeworkParts');
+const { parsePartsConfig, partEnabled, keyIsSet, parseHsaConfig, hsaKeyIsSet } = require('./homeworkParts');
 
 // Cách chia điểm phần Đúng/Sai theo số ý đúng (TỈ LỆ trên điểm câu):
 //   'thpt' (chuẩn THPT): 0,1,2,3,4 ý → 0, 0.1, 0.25, 0.5, 1.0
@@ -202,6 +202,40 @@ function scoreStructured(rawCfg, rawAns) {
   return result;
 }
 
+// Chấm bài kiểu HSA: mỗi câu tự chọn Trắc nghiệm hoặc Trả lời ngắn, luôn 1 điểm/câu, cộng dồn thành
+// điểm cuối (KHÔNG quy đổi thang 10). Câu chưa có đáp án (giáo viên chưa nhập) → 'partial', không cộng
+// điểm, cần giáo viên kiểm tra (không có đường AI đọc file đáp án như THPT).
+function scoreHsa(rawCfg, rawAns) {
+  const cfg = parseHsaConfig(rawCfg);
+  const result = { score: 0, details: [] };
+  if (!cfg) return result;
+
+  let ans = rawAns;
+  if (typeof ans === 'string') { try { ans = JSON.parse(ans); } catch { ans = null; } }
+  const list = ans && Array.isArray(ans.hsa) ? ans.hsa : [];
+
+  cfg.questions.forEach((q, i) => {
+    const kindTxt = q.kind === 'multiple_choice' ? 'TN' : 'TLN';
+    if (!hsaKeyIsSet(q)) {
+      result.details.push({ question: `Câu ${i + 1} (${kindTxt})`, status: 'partial', comment: 'Chưa có đáp án để chấm — cần giáo viên kiểm tra' });
+      return;
+    }
+    const got = list[i];
+    const ok = q.kind === 'multiple_choice' ? (up1(got) !== '' && up1(got) === up1(q.answer)) : saMatch(got, q.answer);
+    if (ok) result.score += 1;
+    result.details.push({
+      question: `Câu ${i + 1} (${kindTxt})`,
+      status: ok ? 'correct' : 'wrong',
+      comment: ok ? 'Đúng (+1đ)' : (q.kind === 'multiple_choice'
+        ? `Chọn ${up1(got) || '—'}, đáp án đúng ${String(q.answer).toUpperCase()}`
+        : `Trả lời "${String(got == null ? '' : got).trim() || '—'}", đáp án "${q.answer}"`),
+    });
+  });
+
+  result.score = round2(result.score);
+  return result;
+}
+
 // Tổng điểm THÔ (sum tất cả các câu + tự luận) của một cfg đã parse.
 function rawMaxScore(cfg) {
   if (!cfg) return 0;
@@ -269,5 +303,6 @@ module.exports = {
   scaleToTarget,
   saMatch,
   scoreStructured,
+  scoreHsa,
   composeAutoFeedback,
 };

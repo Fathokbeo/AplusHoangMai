@@ -200,3 +200,66 @@ export function emptyStudentAnswers(cfg: PartsConfig | null) {
     short_answer: cfg?.short_answer.enabled ? Array(cfg.short_answer.count).fill('') : [],
   };
 }
+
+// ── HSA: Lựa chọn 2 khi tạo bài — mỗi câu tự chọn Trắc nghiệm hoặc Trả lời ngắn, luôn 1 điểm/câu.
+// Điểm cuối = tổng số câu đúng (KHÔNG quy đổi về thang điểm như THPT). Khác THPT: chấm hoàn toàn tự
+// động theo đáp án nhập ở đây, không hỗ trợ để trống đáp án cho AI đọc từ file.
+export type ExamType = 'thpt' | 'hsa';
+export type HsaQuestionKind = 'multiple_choice' | 'short_answer';
+
+export interface HsaQuestion {
+  kind: HsaQuestionKind;
+  answer: string; // TN: '' | 'A'..'D'; TLN: đáp án text
+  note?: string;  // gợi ý cách điền (chỉ áp dụng câu TLN)
+}
+
+export interface HsaConfig {
+  questions: HsaQuestion[];
+}
+
+export function emptyHsaConfig(): HsaConfig {
+  return { questions: [] };
+}
+
+function defaultHsaQuestion(): HsaQuestion {
+  return { kind: 'multiple_choice', answer: '', note: '' };
+}
+
+// Cắt/đệm danh sách câu hỏi HSA cho khớp số câu, giữ nguyên các câu cũ theo thứ tự.
+export function resizeHsaQuestions(questions: HsaQuestion[], count: number): HsaQuestion[] {
+  const n = Math.max(0, Math.min(50, Math.floor(count) || 0));
+  const next: HsaQuestion[] = (questions || []).slice(0, n).map((q) => ({
+    kind: q?.kind === 'short_answer' ? 'short_answer' : 'multiple_choice' as HsaQuestionKind,
+    answer: typeof q?.answer === 'string' ? q.answer : '',
+    note: typeof q?.note === 'string' ? q.note : '',
+  }));
+  while (next.length < n) next.push(defaultHsaQuestion());
+  return next;
+}
+
+// Một câu HSA đã có đáp án chưa (theo đúng kiểu TN/TLN của câu đó)?
+export function hsaKeyIsSet(q: HsaQuestion): boolean {
+  if (q.kind === 'multiple_choice') return /^[ABCD]$/i.test((q.answer || '').trim());
+  return (q.answer || '').trim() !== '';
+}
+
+// Thang điểm HSA = số câu (mỗi câu 1 điểm, không quy đổi).
+export function hsaMaxScore(cfg: HsaConfig | null): number {
+  return cfg ? cfg.questions.length : 0;
+}
+
+// Parse hsa_config từ chuỗi JSON (server trả) hoặc object; trả null nếu không hợp lệ/không có câu nào.
+export function parseHsaConfig(raw: any): HsaConfig | null {
+  if (!raw) return null;
+  let obj = raw;
+  if (typeof raw === 'string') {
+    try { obj = JSON.parse(raw); } catch { return null; }
+  }
+  if (!obj || typeof obj !== 'object' || !Array.isArray(obj.questions) || obj.questions.length === 0) return null;
+  return { questions: resizeHsaQuestions(obj.questions, obj.questions.length) };
+}
+
+// Tạo state đáp án rỗng cho học sinh điền bài HSA (1 chuỗi/câu).
+export function emptyHsaStudentAnswers(cfg: HsaConfig | null): string[] {
+  return cfg ? Array(cfg.questions.length).fill('') : [];
+}
