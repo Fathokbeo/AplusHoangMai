@@ -59,6 +59,9 @@ export default function SubmitHomeworkView({
   const [splitPct, setSplitPct] = useState(50); // % chiều rộng dành cho đề (chỉ máy tính, kéo được)
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // Danh sách số thứ tự câu HSA chưa làm khi bấm "Nộp bài" thủ công — rỗng = không hiện hộp xác nhận.
+  // Chỉ cảnh báo khi HỌC SINH chủ động nộp còn thời gian; tự động nộp lúc hết giờ thì bỏ qua bước này.
+  const [confirmUnanswered, setConfirmUnanswered] = useState<number[]>([]);
   const rootRef = useRef<HTMLDivElement>(null);
   const splitRowRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
@@ -67,7 +70,7 @@ export default function SubmitHomeworkView({
 
   useEffect(() => {
     document.body.style.overflow = open ? 'hidden' : '';
-    if (open) { setShowDe(false); setZoom(1); setSplitPct(50); }
+    if (open) { setShowDe(false); setZoom(1); setSplitPct(50); setConfirmUnanswered([]); }
     if (!open && document.fullscreenElement) document.exitFullscreen().catch(() => {});
     return () => { document.body.style.overflow = ''; };
   }, [open]);
@@ -82,6 +85,16 @@ export default function SubmitHomeworkView({
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) rootRef.current?.requestFullscreen?.().catch(() => {});
     else document.exitFullscreen?.().catch(() => {});
+  };
+
+  // Bấm nút "Nộp bài" (bài HSA, còn thời gian): nếu còn câu chưa làm thì hỏi lại 1 lần trước khi nộp
+  // thật; hết giờ tự động nộp thì bỏ qua bước hỏi này (autoSubmittedRef gọi thẳng onSubmit()).
+  const handleSubmitClick = () => {
+    if (examType === 'hsa' && hsaCfg) {
+      const missing = hsaCfg.questions.map((_, i) => i + 1).filter((n) => !(hsaAnswers[n - 1] || '').trim());
+      if (missing.length > 0) { setConfirmUnanswered(missing); return; }
+    }
+    onSubmit();
   };
 
   // Đồng hồ đếm ngược (chỉ bài HSA có giới hạn thời gian): cập nhật mỗi giây trong khi đang mở.
@@ -247,7 +260,7 @@ export default function SubmitHomeworkView({
             {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </button>
         )}
-        <button className="btn btn-primary btn-sm" onClick={onSubmit} disabled={loading || !canDoSubmit}>
+        <button className="btn btn-primary btn-sm" onClick={handleSubmitClick} disabled={loading || !canDoSubmit}>
           {loading ? 'Đang nộp...' : `Nộp bài${submitFiles.length > 0 ? ` (${submitFiles.length} file)` : ''}`}
         </button>
       </div>
@@ -273,6 +286,32 @@ export default function SubmitHomeworkView({
             </>
           )}
           <div style={{ width: pdfUrl ? `${100 - splitPct}%` : '100%' }}>{answerPanel}</div>
+        </div>
+      )}
+
+      {confirmUnanswered.length > 0 && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1100, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div className="card" style={{ width: '100%', maxWidth: 440, padding: '1.5rem' }}>
+            <div style={{ fontWeight: 800, fontSize: '1.05rem', marginBottom: 8, color: '#E65100' }}>
+              Còn {confirmUnanswered.length} câu chưa làm
+            </div>
+            <div style={{ fontSize: '0.88rem', color: '#666', marginBottom: 12 }}>
+              Bạn chưa chọn/điền đáp án cho các câu sau. Vẫn muốn nộp bài?
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 20, maxHeight: 160, overflowY: 'auto' }}>
+              {confirmUnanswered.map((n) => (
+                <span key={n} style={{ fontWeight: 700, fontSize: '0.8rem', color: '#E65100', background: '#FFF3E0', borderRadius: 6, padding: '3px 9px' }}>
+                  Câu {n}
+                </span>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => setConfirmUnanswered([])}>Quay lại làm bài</button>
+              <button className="btn btn-primary btn-sm" onClick={() => { setConfirmUnanswered([]); onSubmit(); }} disabled={loading}>
+                Vẫn nộp bài
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
