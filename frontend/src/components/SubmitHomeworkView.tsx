@@ -135,13 +135,19 @@ export default function SubmitHomeworkView({
   const dePanel = pdfUrl && (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <PdfCanvasViewer url={pdfUrl} zoom={zoom} />
-      <div style={{ position: 'absolute', bottom: 12, right: 12, display: 'flex', alignItems: 'center', gap: 2, background: 'white', borderRadius: 99, boxShadow: '0 2px 10px rgba(0,0,0,0.25)', padding: 4 }}>
-        <button type="button" className="btn btn-ghost btn-sm btn-icon" onClick={() => setZoom((z) => Math.max(ZOOM_MIN, round2(z - ZOOM_STEP)))} title="Thu nhỏ" disabled={zoom <= ZOOM_MIN}>
-          <Minus size={14} />
+      <div style={{
+        position: 'absolute', bottom: 14, right: 14, display: 'flex', alignItems: 'center', gap: 2,
+        background: 'rgba(32,32,40,0.72)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+        borderRadius: 99, boxShadow: '0 4px 16px rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.08)', padding: 3,
+      }}>
+        <button type="button" className="zoom-pill-btn" onClick={() => setZoom((z) => Math.max(ZOOM_MIN, round2(z - ZOOM_STEP)))} title="Thu nhỏ" disabled={zoom <= ZOOM_MIN}>
+          <Minus size={15} />
         </button>
-        <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#666', minWidth: 36, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
-        <button type="button" className="btn btn-ghost btn-sm btn-icon" onClick={() => setZoom((z) => Math.min(ZOOM_MAX, round2(z + ZOOM_STEP)))} title="Phóng to" disabled={zoom >= ZOOM_MAX}>
-          <Plus size={14} />
+        <span style={{ fontSize: '0.76rem', fontWeight: 700, color: '#fff', minWidth: 40, textAlign: 'center', letterSpacing: 0.2 }}>
+          {Math.round(zoom * 100)}%
+        </span>
+        <button type="button" className="zoom-pill-btn" onClick={() => setZoom((z) => Math.min(ZOOM_MAX, round2(z + ZOOM_STEP)))} title="Phóng to" disabled={zoom >= ZOOM_MAX}>
+          <Plus size={15} />
         </button>
       </div>
     </div>
