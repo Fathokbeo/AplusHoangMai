@@ -33,6 +33,15 @@ export default function UserManagement() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [showPw, setShowPw] = useState(false);
   const [revealed, setRevealed] = useState<Set<number>>(new Set());
+  const [expandedClasses, setExpandedClasses] = useState<Set<number>>(new Set());
+
+  const toggleClasses = (id: number) => {
+    setExpandedClasses((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
 
   useEffect(() => {
     const r = searchParams.get('role');
@@ -220,16 +229,26 @@ export default function UserManagement() {
                   <input type="checkbox" checked={selected.has(u.id)} onChange={() => toggleSelect(u.id)} style={{ cursor: 'pointer', width: 16, height: 16 }} />
                 </td>
                 <td>
-                  <strong>{u.full_name}</strong>
-                  {u.role === 'student' && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-                      {u.classes && u.classes.length > 0 ? u.classes.map((c) => (
-                        <span key={c.id} className="badge badge-blue" style={{ fontSize: '0.68rem' }}>
-                          {c.course_title ? `${c.course_title} · ` : ''}{c.title}
-                        </span>
-                      )) : <span className="badge badge-gray" style={{ fontSize: '0.68rem' }}>Chưa có lớp</span>}
-                    </div>
-                  )}
+                  {u.role === 'student' ? (
+                    <>
+                      <strong
+                        style={{ cursor: 'pointer' }}
+                        title={expandedClasses.has(u.id) ? 'Ẩn danh sách lớp' : 'Xem danh sách lớp'}
+                        onClick={() => toggleClasses(u.id)}
+                      >
+                        {u.full_name}
+                      </strong>
+                      {expandedClasses.has(u.id) && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                          {u.classes && u.classes.length > 0 ? u.classes.map((c) => (
+                            <span key={c.id} className="badge badge-blue" style={{ fontSize: '0.68rem' }}>
+                              {c.course_title ? `${c.course_title} · ` : ''}{c.title}
+                            </span>
+                          )) : <span className="badge badge-gray" style={{ fontSize: '0.68rem' }}>Chưa có lớp</span>}
+                        </div>
+                      )}
+                    </>
+                  ) : <strong>{u.full_name}</strong>}
                 </td>
                 <td style={{ color: '#888', fontFamily: 'monospace' }}>{u.username}</td>
                 <td style={{ fontFamily: 'monospace', color: '#555' }}>
