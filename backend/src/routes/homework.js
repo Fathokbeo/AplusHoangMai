@@ -95,6 +95,12 @@ function sanitizeHsaConfig(raw) {
   return questions.length ? JSON.stringify({ questions }) : null;
 }
 
+// Thời gian làm bài tối đa (phút): số nguyên dương, để trống/0 = không giới hạn
+function sanitizeTimeLimit(raw) {
+  const n = parseInt(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 // Lấy danh sách tên file của một bài nộp (hỗ trợ cũ: file_path đơn, mới: files JSON)
 function submissionFilenames(sub) {
   if (sub && sub.files) {
@@ -109,7 +115,7 @@ router.post(
   requireRole('teacher', 'admin'),
   uploadHomework.fields([{ name: 'pdf_file', maxCount: 1 }, { name: 'answer_file', maxCount: 1 }]),
   (req, res) => {
-    const { title, description, due_date, answer_visible_date, max_score, grading_note, chapter_id, solution_video_url, parts_config, hw_order, max_attempts, exam_type, hsa_config } = req.body;
+    const { title, description, due_date, answer_visible_date, max_score, grading_note, chapter_id, solution_video_url, parts_config, hw_order, max_attempts, exam_type, hsa_config, time_limit_minutes } = req.body;
     if (!title) return res.status(400).json({ message: 'Cần tiêu đề bài tập' });
     const db = getDb();
     const cls = db.prepare('SELECT * FROM classes WHERE id=?').get(req.params.classId);
@@ -135,17 +141,19 @@ router.post(
     // Giới hạn số lần nộp bài: số nguyên dương, để trống/0 = không giới hạn
     const attemptsLimit = parseInt(max_attempts);
     const finalMaxAttempts = Number.isFinite(attemptsLimit) && attemptsLimit > 0 ? attemptsLimit : null;
+    // Thời gian làm bài (phút, tính từ lúc bấm "Làm bài") — chỉ có ý nghĩa với bài HSA.
+    const finalTimeLimit = examType === 'hsa' ? sanitizeTimeLimit(time_limit_minutes) : null;
 
     const result = db.prepare(`
-      INSERT INTO homework (class_id,title,description,pdf_file,answer_file,due_date,answer_visible_date,max_score,grading_note,chapter_id,solution_video_url,parts_config,hw_order,max_attempts,exam_type,hsa_config)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      INSERT INTO homework (class_id,title,description,pdf_file,answer_file,due_date,answer_visible_date,max_score,grading_note,chapter_id,solution_video_url,parts_config,hw_order,max_attempts,exam_type,hsa_config,time_limit_minutes)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       req.params.classId, title, description || null,
       req.files?.pdf_file?.[0]?.filename || null,
       req.files?.answer_file?.[0]?.filename || null,
       due_date || null, answer_visible_date || null, finalMax,
       grading_note || null, chapter_id || null, solution_video_url || null,
-      partsJson, parseInt(hw_order) || 0, finalMaxAttempts, examType, hsaJson
+      partsJson, parseInt(hw_order) || 0, finalMaxAttempts, examType, hsaJson, finalTimeLimit
     );
     scheduleRubricGeneration(result.lastInsertRowid, req.files?.answer_file?.[0]?.filename || null, partsJson);
     res.status(201).json({ id: result.lastInsertRowid, title });
@@ -158,7 +166,7 @@ router.put(
   requireRole('teacher', 'admin'),
   uploadHomework.fields([{ name: 'pdf_file', maxCount: 1 }, { name: 'answer_file', maxCount: 1 }]),
   (req, res) => {
-    const { title, description, due_date, answer_visible_date, max_score, grading_note, chapter_id, solution_video_url, parts_config, hw_order, max_attempts, exam_type, hsa_config } = req.body;
+    const { title, description, due_date, answer_visible_date, max_score, grading_note, chapter_id, solution_video_url, parts_config, hw_order, max_attempts, exam_type, hsa_config, time_limit_minutes } = req.body;
     const db = getDb();
     const hw = db.prepare('SELECT h.*,c.teacher_id FROM homework h JOIN classes c ON h.class_id=c.id WHERE h.id=?').get(req.params.id);
     if (!hw) return res.status(404).json({ message: 'Không tìm thấy' });
@@ -184,6 +192,8 @@ router.put(
     if (exam_type !== undefined) {
       const newExamType = exam_type === 'hsa' ? 'hsa' : 'thpt';
       sets.push('exam_type=?'); vals.push(newExamType);
+      // Thời gian làm bài (phút): chỉ có ý nghĩa với HSA — đổi sang THPT thì bỏ giới hạn này.
+      sets.push('time_limit_minutes=?'); vals.push(newExamType === 'hsa' ? sanitizeTimeLimit(time_limit_minutes) : null);
       if (newExamType === 'hsa') {
         const hsaJson = sanitizeHsaConfig(hsa_config);
         sets.push('hsa_config=?'); vals.push(hsaJson);
@@ -207,7 +217,10 @@ router.put(
       const provided = parseFloat(max_score);
       if (isFinite(provided) && provided > 0) { sets.push('max_score=?'); vals.push(provided); }
       else if (rawSum != null) { sets.push('max_score=?'); vals.push(rawSum); }
+      // Sửa thời gian làm bài mà không đổi kiểu bài (giữ nguyên HSA hiện tại)
+      if (time_limit_minutes !== undefined && hw.exam_type === 'hsa') { sets.push('time_limit_minutes=?'); vals.push(sanitizeTimeLimit(time_limit_minutes)); }
     } else {
+      if (time_limit_minutes !== undefined && hw.exam_type === 'hsa') { sets.push('time_limit_minutes=?'); vals.push(sanitizeTimeLimit(time_limit_minutes)); }
       const provided = parseFloat(max_score);
       if (isFinite(provided) && provided > 0) { sets.push('max_score=?'); vals.push(provided); }
     }
@@ -238,6 +251,7 @@ router.delete('/homework/:id', requireRole('teacher', 'admin'), (req, res) => {
     });
   });
   db.prepare('DELETE FROM submissions WHERE homework_id=?').run(req.params.id);
+  db.prepare('DELETE FROM homework_attempts WHERE homework_id=?').run(req.params.id);
   db.prepare('DELETE FROM homework WHERE id=?').run(req.params.id);
   res.json({ message: 'Đã xóa' });
 });
@@ -301,6 +315,41 @@ router.get('/homework/:id', (req, res) => {
   roster.forEach((s) => { delete s.sort_order; });
 
   res.json({ ...hw, submissions, roster, is_overdue: hw.due_date ? now > hw.due_date : false });
+});
+
+// ── Bắt đầu làm bài (student) — chỉ dùng cho bài HSA có/không giới hạn thời gian ────────
+// Ghi (hoặc trả lại nếu đã có sẵn) thời điểm bắt đầu lượt làm hiện tại, để tính hạn "hết giờ"
+// = started_at + time_limit_minutes. Gọi lại nhiều lần (vd học sinh tải lại trang) khi lượt làm
+// CHƯA nộp sẽ trả về đúng started_at cũ (không reset đồng hồ đếm ngược).
+router.post('/homework/:id/start', requireRole('student'), (req, res) => {
+  const db = getDb();
+  const hw = db.prepare('SELECT * FROM homework WHERE id=?').get(req.params.id);
+  if (!hw) return res.status(404).json({ message: 'Không tìm thấy bài tập' });
+
+  const enrolled = db.prepare('SELECT * FROM class_students WHERE class_id=? AND student_id=?').get(hw.class_id, req.user.id);
+  if (!enrolled) return res.status(403).json({ message: 'Bạn không thuộc lớp này' });
+
+  const now = new Date().toISOString();
+  if (hw.due_date && now > hw.due_date) return res.status(400).json({ message: 'Đã quá hạn nộp bài' });
+
+  const existing = db.prepare('SELECT * FROM submissions WHERE homework_id=? AND student_id=?').get(req.params.id, req.user.id);
+  const attemptsUsed = existing?.submit_count || 0;
+  if (hw.max_attempts && attemptsUsed >= hw.max_attempts) {
+    return res.status(400).json({ message: `Đã hết số lần nộp bài cho phép (tối đa ${hw.max_attempts} lần)` });
+  }
+
+  const attempt = db.prepare('SELECT * FROM homework_attempts WHERE homework_id=? AND student_id=?').get(req.params.id, req.user.id);
+  // Lượt làm đang dở (chưa nộp kể từ lúc bắt đầu) → giữ nguyên started_at cũ, không reset đồng hồ
+  const inProgress = attempt && (!existing || attempt.started_at > existing.submitted_at);
+  let startedAt;
+  if (inProgress) {
+    startedAt = attempt.started_at;
+  } else {
+    startedAt = now;
+    if (attempt) db.prepare('UPDATE homework_attempts SET started_at=? WHERE homework_id=? AND student_id=?').run(startedAt, req.params.id, req.user.id);
+    else db.prepare('INSERT INTO homework_attempts (homework_id,student_id,started_at) VALUES (?,?,?)').run(req.params.id, req.user.id, startedAt);
+  }
+  res.json({ started_at: startedAt, time_limit_minutes: hw.time_limit_minutes || null });
 });
 
 // ── Submit homework (student) ──────────────────────────────────────────

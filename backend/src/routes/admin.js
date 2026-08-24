@@ -86,12 +86,14 @@ function hardDeleteUser(db, userId) {
     }
   });
   db.prepare('DELETE FROM submissions WHERE student_id=?').run(userId);
+  db.prepare('DELETE FROM homework_attempts WHERE student_id=?').run(userId);
   db.prepare('DELETE FROM class_students WHERE student_id=?').run(userId);
 
   // Nếu là giáo viên: xóa các lớp do họ phụ trách + dữ liệu con
   const taughtClasses = db.prepare('SELECT id FROM classes WHERE teacher_id=?').all(userId);
   for (const c of taughtClasses) {
     db.prepare('DELETE FROM submissions WHERE homework_id IN (SELECT id FROM homework WHERE class_id=?)').run(c.id);
+    db.prepare('DELETE FROM homework_attempts WHERE homework_id IN (SELECT id FROM homework WHERE class_id=?)').run(c.id);
     db.prepare('DELETE FROM homework WHERE class_id=?').run(c.id);
     db.prepare('DELETE FROM lessons WHERE class_id=?').run(c.id);
     db.prepare('DELETE FROM class_students WHERE class_id=?').run(c.id);

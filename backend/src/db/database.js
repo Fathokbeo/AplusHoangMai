@@ -112,6 +112,18 @@ function initSchema() {
       FOREIGN KEY (class_id) REFERENCES classes(id)
     );
 
+    -- Thời điểm học sinh BẤM "Làm bài" cho lượt làm hiện tại (chỉ dùng khi homework.time_limit_minutes
+    -- có đặt, hiện chỉ áp dụng bài HSA) — dùng để tính hạn "hết giờ" = started_at + time_limit_minutes,
+    -- độc lập với "Hạn nộp bài" chung của cả lớp. Mỗi học sinh 1 dòng/bài tập, ghi đè khi bắt đầu lượt mới.
+    CREATE TABLE IF NOT EXISTS homework_attempts (
+      homework_id INTEGER NOT NULL,
+      student_id INTEGER NOT NULL,
+      started_at DATETIME NOT NULL,
+      PRIMARY KEY (homework_id, student_id),
+      FOREIGN KEY (homework_id) REFERENCES homework(id),
+      FOREIGN KEY (student_id) REFERENCES users(id)
+    );
+
     CREATE TABLE IF NOT EXISTS submissions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       homework_id INTEGER NOT NULL,
@@ -329,6 +341,11 @@ function initSchema() {
   }
   if (!hwCols.some(c => c.name === 'hsa_config')) {
     db.exec('ALTER TABLE homework ADD COLUMN hsa_config TEXT');
+  }
+  // Thời gian làm bài tối đa (phút), tính từ lúc học sinh bấm "Làm bài" — CHỈ áp dụng bài HSA.
+  // NULL = không giới hạn thời gian (như bài tập thường, chỉ theo "Hạn nộp bài" chung).
+  if (!hwCols.some(c => c.name === 'time_limit_minutes')) {
+    db.exec('ALTER TABLE homework ADD COLUMN time_limit_minutes INTEGER');
   }
 
   // Đồng bộ dữ liệu: mỗi khóa học chỉ do 1 giáo viên phụ trách (courses.created_by) nên mọi lớp trong khóa

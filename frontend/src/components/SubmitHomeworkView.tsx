@@ -3,7 +3,7 @@
 // chia để đổi tỉ lệ 2 bên), phải là chỗ làm bài như cũ.
 // Điện thoại: toàn màn chỉ có chỗ làm bài; bấm "Xem đề" mới hiện đề ở trên (không kéo chia được).
 import { useEffect, useRef, useState } from 'react';
-import { X, FileText, Upload, Plus, Minus, CheckCircle } from 'lucide-react';
+import { X, FileText, Upload, Plus, Minus, CheckCircle, Timer } from 'lucide-react';
 import PartsSolver, { type StudentAnswers } from './PartsSolver';
 import HsaSolver from './HsaSolver';
 import PdfCanvasViewer from './PdfCanvasViewer';
@@ -12,6 +12,17 @@ import useIsMobile from '../lib/useIsMobile';
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const ZOOM_MIN = 0.5, ZOOM_MAX = 3, ZOOM_STEP = 0.25;
+
+// mm:ss (hoặc h:mm:ss nếu còn hơn 1 tiếng) từ số mili-giây còn lại
+function formatRemaining(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const mm = String(m).padStart(2, '0');
+  const ss = String(s).padStart(2, '0');
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
 
 interface Props {
   open: boolean;
@@ -33,26 +44,50 @@ interface Props {
   loading: boolean;
   canDoSubmit: boolean;
   onSubmit: () => void;
+  // Hạn "hết giờ" của lượt làm HSA hiện tại (epoch ms) — null = không giới hạn thời gian.
+  examDeadline: number | null;
 }
 
 export default function SubmitHomeworkView({
   open, onClose, title, pdfUrl, submitObjective, submitEssay, cfg,
   studentAnswers, onAnswersChange, examType, hsaCfg, hsaAnswers, onHsaAnswersChange,
-  submitFiles, onAddFiles, onRemoveFile, loading, canDoSubmit, onSubmit,
+  submitFiles, onAddFiles, onRemoveFile, loading, canDoSubmit, onSubmit, examDeadline,
 }: Props) {
   const isMobile = useIsMobile();
   const [showDe, setShowDe] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [splitPct, setSplitPct] = useState(50); // % chiều rộng dành cho đề (chỉ máy tính, kéo được)
+  const [nowTick, setNowTick] = useState(() => Date.now());
   const splitRowRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const autoSubmittedRef = useRef(false);
 
   useEffect(() => {
     document.body.style.overflow = open ? 'hidden' : '';
     if (open) { setShowDe(false); setZoom(1); setSplitPct(50); }
     return () => { document.body.style.overflow = ''; };
   }, [open]);
+
+  // Đồng hồ đếm ngược (chỉ bài HSA có giới hạn thời gian): cập nhật mỗi giây trong khi đang mở.
+  useEffect(() => {
+    if (!open) return;
+    autoSubmittedRef.current = false;
+    setNowTick(Date.now());
+    if (examType !== 'hsa' || !examDeadline) return;
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [open, examType, examDeadline]);
+
+  const remainingMs = open && examType === 'hsa' && examDeadline ? examDeadline - nowTick : null;
+
+  // Hết giờ mà chưa nộp → tự động nộp (kể cả khi vừa quay lại trang sau khi đã hết giờ từ trước).
+  useEffect(() => {
+    if (remainingMs === null || remainingMs > 0) return;
+    if (autoSubmittedRef.current || loading) return;
+    autoSubmittedRef.current = true;
+    onSubmit();
+  }, [remainingMs, loading, onSubmit]);
 
   // Kéo thanh chia tỉ lệ đề/bài làm (chỉ máy tính) — theo dõi chuột trên toàn trang khi đang kéo
   useEffect(() => {
@@ -97,8 +132,27 @@ export default function SubmitHomeworkView({
     </div>
   );
 
+  const isLowTime = remainingMs !== null && remainingMs <= 5 * 60 * 1000;
+  const timerBar = examType === 'hsa' && (
+    <div style={{
+      position: 'sticky', top: 0, zIndex: 5, marginBottom: '1.25rem',
+      display: 'flex', alignItems: 'center', gap: 8, padding: '0.6rem 0.9rem', borderRadius: 10,
+      background: examDeadline ? (isLowTime ? '#FFEBEE' : '#FFF3E0') : '#F5F5F5',
+      color: examDeadline ? (isLowTime ? '#C62828' : '#E65100') : '#888',
+      fontWeight: 700, fontSize: '0.92rem',
+    }}>
+      <Timer size={16} />
+      {examDeadline
+        ? (remainingMs !== null && remainingMs > 0
+          ? <>Thời gian còn lại: {formatRemaining(remainingMs)}</>
+          : <>Hết giờ — đang tự động nộp bài...</>)
+        : <>Không giới hạn thời gian làm bài</>}
+    </div>
+  );
+
   const answerPanel = (
     <div style={{ padding: isMobile ? '1rem' : '1.5rem', overflowY: 'auto', height: '100%' }}>
+      {timerBar}
       {examType === 'hsa' && hsaCfg ? (
         <div style={{ marginBottom: '1.25rem' }}>
           <HsaSolver cfg={hsaCfg} value={hsaAnswers} onChange={onHsaAnswersChange} />

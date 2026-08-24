@@ -77,7 +77,7 @@ export default function ClassDetail() {
   const [viewingLesson, setViewingLesson] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [lessonForm, setLessonForm] = useState({ title: '', description: '', video_url: '', video_type: 'youtube', lesson_order: '0', chapter_id: '' });
-  const [hwForm, setHwForm] = useState({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '', chapter_id: '', solution_video_url: '', hw_order: '0', max_attempts: '', exam_type: 'thpt' as ExamType });
+  const [hwForm, setHwForm] = useState({ title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '', chapter_id: '', solution_video_url: '', hw_order: '0', max_attempts: '', exam_type: 'thpt' as ExamType, time_limit_minutes: '' });
   const [hwParts, setHwParts] = useState<PartsConfig>(emptyPartsConfig());
   const [hsaConfig, setHsaConfig] = useState<HsaConfig>(emptyHsaConfig());
   const [hwFiles, setHwFiles] = useState<{ pdf?: File; answer?: File }>({});
@@ -529,7 +529,7 @@ export default function ClassDetail() {
     setHwForm({
       title: '', description: '', due_date: '', answer_visible_date: '', max_score: '10', grading_note: '',
       chapter_id: chapterId ? String(chapterId) : '', solution_video_url: '', max_attempts: '',
-      hw_order: String(nextOrderInChapter(cls?.homework, chapterId ?? null)), exam_type: 'thpt',
+      hw_order: String(nextOrderInChapter(cls?.homework, chapterId ?? null)), exam_type: 'thpt', time_limit_minutes: '',
     });
     setHwParts(emptyPartsConfig());
     setHsaConfig(emptyHsaConfig());
@@ -550,6 +550,7 @@ export default function ClassDetail() {
       max_attempts: h.max_attempts ? String(h.max_attempts) : '',
       hw_order: String(positionInChapter(cls?.homework, h.chapter_id, h.id)),
       exam_type: h.exam_type === 'hsa' ? 'hsa' : 'thpt',
+      time_limit_minutes: h.time_limit_minutes ? String(h.time_limit_minutes) : '',
     });
     setHwParts(normalizePartsConfig(h.parts_config));
     setHsaConfig(parseHsaConfig(h.hsa_config) || emptyHsaConfig());
@@ -1397,10 +1398,21 @@ export default function ClassDetail() {
           </div>
         </div>
         {hwForm.exam_type === 'hsa' ? (
-          <div className="form-group">
-            <label className="label">Cấu hình câu hỏi (HSA)</label>
-            <HsaEditor value={hsaConfig} onChange={setHsaConfig} />
-          </div>
+          <>
+            <div className="form-group">
+              <label className="label">Cấu hình câu hỏi (HSA)</label>
+              <HsaEditor value={hsaConfig} onChange={setHsaConfig} />
+            </div>
+            <div className="form-group">
+              <label className="label">Thời gian làm bài (phút)</label>
+              <input className="input" type="number" min={1} step={1} placeholder="Không giới hạn thời gian"
+                value={hwForm.time_limit_minutes} onChange={(e) => setHwForm({ ...hwForm, time_limit_minutes: e.target.value })} />
+              <div style={{ fontSize: '0.72rem', color: '#888', marginTop: 4, lineHeight: 1.5 }}>
+                Học sinh bấm <strong>"Làm bài"</strong> mới bắt đầu tính giờ — hết thời gian này mà chưa nộp sẽ{' '}
+                <strong>tự động nộp bài</strong>, không phụ thuộc "Hạn nộp bài" chung ở dưới. Để trống = không giới hạn thời gian làm bài.
+              </div>
+            </div>
+          </>
         ) : (
           <div className="form-group">
             <label className="label">Kiểu nộp bài</label>

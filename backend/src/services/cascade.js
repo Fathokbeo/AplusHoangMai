@@ -23,6 +23,7 @@ function hardDeleteStudent(db, studentId) {
   const subs = db.prepare('SELECT file_path,files FROM submissions WHERE student_id=?').all(studentId);
   subs.forEach(rmSubmissionFiles);
   db.prepare('DELETE FROM submissions WHERE student_id=?').run(studentId);
+  db.prepare('DELETE FROM homework_attempts WHERE student_id=?').run(studentId);
   db.prepare('DELETE FROM class_students WHERE student_id=?').run(studentId);
   // Gỡ liên kết "người tạo" để không vướng ràng buộc, rồi xóa tài khoản
   db.prepare('UPDATE courses SET created_by=NULL WHERE created_by=?').run(studentId);
@@ -41,6 +42,7 @@ function hardDeleteClass(db, classId, { purgeStudents = true } = {}) {
     const subs = db.prepare('SELECT file_path,files FROM submissions WHERE homework_id=?').all(hw.id);
     subs.forEach(rmSubmissionFiles);
     db.prepare('DELETE FROM submissions WHERE homework_id=?').run(hw.id);
+    db.prepare('DELETE FROM homework_attempts WHERE homework_id=?').run(hw.id);
     rmFile('homework', hw.pdf_file);
     rmFile('homework', hw.answer_file);
   }

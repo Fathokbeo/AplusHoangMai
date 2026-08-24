@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
-const { stripAnswers } = require('../services/homeworkParts');
+const { stripAnswers, stripHsaAnswers } = require('../services/homeworkParts');
 const { classRanking, studentOverallAverage } = require('../services/classRanking');
 
 router.use(authMiddleware, requireRole('student'));
@@ -42,8 +42,14 @@ router.get('/my-classes/:id', (req, res) => {
   const lessons = db.prepare('SELECT * FROM lessons WHERE class_id=? ORDER BY lesson_order,created_at').all(req.params.id);
 
   const now = new Date().toISOString();
+  // started_at của lượt làm HIỆN TẠI (nếu có) cho từng bài — dùng để tính hạn "hết giờ" của bài HSA
+  // có giới hạn thời gian, và để nút "Làm bài" đổi thành "Tiếp tục làm bài" khi tải lại trang giữa chừng.
+  const attemptStarts = new Map(
+    db.prepare('SELECT homework_id,started_at FROM homework_attempts WHERE student_id=?').all(req.user.id)
+      .map(a => [a.homework_id, a.started_at])
+  );
   const homework = db.prepare(`
-    SELECT h.id,h.class_id,h.chapter_id,h.title,h.description,h.pdf_file,h.answer_file,h.solution_video_url,h.due_date,h.answer_visible_date,h.max_score,h.created_at,h.parts_config,h.max_attempts,
+    SELECT h.id,h.class_id,h.chapter_id,h.title,h.description,h.pdf_file,h.answer_file,h.solution_video_url,h.due_date,h.answer_visible_date,h.max_score,h.created_at,h.parts_config,h.max_attempts,h.exam_type,h.hsa_config,h.time_limit_minutes,
            s.id submission_id,s.score,s.feedback,s.grading_details,s.submitted_at,s.graded_at,s.file_path submitted_file,s.files submitted_files,s.structured_answers,s.graded_by_ai,s.grading_status,s.submit_count
     FROM homework h LEFT JOIN submissions s ON h.id=s.homework_id AND s.student_id=?
     WHERE h.class_id=? ORDER BY h.hw_order,h.created_at
@@ -51,8 +57,12 @@ router.get('/my-classes/:id', (req, res) => {
     const canSeeAnswer = hw.answer_visible_date ? now >= hw.answer_visible_date : false;
     // Giới hạn số lần nộp bài (nếu giáo viên có đặt): hết hạn hoặc hết lượt đều không cho nộp nữa.
     const attemptsLeft = hw.max_attempts ? Math.max(0, hw.max_attempts - (hw.submit_count || 0)) : null;
+    // Lượt làm đang dở (bấm "Làm bài" nhưng chưa nộp lại kể từ đó) → còn hiệu lực để tính đồng hồ đếm ngược
+    const attemptStartedAt = attemptStarts.get(hw.id);
+    const attemptInProgress = attemptStartedAt && (!hw.submitted_at || attemptStartedAt > hw.submitted_at);
     return {
       ...hw,
+      hsa_config: stripHsaAnswers(hw.hsa_config), // ẩn đáp án HSA, chỉ giữ kiểu câu (TN/TLN) + ghi chú
       parts_config: stripAnswers(hw.parts_config), // ẩn đáp án (key) khỏi học sinh
       can_submit: (!hw.due_date || now <= hw.due_date) && (attemptsLeft === null || attemptsLeft > 0),
       can_see_answer: canSeeAnswer,
@@ -62,6 +72,7 @@ router.get('/my-classes/:id', (req, res) => {
       // Nhận xét + chi tiết từng câu (sai câu nào) chỉ hiện cùng lúc với đáp án (theo "Thời gian xem đáp án").
       feedback: canSeeAnswer ? hw.feedback : null,
       grading_details: canSeeAnswer ? hw.grading_details : null,
+      attempt_started_at: attemptInProgress ? attemptStartedAt : null,
     };
   });
 

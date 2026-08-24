@@ -15,7 +15,7 @@ import AssistantScheduleModal from '../../components/AssistantScheduleModal';
 import FacebookIcon from '../../components/FacebookIcon';
 import {
   ChevronLeft, Play, ClipboardList, BookOpen, Upload, CheckCircle, Clock, Eye, Bot, Lock, FileText, Layers, Video,
-  ChevronDown, ChevronRight, ChevronUp, Trophy, Star, Paperclip, Download, UserCog, Phone, Calendar
+  ChevronDown, ChevronRight, ChevronUp, Trophy, Star, Paperclip, Download, UserCog, Phone, Calendar, Timer
 } from 'lucide-react';
 
 // Khóa lưu tạm đáp án đang làm dở của 1 bài, để không mất khi lỡ thoát ra giữa chừng.
@@ -43,6 +43,8 @@ export default function StudentClassDetail() {
   const [submitFiles, setSubmitFiles] = useState<File[]>([]);
   const [studentAnswers, setStudentAnswers] = useState<StudentAnswers>({ multiple_choice: [], true_false: [], short_answer: [] });
   const [hsaAnswers, setHsaAnswers] = useState<string[]>([]);
+  // Hạn "hết giờ" của lượt làm bài HSA hiện tại (epoch ms) — null = không giới hạn / bài không phải HSA
+  const [examDeadline, setExamDeadline] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [viewFiles, setViewFiles] = useState<string[] | null>(null);
   // Bài tập nào đang mở "Chi tiết" điểm (nhận xét + kết quả từng câu); mặc định ẩn hết
@@ -95,6 +97,20 @@ export default function StudentClassDetail() {
       });
     }
     setSubmitModal(true);
+  };
+
+  // Bấm "Làm bài" (chỉ bài HSA): ghi/nhận thời điểm bắt đầu ở server rồi tính hạn "hết giờ" =
+  // started_at + thời gian làm bài. Gọi lại nhiều lần (vd tải lại trang) khi lượt làm chưa nộp sẽ
+  // nhận đúng started_at cũ (không làm mới đồng hồ đếm ngược).
+  const startExam = async (hw: any) => {
+    try {
+      const { data } = await api.post(`/homework/${hw.id}/start`);
+      setExamDeadline(data.time_limit_minutes ? new Date(data.started_at).getTime() + data.time_limit_minutes * 60000 : null);
+      openSubmit(hw);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Không thể bắt đầu làm bài');
+      fetchClass();
+    }
   };
 
   // Tự lưu tạm đáp án đang điền để không mất khi lỡ thoát ra giữa chừng
@@ -353,11 +369,20 @@ export default function StudentClassDetail() {
             )}
             {canSubmit ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-                <button className="btn btn-primary btn-sm" onClick={() => openSubmit(hw)}>
-                  <Upload size={13} /> {isSubmitted ? 'Nộp lại' : 'Nộp bài'}
-                </button>
+                {hw.exam_type === 'hsa' ? (
+                  <button className="btn btn-primary btn-sm" onClick={() => startExam(hw)}>
+                    <Timer size={13} /> {hw.attempt_started_at ? 'Tiếp tục làm bài' : isSubmitted ? 'Làm lại' : 'Làm bài'}
+                  </button>
+                ) : (
+                  <button className="btn btn-primary btn-sm" onClick={() => { setExamDeadline(null); openSubmit(hw); }}>
+                    <Upload size={13} /> {isSubmitted ? 'Nộp lại' : 'Nộp bài'}
+                  </button>
+                )}
                 {hasAttemptLimit && (
                   <span style={{ fontSize: '0.72rem', color: '#999' }}>Giới hạn (còn {hw.attempts_left} lần nộp)</span>
+                )}
+                {hw.exam_type === 'hsa' && hw.time_limit_minutes && (
+                  <span style={{ fontSize: '0.72rem', color: '#999' }}>Thời gian làm bài: {hw.time_limit_minutes} phút</span>
                 )}
               </div>
             ) : !isSubmitted ? (
@@ -603,6 +628,7 @@ export default function StudentClassDetail() {
         loading={loading}
         canDoSubmit={canDoSubmit}
         onSubmit={doSubmit}
+        examDeadline={examDeadline}
       />
 
       {/* File Viewer */}
