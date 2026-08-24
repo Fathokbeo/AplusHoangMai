@@ -3,7 +3,7 @@
 // chia để đổi tỉ lệ 2 bên), phải là chỗ làm bài như cũ.
 // Điện thoại: toàn màn chỉ có chỗ làm bài; bấm "Xem đề" mới hiện đề ở trên (không kéo chia được).
 import { useEffect, useRef, useState } from 'react';
-import { X, FileText, Upload, Plus, Minus, CheckCircle, Timer } from 'lucide-react';
+import { X, FileText, Upload, Plus, Minus, CheckCircle, Timer, Maximize2, Minimize2 } from 'lucide-react';
 import PartsSolver, { type StudentAnswers } from './PartsSolver';
 import HsaSolver from './HsaSolver';
 import PdfCanvasViewer from './PdfCanvasViewer';
@@ -58,6 +58,8 @@ export default function SubmitHomeworkView({
   const [zoom, setZoom] = useState(1);
   const [splitPct, setSplitPct] = useState(50); // % chiều rộng dành cho đề (chỉ máy tính, kéo được)
   const [nowTick, setNowTick] = useState(() => Date.now());
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
   const splitRowRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -66,8 +68,21 @@ export default function SubmitHomeworkView({
   useEffect(() => {
     document.body.style.overflow = open ? 'hidden' : '';
     if (open) { setShowDe(false); setZoom(1); setSplitPct(50); }
+    if (!open && document.fullscreenElement) document.exitFullscreen().catch(() => {});
     return () => { document.body.style.overflow = ''; };
   }, [open]);
+
+  // Theo dõi trạng thái toàn màn hình (kể cả khi học sinh bấm Esc để thoát thay vì bấm nút)
+  useEffect(() => {
+    const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) rootRef.current?.requestFullscreen?.().catch(() => {});
+    else document.exitFullscreen?.().catch(() => {});
+  };
 
   // Đồng hồ đếm ngược (chỉ bài HSA có giới hạn thời gian): cập nhật mỗi giây trong khi đang mở.
   useEffect(() => {
@@ -212,13 +227,18 @@ export default function SubmitHomeworkView({
   );
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'white', zIndex: 1000, display: 'flex', flexDirection: 'column' }} className="fade-in">
+    <div ref={rootRef} style={{ position: 'fixed', inset: 0, background: 'white', zIndex: 1000, display: 'flex', flexDirection: 'column' }} className="fade-in">
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: isMobile ? '0.7rem 0.85rem' : '0.85rem 1.5rem', borderBottom: '1px solid #EEE', flexShrink: 0 }}>
         <button className="btn btn-ghost btn-sm btn-icon" onClick={onClose} title="Đóng"><X size={18} /></button>
         <span style={{ fontWeight: 700, fontSize: isMobile ? '0.92rem' : '1.05rem', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
         {isMobile && pdfUrl && (
           <button className="btn btn-ghost btn-sm" onClick={() => setShowDe((v) => !v)}>
             <FileText size={13} /> {showDe ? 'Ẩn đề' : 'Xem đề'}
+          </button>
+        )}
+        {document.fullscreenEnabled && (
+          <button className="btn btn-ghost btn-sm btn-icon" onClick={toggleFullscreen} title={isFullscreen ? 'Thoát toàn màn hình' : 'Phóng to toàn màn hình'}>
+            {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </button>
         )}
         <button className="btn btn-primary btn-sm" onClick={onSubmit} disabled={loading || !canDoSubmit}>
