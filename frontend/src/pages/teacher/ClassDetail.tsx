@@ -1523,7 +1523,8 @@ export default function ClassDetail() {
         </div>
         <div style={{ padding: '0.6rem 0.8rem', background: '#F5F5F5', borderRadius: 8, fontSize: '0.8rem', color: '#666', lineHeight: 1.6, marginBottom: 14 }}>
           File Excel cần các cột: <strong>Họ và tên</strong>, <strong>Tên đăng nhập</strong>, <strong>Mật khẩu</strong>, <strong>Số điện thoại</strong> (tùy chọn).
-          Mỗi dòng là một học sinh — tất cả sẽ được tạo tài khoản và thêm thẳng vào lớp này.
+          Mỗi dòng là một học sinh — tất cả sẽ được tạo tài khoản và thêm thẳng vào lớp này. Nếu tên đăng nhập đã tồn tại và họ tên + số điện thoại khớp
+          hoàn toàn với tài khoản cũ, tài khoản đó vẫn được thêm vào lớp (không tạo mới); nếu chỉ trùng tên đăng nhập nhưng thông tin khác thì sẽ báo lỗi.
         </div>
 
         {/* Bước 2: xem trước dữ liệu đã đọc */}
@@ -1564,13 +1565,35 @@ export default function ClassDetail() {
             <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
               <div className="card" style={{ flex: 1, padding: '0.8rem 1rem', background: '#E8F5E9', minWidth: 140 }}>
                 <div style={{ fontWeight: 800, fontSize: '1.3rem', color: '#2E7D32' }}>{excelResult.created}</div>
-                <div style={{ fontSize: '0.8rem', color: '#2E7D32' }}>Tài khoản đã tạo & thêm vào lớp</div>
+                <div style={{ fontSize: '0.8rem', color: '#2E7D32' }}>Tài khoản mới đã tạo & thêm vào lớp</div>
               </div>
+              {excelResult.addedExisting > 0 && (
+                <div className="card" style={{ flex: 1, padding: '0.8rem 1rem', background: '#E3F2FD', minWidth: 140 }}>
+                  <div style={{ fontWeight: 800, fontSize: '1.3rem', color: '#1565C0' }}>{excelResult.addedExisting}</div>
+                  <div style={{ fontSize: '0.8rem', color: '#1565C0' }}>Tài khoản đã tồn tại, thêm vào lớp</div>
+                </div>
+              )}
               <div className="card" style={{ flex: 1, padding: '0.8rem 1rem', background: excelResult.failed > 0 ? '#FFEBEE' : '#F5F5F5', minWidth: 140 }}>
                 <div style={{ fontWeight: 800, fontSize: '1.3rem', color: excelResult.failed > 0 ? '#C62828' : '#888' }}>{excelResult.failed}</div>
                 <div style={{ fontSize: '0.8rem', color: excelResult.failed > 0 ? '#C62828' : '#888' }}>Dòng lỗi</div>
               </div>
             </div>
+            {excelResult.existed?.length > 0 && (
+              <div className="table-wrap" style={{ maxHeight: 200, overflowY: 'auto', marginBottom: 12 }}>
+                <table>
+                  <thead><tr><th>Dòng</th><th>Tên đăng nhập</th><th>Ghi chú</th></tr></thead>
+                  <tbody>
+                    {excelResult.existed.map((e: any, i: number) => (
+                      <tr key={i}>
+                        <td style={{ color: '#999' }}>{e.row}</td>
+                        <td style={{ fontFamily: 'monospace' }}>{e.username || '—'}</td>
+                        <td style={{ color: '#1565C0' }}>{e.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             {excelResult.errors?.length > 0 && (
               <div className="table-wrap" style={{ maxHeight: 240, overflowY: 'auto' }}>
                 <table>

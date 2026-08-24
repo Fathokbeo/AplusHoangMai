@@ -315,7 +315,9 @@ router.post('/classes/:id/students/bulk', (req, res) => {
   if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
 
   let created = 0;
+  let addedExisting = 0; // tài khoản đã tồn tại (trùng khớp toàn bộ), được thêm thẳng vào lớp thay vì báo lỗi
   const errors = [];
+  const existed = []; // danh sách tài khoản đã tồn tại từ trước, để thông báo cho giáo viên
   const insertUser = db.prepare(
     'INSERT INTO users (username,password,plain_password,full_name,parent_phone,role,created_by) VALUES (?,?,?,?,?,?,?)'
   );
@@ -332,19 +334,43 @@ router.post('/classes/:id/students/bulk', (req, res) => {
         errors.push({ row: line, username, reason: 'Thiếu họ tên, tên đăng nhập hoặc mật khẩu' });
         return;
       }
-      if (db.prepare('SELECT id FROM users WHERE username=?').get(username)) {
-        errors.push({ row: line, username, reason: 'Tên đăng nhập đã tồn tại' });
+
+      const existingUser = db.prepare('SELECT id,full_name,parent_phone FROM users WHERE username=?').get(username);
+      let studentId;
+      if (existingUser) {
+        // Chỉ coi là "cùng một học sinh" khi họ tên VÀ số điện thoại khớp toàn bộ với tài khoản đã có,
+        // tránh gộp nhầm hai học sinh khác nhau chỉ vì trùng tên đăng nhập.
+        const sameName = existingUser.full_name.trim() === full_name;
+        const samePhone = (existingUser.parent_phone || '') === (parent_phone || '');
+        if (!sameName || !samePhone) {
+          errors.push({ row: line, username, reason: 'Tên đăng nhập đã tồn tại nhưng họ tên/SĐT không khớp' });
+          return;
+        }
+        studentId = existingUser.id;
+      } else {
+        const r = insertUser.run(username, bcrypt.hashSync(password, 10), password, full_name, parent_phone, 'student', req.user.id);
+        studentId = r.lastInsertRowid;
+      }
+
+      const alreadyInClass = db.prepare('SELECT 1 FROM class_students WHERE class_id=? AND student_id=?').get(req.params.id, studentId);
+      if (alreadyInClass) {
+        if (existingUser) existed.push({ row: line, username, reason: 'Tài khoản đã tồn tại — đã có sẵn trong lớp này' });
         return;
       }
-      const r = insertUser.run(username, bcrypt.hashSync(password, 10), password, full_name, parent_phone, 'student', req.user.id);
-      insertStudentSorted(db, req.params.id, r.lastInsertRowid, full_name, cls.custom_student_order);
-      created++;
+
+      insertStudentSorted(db, req.params.id, studentId, full_name, cls.custom_student_order);
+      if (existingUser) {
+        existed.push({ row: line, username, reason: 'Tài khoản đã tồn tại — đã thêm vào lớp' });
+        addedExisting++;
+      } else {
+        created++;
+      }
     });
   })();
 
   res.status(201).json({
-    message: `Đã tạo ${created}/${students.length} tài khoản và thêm vào lớp`,
-    created, failed: errors.length, errors,
+    message: `Đã tạo ${created} tài khoản mới${addedExisting ? `, thêm ${addedExisting} tài khoản đã tồn tại vào lớp` : ''}/${students.length} dòng`,
+    created, addedExisting, existed, failed: errors.length, errors,
   });
 });
 
