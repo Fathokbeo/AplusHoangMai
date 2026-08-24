@@ -7,22 +7,11 @@ import { X, FileText, Upload, Plus, Minus, CheckCircle, Timer, Maximize2, Minimi
 import PartsSolver, { type StudentAnswers } from './PartsSolver';
 import HsaSolver from './HsaSolver';
 import PdfCanvasViewer from './PdfCanvasViewer';
-import type { PartsConfig, HsaConfig, ExamType } from '../lib/homeworkParts';
+import { formatRemainingMs, type PartsConfig, type HsaConfig, type ExamType } from '../lib/homeworkParts';
 import useIsMobile from '../lib/useIsMobile';
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const ZOOM_MIN = 0.5, ZOOM_MAX = 3, ZOOM_STEP = 0.25;
-
-// mm:ss (hoặc h:mm:ss nếu còn hơn 1 tiếng) từ số mili-giây còn lại
-function formatRemaining(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  const mm = String(m).padStart(2, '0');
-  const ss = String(s).padStart(2, '0');
-  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
-}
 
 interface Props {
   open: boolean;
@@ -178,7 +167,7 @@ export default function SubmitHomeworkView({
       <Timer size={16} />
       {examDeadline
         ? (remainingMs !== null && remainingMs > 0
-          ? <>Thời gian còn lại: {formatRemaining(remainingMs)}</>
+          ? <>Thời gian còn lại: {formatRemainingMs(remainingMs)}</>
           : <>Hết giờ — đang tự động nộp bài...</>)
         : <>Không giới hạn thời gian làm bài</>}
     </div>

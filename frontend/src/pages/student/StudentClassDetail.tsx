@@ -9,7 +9,7 @@ import SubmitHomeworkView from '../../components/SubmitHomeworkView';
 import { type StudentAnswers } from '../../components/PartsSolver';
 import useIsMobile from '../../lib/useIsMobile';
 import { toast } from '../../components/Toast';
-import { parsePartsConfig, hasObjectiveParts, hasEssay, emptyStudentAnswers, PART_LABELS, PART_ORDER, type PartKey, parseHsaConfig, emptyHsaStudentAnswers, type HsaConfig } from '../../lib/homeworkParts';
+import { parsePartsConfig, hasObjectiveParts, hasEssay, emptyStudentAnswers, PART_LABELS, PART_ORDER, type PartKey, parseHsaConfig, emptyHsaStudentAnswers, type HsaConfig, formatRemainingMs } from '../../lib/homeworkParts';
 import { parseAttachments, isViewableFile } from '../../lib/attachments';
 import AssistantScheduleModal from '../../components/AssistantScheduleModal';
 import FacebookIcon from '../../components/FacebookIcon';
@@ -49,6 +49,9 @@ export default function StudentClassDetail() {
   const [viewFiles, setViewFiles] = useState<string[] | null>(null);
   // Bài tập nào đang mở "Chi tiết" điểm (nhận xét + kết quả từng câu); mặc định ẩn hết
   const [openGradeDetails, setOpenGradeDetails] = useState<Set<number>>(new Set());
+  // Đồng hồ dùng để đếm ngược thời gian còn lại NGOÀI danh sách bài tập (lượt làm HSA đang dở, chưa nộp,
+  // học sinh đã thoát ra khỏi giao diện làm bài) — chỉ chạy khi thật sự có lượt làm đang dở.
+  const [outsideTick, setOutsideTick] = useState(() => Date.now());
   const isMobile = useIsMobile();
 
   useEffect(() => { fetchClass(); }, [id]);
@@ -58,6 +61,14 @@ export default function StudentClassDetail() {
     const pending = cls?.homework?.some((hw: any) => hw.submission_id && hw.score === null && (hw.grading_status === 'pending' || hw.grading_status === 'grading'));
     if (!pending) return;
     const t = setInterval(fetchClass, 8000);
+    return () => clearInterval(t);
+  }, [cls]);
+
+  useEffect(() => {
+    const hasInProgress = cls?.homework?.some((hw: any) => hw.attempt_started_at && hw.time_limit_minutes);
+    if (!hasInProgress) return;
+    setOutsideTick(Date.now());
+    const t = setInterval(() => setOutsideTick(Date.now()), 1000);
     return () => clearInterval(t);
   }, [cls]);
 
@@ -107,6 +118,10 @@ export default function StudentClassDetail() {
       const { data } = await api.post(`/homework/${hw.id}/start`);
       setExamDeadline(data.time_limit_minutes ? new Date(data.started_at).getTime() + data.time_limit_minutes * 60000 : null);
       openSubmit(hw);
+      // Cập nhật lại danh sách bài tập để ghi nhận lượt làm mới (attempt_started_at) ngay lập tức —
+      // nếu không, lỡ thoát ra mà chưa nộp thì nút ngoài danh sách vẫn hiện "Làm lại" như cũ (dữ liệu cũ
+      // từ lần tải trang trước, chưa biết đã có lượt làm đang dở) thay vì "Tiếp tục làm bài".
+      fetchClass();
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Không thể bắt đầu làm bài');
       fetchClass();
@@ -382,7 +397,17 @@ export default function StudentClassDetail() {
                   <span style={{ fontSize: '0.72rem', color: '#999' }}>Giới hạn (còn {hw.attempts_left} lần nộp)</span>
                 )}
                 {hw.exam_type === 'hsa' && hw.time_limit_minutes && (
-                  <span style={{ fontSize: '0.72rem', color: '#999' }}>Thời gian làm bài: {hw.time_limit_minutes} phút</span>
+                  hw.attempt_started_at ? (() => {
+                    const remainMs = new Date(hw.attempt_started_at).getTime() + hw.time_limit_minutes * 60000 - outsideTick;
+                    const low = remainMs <= 5 * 60 * 1000;
+                    return (
+                      <span style={{ fontSize: '0.72rem', fontWeight: 700, color: low ? '#C62828' : '#E65100', display: 'flex', alignItems: 'center', gap: 3 }}>
+                        <Timer size={11} /> {remainMs > 0 ? `Còn ${formatRemainingMs(remainMs)}` : 'Đã hết giờ'}
+                      </span>
+                    );
+                  })() : (
+                    <span style={{ fontSize: '0.72rem', color: '#999' }}>Thời gian làm bài: {hw.time_limit_minutes} phút</span>
+                  )
                 )}
               </div>
             ) : !isSubmitted ? (
