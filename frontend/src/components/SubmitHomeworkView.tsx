@@ -7,7 +7,7 @@ import { X, FileText, Upload, Plus, Minus, CheckCircle, Timer, Maximize2, Minimi
 import PartsSolver, { type StudentAnswers } from './PartsSolver';
 import HsaSolver from './HsaSolver';
 import PdfCanvasViewer from './PdfCanvasViewer';
-import { formatRemainingMs, type PartsConfig, type HsaConfig, type ExamType } from '../lib/homeworkParts';
+import { formatRemainingMs, formatDeadlineRemaining, type PartsConfig, type HsaConfig, type ExamType } from '../lib/homeworkParts';
 import useIsMobile from '../lib/useIsMobile';
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -35,12 +35,14 @@ interface Props {
   onSubmit: () => void;
   // Hạn "hết giờ" của lượt làm HSA hiện tại (epoch ms) — null = không giới hạn thời gian.
   examDeadline: number | null;
+  // Hạn NỘP BÀI của cả bài tập (due_date, chuỗi ISO từ server) — null = không có hạn nộp.
+  dueDate: string | null;
 }
 
 export default function SubmitHomeworkView({
   open, onClose, title, pdfUrl, submitObjective, submitEssay, cfg,
   studentAnswers, onAnswersChange, examType, hsaCfg, hsaAnswers, onHsaAnswersChange,
-  submitFiles, onAddFiles, onRemoveFile, loading, canDoSubmit, onSubmit, examDeadline,
+  submitFiles, onAddFiles, onRemoveFile, loading, canDoSubmit, onSubmit, examDeadline, dueDate,
 }: Props) {
   const isMobile = useIsMobile();
   const [showDe, setShowDe] = useState(false);
@@ -91,12 +93,15 @@ export default function SubmitHomeworkView({
     if (!open) return;
     autoSubmittedRef.current = false;
     setNowTick(Date.now());
-    if (examType !== 'hsa' || !examDeadline) return;
+    if ((examType !== 'hsa' || !examDeadline) && !dueDate) return;
     const t = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [open, examType, examDeadline]);
+  }, [open, examType, examDeadline, dueDate]);
 
   const remainingMs = open && examType === 'hsa' && examDeadline ? examDeadline - nowTick : null;
+  const dueDateMs = dueDate ? new Date(dueDate).getTime() : null;
+  const deadlineRemainMs = open && dueDateMs ? dueDateMs - nowTick : null;
+  const isDeadlineLow = deadlineRemainMs !== null && deadlineRemainMs <= 60 * 60 * 1000;
 
   // Hết giờ mà chưa nộp → tự động nộp (kể cả khi vừa quay lại trang sau khi đã hết giờ từ trước).
   useEffect(() => {
@@ -249,9 +254,16 @@ export default function SubmitHomeworkView({
             {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </button>
         )}
-        <button className="btn btn-primary btn-sm" onClick={handleSubmitClick} disabled={loading || !canDoSubmit}>
-          {loading ? 'Đang nộp...' : `Nộp bài${submitFiles.length > 0 ? ` (${submitFiles.length} file)` : ''}`}
-        </button>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
+          {deadlineRemainMs !== null && (
+            <span style={{ fontSize: '0.72rem', fontWeight: 400, color: isDeadlineLow ? '#C62828' : '#888' }}>
+              {deadlineRemainMs > 0 ? `Thời gian còn lại: ${formatDeadlineRemaining(deadlineRemainMs)}` : 'Đã hết hạn nộp'}
+            </span>
+          )}
+          <button className="btn btn-primary btn-sm" onClick={handleSubmitClick} disabled={loading || !canDoSubmit}>
+            {loading ? 'Đang nộp...' : `Nộp bài${submitFiles.length > 0 ? ` (${submitFiles.length} file)` : ''}`}
+          </button>
+        </div>
       </div>
 
       {isMobile ? (

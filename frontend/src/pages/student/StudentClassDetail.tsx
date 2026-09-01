@@ -654,6 +654,7 @@ export default function StudentClassDetail() {
         canDoSubmit={canDoSubmit}
         onSubmit={doSubmit}
         examDeadline={examDeadline}
+        dueDate={submitting?.due_date || null}
       />
 
       {/* File Viewer */}

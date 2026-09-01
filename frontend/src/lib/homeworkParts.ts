@@ -275,3 +275,16 @@ export function formatRemainingMs(ms: number): string {
   const ss = String(s).padStart(2, '0');
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
+
+// Thời gian còn lại đến hạn NỘP BÀI (due_date) — khác đồng hồ đếm ngược thời gian làm bài HSA ở trên.
+// Còn hơn 1 ngày: "Xngày Yh". Dưới 1 ngày: "Xh Yphút". Dưới 1 giờ: "Xphút Ygiây".
+export function formatDeadlineRemaining(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  if (days >= 1) return `${days} ngày ${hours} giờ`;
+  if (total >= 3600) return `${hours} giờ ${minutes} phút`;
+  return `${minutes} phút ${seconds} giây`;
+}
