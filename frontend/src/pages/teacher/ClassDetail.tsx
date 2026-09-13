@@ -85,9 +85,9 @@ export default function ClassDetail() {
   const [studentSearch, setStudentSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
-  // Danh sách bài giảng/bài tập nào (theo key "<chương>-lessons"/"-homework") đang bị thu gọn trong 1 chương —
-  // mặc định hiện hết, chỉ ẩn khi bấm thu gọn (khác với expandedChapters vốn mặc định đóng).
-  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  // Danh sách bài giảng/bài tập nào (theo key "<chương>-lessons"/"-homework") đang được bung ra trong 1 chương —
+  // mặc định thu gọn, chỉ hiện khi bấm mở.
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const [selectedStudent, setSelectedStudent] = useState('');
   const [existingSearch, setExistingSearch] = useState('');
   const [addMode, setAddMode] = useState<'new' | 'existing'>('new');
@@ -637,7 +637,7 @@ export default function ClassDetail() {
     return next;
   });
 
-  const toggleSection = (key: string) => setCollapsedSections((prev) => {
+  const toggleSection = (key: string) => setExpandedSections((prev) => {
     const next = new Set(prev);
     if (next.has(key)) next.delete(key); else next.add(key);
     return next;
@@ -731,7 +731,7 @@ export default function ClassDetail() {
         </div>
         {open && (() => {
           const lessonsKey = `${group.key}-lessons`, hwKey = `${group.key}-homework`;
-          const lessonsOpen = !collapsedSections.has(lessonsKey), hwOpen = !collapsedSections.has(hwKey);
+          const lessonsOpen = expandedSections.has(lessonsKey), hwOpen = expandedSections.has(hwKey);
           return (
           <div style={{ padding: '0 1.25rem 1.25rem', display: 'flex', flexDirection: 'column', gap: 16, borderTop: '1px solid #F0F0F0' }}>
             <div style={{ marginTop: 14 }}>
