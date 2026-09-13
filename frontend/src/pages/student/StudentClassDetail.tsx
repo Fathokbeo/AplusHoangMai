@@ -9,7 +9,7 @@ import SubmitHomeworkView from '../../components/SubmitHomeworkView';
 import { type StudentAnswers } from '../../components/PartsSolver';
 import useIsMobile from '../../lib/useIsMobile';
 import { toast } from '../../components/Toast';
-import { parsePartsConfig, hasObjectiveParts, hasEssay, emptyStudentAnswers, PART_LABELS, PART_ORDER, type PartKey, parseHsaConfig, emptyHsaStudentAnswers, type HsaConfig, formatRemainingMs } from '../../lib/homeworkParts';
+import { parsePartsConfig, hasObjectiveParts, hasEssay, emptyStudentAnswers, PART_LABELS, PART_ORDER, type PartKey, parseHsaConfig, emptyHsaStudentAnswers, type HsaConfig, formatRemainingMs, formatDeadlineRemaining } from '../../lib/homeworkParts';
 import { parseAttachments, isViewableFile } from '../../lib/attachments';
 import AssistantScheduleModal from '../../components/AssistantScheduleModal';
 import FacebookIcon from '../../components/FacebookIcon';
@@ -65,8 +65,8 @@ export default function StudentClassDetail() {
   }, [cls]);
 
   useEffect(() => {
-    const hasInProgress = cls?.homework?.some((hw: any) => hw.attempt_started_at && hw.time_limit_minutes);
-    if (!hasInProgress) return;
+    const needsTick = cls?.homework?.some((hw: any) => (hw.attempt_started_at && hw.time_limit_minutes) || (hw.can_submit && hw.due_date));
+    if (!needsTick) return;
     setOutsideTick(Date.now());
     const t = setInterval(() => setOutsideTick(Date.now()), 1000);
     return () => clearInterval(t);
@@ -393,6 +393,15 @@ export default function StudentClassDetail() {
                     <Upload size={13} /> {isSubmitted ? 'Nộp lại' : 'Nộp bài'}
                   </button>
                 )}
+                {hw.due_date && (() => {
+                  const deadlineRemainMs = new Date(hw.due_date).getTime() - outsideTick;
+                  const isDeadlineLow = deadlineRemainMs <= 60 * 60 * 1000;
+                  return (
+                    <span style={{ fontSize: '0.72rem', fontWeight: 700, color: isDeadlineLow ? '#C62828' : '#E65100', display: 'flex', alignItems: 'center', gap: 3 }}>
+                      <Timer size={11} /> {deadlineRemainMs > 0 ? `Còn ${formatDeadlineRemaining(deadlineRemainMs)}` : 'Đã hết hạn'}
+                    </span>
+                  );
+                })()}
                 {hasAttemptLimit && (
                   <span style={{ fontSize: '0.72rem', color: '#999' }}>Giới hạn (còn {hw.attempts_left} lần nộp)</span>
                 )}
