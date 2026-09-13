@@ -85,6 +85,9 @@ export default function ClassDetail() {
   const [studentSearch, setStudentSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
+  // Danh sách bài giảng/bài tập nào (theo key "<chương>-lessons"/"-homework") đang bị thu gọn trong 1 chương —
+  // mặc định hiện hết, chỉ ẩn khi bấm thu gọn (khác với expandedChapters vốn mặc định đóng).
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [selectedStudent, setSelectedStudent] = useState('');
   const [existingSearch, setExistingSearch] = useState('');
   const [addMode, setAddMode] = useState<'new' | 'existing'>('new');
@@ -634,6 +637,12 @@ export default function ClassDetail() {
     return next;
   });
 
+  const toggleSection = (key: string) => setCollapsedSections((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+
   const renderLessonCard = (l: any, i: number) => {
     const atts = parseAttachments(l.attachments);
     const docCount = atts.filter((a) => a.kind !== 'answer').length;
@@ -720,36 +729,42 @@ export default function ClassDetail() {
             </div>
           )}
         </div>
-        {open && (
+        {open && (() => {
+          const lessonsKey = `${group.key}-lessons`, hwKey = `${group.key}-homework`;
+          const lessonsOpen = !collapsedSections.has(lessonsKey), hwOpen = !collapsedSections.has(hwKey);
+          return (
           <div style={{ padding: '0 1.25rem 1.25rem', display: 'flex', flexDirection: 'column', gap: 16, borderTop: '1px solid #F0F0F0' }}>
             <div style={{ marginTop: 14 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, cursor: lc > 0 ? 'pointer' : 'default' }} onClick={() => lc > 0 && toggleSection(lessonsKey)}>
+                {lc > 0 && (lessonsOpen ? <ChevronDown size={14} color="#aaa" /> : <ChevronRight size={14} color="#aaa" />)}
                 <BookOpen size={14} color="#1565C0" /><span style={{ fontWeight: 700, fontSize: '0.85rem' }}>Bài giảng ({lc})</span>
                 <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#1565C0', border: '1px dashed #90CAF9' }}
                   title={group.chapter ? `Thêm bài giảng vào "${group.chapter.title}"` : 'Thêm bài giảng (chưa phân chương)'}
-                  onClick={() => openCreateLesson(group.chapter?.id)}>
+                  onClick={(e) => { e.stopPropagation(); openCreateLesson(group.chapter?.id); }}>
                   <Plus size={14} />
                 </button>
               </div>
-              {lc === 0 ? <div style={{ fontSize: '0.8rem', color: '#aaa' }}>Chưa có bài giảng</div> : (
+              {lc === 0 ? <div style={{ fontSize: '0.8rem', color: '#aaa' }}>Chưa có bài giảng</div> : lessonsOpen && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{group.lessons.map((l: any, i: number) => renderLessonCard(l, i))}</div>
               )}
             </div>
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, cursor: hc > 0 ? 'pointer' : 'default' }} onClick={() => hc > 0 && toggleSection(hwKey)}>
+                {hc > 0 && (hwOpen ? <ChevronDown size={14} color="#aaa" /> : <ChevronRight size={14} color="#aaa" />)}
                 <ClipboardList size={14} color="#6A1B9A" /><span style={{ fontWeight: 700, fontSize: '0.85rem' }}>Bài tập ({hc})</span>
                 <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#6A1B9A', border: '1px dashed #CE93D8' }}
                   title={group.chapter ? `Thêm bài tập vào "${group.chapter.title}"` : 'Thêm bài tập (chưa phân chương)'}
-                  onClick={() => openCreateHw(group.chapter?.id)}>
+                  onClick={(e) => { e.stopPropagation(); openCreateHw(group.chapter?.id); }}>
                   <Plus size={14} />
                 </button>
               </div>
-              {hc === 0 ? <div style={{ fontSize: '0.8rem', color: '#aaa' }}>Chưa có bài tập</div> : (
+              {hc === 0 ? <div style={{ fontSize: '0.8rem', color: '#aaa' }}>Chưa có bài tập</div> : hwOpen && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{group.homework.map((h: any, i: number) => renderHomeworkCard(h, i))}</div>
               )}
             </div>
           </div>
-        )}
+          );
+        })()}
       </div>
     );
   };
