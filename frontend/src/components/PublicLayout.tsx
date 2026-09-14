@@ -74,7 +74,7 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
             {user ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 8 }}>
                 <Link to={dashLink} className="btn btn-primary btn-sm" style={{ gap: 6 }}>
-                  <User size={14} />{user.role === 'admin' ? 'Quản trị' : user.role === 'teacher' ? 'Giáo viên' : 'Học sinh'}
+                  <User size={14} />{user.role === 'admin' ? 'Quản trị' : user.role === 'teacher' ? 'Giáo viên' : 'Vào học'}
                 </Link>
                 <button className="btn btn-ghost btn-sm" style={{ color: solid ? '#555' : 'white', borderColor: solid ? '#DDD' : 'rgba(255,255,255,0.3)' }} onClick={handleLogout}>
                   <LogOut size={14} /> Đăng xuất

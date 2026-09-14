@@ -1,13 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
 import AdCarousel from '../components/AdCarousel';
 import PublicLayout from '../components/PublicLayout';
 import api from '../lib/api';
 import { BookOpen, ChevronRight, Trophy, Users, GraduationCap } from 'lucide-react';
 
 export default function Home() {
-  const { user } = useAuth();
   const [ads, setAds] = useState([]);
   const [courses, setCourses] = useState([]);
   const [settings, setSettings] = useState<any>({});
@@ -17,8 +15,6 @@ export default function Home() {
     api.get('/public/courses').then((r) => setCourses(r.data));
     api.get('/public/settings').then((r) => setSettings(r.data)).catch(() => {});
   }, []);
-
-  const dashLink = user ? `/${user.role}` : '/login';
 
   const quickLinks = [
     { to: '/hoc-sinh', icon: Trophy, label: 'Học sinh tiêu biểu', color: '#C62828', bg: '#FFEBEE' },
@@ -114,11 +110,9 @@ export default function Home() {
                 <div style={{ padding: '1rem' }}>
                   <h3 style={{ margin: '0 0 8px', fontSize: '1rem', fontWeight: 700, color: '#1A1A2E' }}>{c.title}</h3>
                   {c.description && <p style={{ margin: '0 0 12px', fontSize: '0.85rem', color: '#888', lineHeight: 1.5 }}>{c.description}</p>}
-                  {user && (
-                    <Link to={dashLink} style={{ color: '#C62828', fontWeight: 600, fontSize: '0.85rem', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
-                      Xem chi tiết <ChevronRight size={14} />
-                    </Link>
-                  )}
+                  <Link to={`/courses/${c.id}`} style={{ color: '#C62828', fontWeight: 600, fontSize: '0.85rem', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    Xem chi tiết <ChevronRight size={14} />
+                  </Link>
                 </div>
               </div>
             ))}

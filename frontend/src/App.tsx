@@ -9,6 +9,7 @@ import Home from './pages/Home';
 import FeaturedStudents from './pages/public/FeaturedStudents';
 import OurTeachers from './pages/public/OurTeachers';
 import FeaturedCourses from './pages/public/FeaturedCourses';
+import CourseDetail from './pages/public/CourseDetail';
 import Achievements from './pages/public/Achievements';
 
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -54,6 +55,7 @@ function AppRoutes() {
       <Route path="/hoc-sinh" element={<FeaturedStudents />} />
       <Route path="/giao-vien" element={<OurTeachers />} />
       <Route path="/khoa-hoc" element={<FeaturedCourses />} />
+      <Route path="/courses/:id" element={<CourseDetail />} />
       <Route path="/kinh-nghiem" element={<Achievements />} />
       <Route path="/login" element={user ? <Navigate to={`/${user.role}`} replace /> : <Login />} />
 
