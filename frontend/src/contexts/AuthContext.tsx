@@ -31,6 +31,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (t && u) {
       setToken(t);
       setUser(JSON.parse(u));
+      // Người đã đăng nhập từ trước khi có cookie phiên: cấp lại cookie để tải được file /uploads
+      // (ảnh, đề bài, video) mà không phải đăng nhập lại.
+      api.post('/auth/session').catch(() => {});
     }
     setLoading(false);
   }, []);
@@ -44,6 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
+    api.post('/auth/logout').catch(() => {}); // xóa cookie phiên ở máy chủ
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setToken(null);

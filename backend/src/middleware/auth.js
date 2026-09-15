@@ -1,11 +1,13 @@
 const jwt = require('jsonwebtoken');
-const JWT_SECRET = process.env.JWT_SECRET || 'mathweb_secret';
+const { getJwtSecret } = require('../services/security');
 
+// API chỉ chấp nhận token ở header Authorization (KHÔNG nhận cookie phiên), nên cookie dùng cho
+// /uploads không thể bị lợi dụng để gọi API thay người dùng từ trang web khác (CSRF).
 function authMiddleware(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ message: 'Unauthorized' });
   try {
-    req.user = jwt.verify(token, JWT_SECRET);
+    req.user = jwt.verify(token, getJwtSecret());
     next();
   } catch {
     res.status(401).json({ message: 'Token không hợp lệ' });

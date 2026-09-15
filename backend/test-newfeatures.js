@@ -196,10 +196,14 @@ async function main() {
   const atts = r.data.attachments || [];
   log('Gắn file đáp án BT trên lớp (tổng 2 file)', atts.length === 2 && atts.some(a => a.kind === 'answer') && atts.some(a => a.kind === 'doc'), JSON.stringify(atts));
 
-  // File phục vụ được qua /uploads/lessons/
+  // File phục vụ được qua /uploads/lessons/ — nay phải đăng nhập đúng quyền mới tải được
   const fileName = atts[0].file;
-  const fres = await fetch(`http://localhost:5000/uploads/lessons/${fileName}`);
+  const dl = (name, token) => fetch(`http://localhost:5000/uploads/lessons/${name}`,
+    token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
+  const fres = await dl(fileName, teacherTok);
   log('File đính kèm tải được qua /uploads/lessons', fres.ok, `status=${fres.status}`);
+  const fresAnon = await dl(fileName);
+  log('Khách chưa đăng nhập KHÔNG tải được file đính kèm', fresAnon.status === 401, `status=${fresAnon.status}`);
 
   // Học sinh thấy attachments trong trang lớp
   r = await req('GET', `/student/my-classes/${classId}`, { token: anTok });
@@ -209,14 +213,14 @@ async function main() {
   // Xóa 1 file đính kèm
   r = await req('DELETE', `/teacher/lessons/${lessonId}/attachments/${fileName}`, { token: teacherTok });
   log('Xóa 1 file đính kèm (còn 1)', r.ok && r.data.attachments.length === 1, JSON.stringify(r.data));
-  const fres2 = await fetch(`http://localhost:5000/uploads/lessons/${fileName}`);
+  const fres2 = await dl(fileName, teacherTok);
   log('File đã xóa không còn trên đĩa', fres2.status === 404, `status=${fres2.status}`);
 
   // Xóa bài giảng → dọn nốt file còn lại
   const remainFile = r.data.attachments[0].file;
   r = await req('DELETE', `/teacher/lessons/${lessonId}`, { token: teacherTok });
   log('Xóa bài giảng', r.ok, '');
-  const fres3 = await fetch(`http://localhost:5000/uploads/lessons/${remainFile}`);
+  const fres3 = await dl(remainFile, teacherTok);
   log('File của bài giảng đã xóa cũng bị dọn', fres3.status === 404, `status=${fres3.status}`);
 
   // ── Dọn dẹp ──
