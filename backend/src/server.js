@@ -61,10 +61,12 @@ if (fs.existsSync(frontendDist)) {
   console.log('🌐 Đang phục vụ frontend từ frontend/dist');
 }
 
-// Global error handler — always return JSON
+// Global error handler — always return JSON. Che bí mật (API key...) trước khi trả lỗi ra ngoài.
 app.use((err, req, res, next) => {
-  console.error('[ERROR]', err.message);
-  res.status(err.status || 500).json({ message: err.message || 'Lỗi server' });
+  const { redactSecrets } = require('./services/security');
+  const safe = redactSecrets(err.message || 'Lỗi server');
+  console.error('[ERROR]', safe);
+  res.status(err.status || 500).json({ message: safe });
 });
 
 app.listen(PORT, () => {

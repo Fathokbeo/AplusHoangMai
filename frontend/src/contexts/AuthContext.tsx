@@ -28,14 +28,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const t = localStorage.getItem('token');
     const u = localStorage.getItem('user');
-    if (t && u) {
-      setToken(t);
-      setUser(JSON.parse(u));
-      // Người đã đăng nhập từ trước khi có cookie phiên: cấp lại cookie để tải được file /uploads
-      // (ảnh, đề bài, video) mà không phải đăng nhập lại.
-      api.post('/auth/session').catch(() => {});
-    }
-    setLoading(false);
+    if (!t || !u) { setLoading(false); return; }
+    setToken(t);
+    setUser(JSON.parse(u));
+    // Cấp (hoặc gia hạn) cookie phiên TRƯỚC khi hiện giao diện, để ảnh/đề bài/video tải được ngay từ
+    // lần mở đầu tiên — kể cả người đã đăng nhập từ trước khi có tính năng kiểm tra quyền tải file.
+    api.post('/auth/session').catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   const login = async (username: string, password: string) => {

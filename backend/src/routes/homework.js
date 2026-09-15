@@ -10,6 +10,7 @@ const { needsAiGrading, stripAnswers, stripHsaAnswers, parsePartsConfig, partEna
 const { computeMaxScore, DEFAULT_POINTS } = require('../services/homeworkScoring');
 const { compareVietnameseName } = require('../services/vietnameseName');
 const { generateFeedbackRubric } = require('../services/aiGrading');
+const { redactSecrets } = require('../services/security');
 
 router.use(authMiddleware);
 
@@ -462,7 +463,7 @@ router.post('/submissions/:id/regrade', requireRole('teacher', 'admin'), async (
     if (!result) return res.status(400).json({ message: 'Không thể chấm bài này' });
     res.json({ message: 'Đã chấm lại', score: result.score, feedback: result.feedback, details: result.details });
   } catch (err) {
-    res.status(500).json({ message: 'Lỗi chấm bài: ' + err.message });
+    res.status(500).json({ message: 'Lỗi chấm bài: ' + redactSecrets(err.message) });
   }
 });
 

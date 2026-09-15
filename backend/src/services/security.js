@@ -109,8 +109,29 @@ function clearLoginFailures(req, username) {
   failures.delete(`i:${clientIp(req)}`);
 }
 
+// ── Che bí mật trong thông báo lỗi ────────────────────────────────────
+// Lỗi từ SDK của Google/Anthropic có thể kèm URL chứa "?key=AIza..." — không được để lọt ra client
+// (và cũng không nên nằm trong log, vì log hay được copy đi nơi khác khi nhờ hỗ trợ).
+const SECRET_PATTERNS = [
+  /AIza[0-9A-Za-z_-]{20,}/g,
+  /sk-ant-[0-9A-Za-z_-]{20,}/g,
+  /([?&](?:key|api_?key|access_token)=)[^&\s"']+/gi,
+];
+
+function redactSecrets(text) {
+  let out = String(text == null ? '' : text);
+  for (const name of ['GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'JWT_SECRET']) {
+    const val = process.env[name];
+    if (val && val.length >= 8) out = out.split(val).join('***');
+  }
+  if (cachedSecret && cachedSecret.length >= 8) out = out.split(cachedSecret).join('***');
+  out = out.replace(SECRET_PATTERNS[0], '***').replace(SECRET_PATTERNS[1], '***');
+  return out.replace(SECRET_PATTERNS[2], '$1***');
+}
+
 module.exports = {
   getJwtSecret,
+  redactSecrets,
   SESSION_COOKIE,
   setSessionCookie,
   clearSessionCookie,
