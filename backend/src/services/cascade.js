@@ -60,9 +60,15 @@ function hardDeleteClass(db, classId, { purgeStudents = true } = {}) {
 
   db.prepare('DELETE FROM chapters WHERE class_id=?').run(classId);
 
-  const assistants = db.prepare('SELECT photo FROM class_assistants WHERE class_id=?').all(classId);
-  assistants.forEach(a => rmFile('assistants', a.photo));
+  // Trợ giảng dùng chung nhiều lớp: chỉ gỡ liên kết với lớp này; ai không còn dạy lớp nào thì xóa hẳn hồ sơ
+  const assistantIds = db.prepare('SELECT assistant_id FROM class_assistants WHERE class_id=?').all(classId).map(r => r.assistant_id);
   db.prepare('DELETE FROM class_assistants WHERE class_id=?').run(classId);
+  for (const aid of assistantIds) {
+    if (db.prepare('SELECT 1 FROM class_assistants WHERE assistant_id=? LIMIT 1').get(aid)) continue;
+    const a = db.prepare('SELECT photo FROM assistants WHERE id=?').get(aid);
+    if (a) rmFile('assistants', a.photo);
+    db.prepare('DELETE FROM assistants WHERE id=?').run(aid);
+  }
 
   db.prepare('DELETE FROM class_students WHERE class_id=?').run(classId);
   db.prepare('DELETE FROM classes WHERE id=?').run(classId);

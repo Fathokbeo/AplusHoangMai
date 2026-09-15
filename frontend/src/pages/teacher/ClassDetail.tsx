@@ -163,7 +163,7 @@ export default function ClassDetail() {
   };
 
   const fetchAllAssistants = async () => {
-    const { data } = await api.get('/teacher/all-assistants');
+    const { data } = await api.get('/teacher/all-assistants', { params: { exclude_class_id: id } });
     setAllAssistants(data);
   };
 
@@ -475,9 +475,13 @@ export default function ClassDetail() {
   };
 
   const deleteAssistant = async (a: any) => {
-    if (!confirm(`Xóa trợ giảng "${a.full_name}"?`)) return;
-    await api.delete(`/teacher/assistants/${a.id}`);
-    toast.success('Đã xóa trợ giảng');
+    if (!confirm(
+      `Gỡ trợ giảng "${a.full_name}" khỏi lớp này?\n\n` +
+      `Các lớp khác của trợ giảng này không bị ảnh hưởng. ` +
+      `Nếu họ không còn dạy lớp nào khác thì hồ sơ (ảnh, thông tin, lịch làm việc) sẽ bị xóa hẳn.`
+    )) return;
+    await api.delete(`/teacher/classes/${id}/assistants/${a.id}`);
+    toast.success('Đã gỡ trợ giảng khỏi lớp');
     fetchClass();
   };
 
@@ -652,12 +656,9 @@ export default function ClassDetail() {
     (s: any) => s.full_name || ''
   );
 
-  // Trợ giảng đã tạo ở lớp khác, có thể thêm lại vào lớp này (bỏ những người đã có sẵn trong lớp)
+  // Trợ giảng đã có ở lớp khác, có thể gán thêm vào lớp này (server đã loại người đã có trong lớp)
   const availableAssistants = sortByVietnameseName(
-    (allAssistants || []).filter((a: any) =>
-      !cls.assistants?.find((x: any) => x.full_name === a.full_name && (x.phone || '') === (a.phone || '') && (x.facebook_url || '') === (a.facebook_url || '')) &&
-      matchesNameSearch(a.full_name || '', existingAssistantSearch)
-    ),
+    (allAssistants || []).filter((a: any) => matchesNameSearch(a.full_name || '', existingAssistantSearch)),
     (a: any) => a.full_name || ''
   );
 
@@ -1277,6 +1278,12 @@ export default function ClassDetail() {
           </div>
         )}
 
+        {editingAssistant && editingAssistant.class_count > 1 && (
+          <div style={{ background: '#E3F2FD', color: '#1565C0', borderRadius: 8, padding: '0.6rem 0.75rem', fontSize: '0.8rem', marginBottom: '1rem' }}>
+            Trợ giảng này đang dạy {editingAssistant.class_count} lớp. Thông tin và lịch làm việc dùng chung nên thay đổi sẽ áp dụng cho tất cả các lớp đó.
+          </div>
+        )}
+
         {!editingAssistant && assistantAddMode === 'existing' ? (
           <div className="form-group">
             <label className="label">Chọn trợ giảng đã tạo ở lớp khác</label>
@@ -1308,7 +1315,7 @@ export default function ClassDetail() {
                   )}
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>{a.full_name}</div>
-                    <div style={{ fontSize: '0.76rem', color: '#999' }}>Đã dạy lớp {a.class_title}{a.phone ? ` · ${a.phone}` : ''}</div>
+                    <div style={{ fontSize: '0.76rem', color: '#999' }}>Đang dạy: {a.class_titles || '—'}{a.phone ? ` · ${a.phone}` : ''}</div>
                   </div>
                 </div>
               ))}

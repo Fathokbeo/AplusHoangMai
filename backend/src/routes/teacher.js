@@ -3,7 +3,6 @@ const router = express.Router();
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
-const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { uploadVideo, uploadCourseThumbnail, uploadLessonFile, uploadAssistantPhoto } = require('../middleware/upload');
@@ -83,25 +82,25 @@ router.get('/all-students', (req, res) => {
   res.json(db.prepare("SELECT id,username,full_name,parent_phone FROM users WHERE role='student' AND active=1 ORDER BY full_name").all());
 });
 
-// Trợ giảng đã từng tạo ở các lớp khác, để chọn thêm lại thay vì nhập lại từ đầu.
-// Trùng cùng họ tên+SĐT+Facebook (cùng 1 người, từng thêm ở nhiều lớp) chỉ giữ bản mới nhất.
+// Trợ giảng đã có (để gán thêm vào lớp khác). ?exclude_class_id= bỏ những người đã có trong lớp đó.
 router.get('/all-assistants', (req, res) => {
   const db = getDb();
   const p = [];
   let q = `
-    SELECT ca.id, ca.full_name, ca.phone, ca.facebook_url, ca.photo, cl.title class_title
-    FROM class_assistants ca JOIN classes cl ON ca.class_id=cl.id
-    WHERE cl.active=1`;
-  if (req.user.role === 'teacher') { q += ' AND cl.teacher_id=?'; p.push(req.user.id); }
-  const rows = db.prepare(q + ' ORDER BY ca.full_name, ca.created_at DESC').all(...p);
-  const seen = new Set();
-  const result = rows.filter((r) => {
-    const key = `${r.full_name}|${r.phone || ''}|${r.facebook_url || ''}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  res.json(result);
+    SELECT a.id, a.full_name, a.phone, a.facebook_url, a.photo,
+      (SELECT GROUP_CONCAT(cl.title, ', ') FROM class_assistants ca JOIN classes cl ON ca.class_id=cl.id
+        WHERE ca.assistant_id=a.id AND cl.active=1) class_titles
+    FROM assistants a
+    WHERE EXISTS (
+      SELECT 1 FROM class_assistants ca JOIN classes cl ON ca.class_id=cl.id
+      WHERE ca.assistant_id=a.id AND cl.active=1${req.user.role === 'teacher' ? ' AND cl.teacher_id=?' : ''}
+    )`;
+  if (req.user.role === 'teacher') p.push(req.user.id);
+  if (req.query.exclude_class_id) {
+    q += ' AND NOT EXISTS (SELECT 1 FROM class_assistants ca2 WHERE ca2.assistant_id=a.id AND ca2.class_id=?)';
+    p.push(req.query.exclude_class_id);
+  }
+  res.json(db.prepare(q + ' ORDER BY a.full_name').all(...p));
 });
 
 // ── Courses (teacher can create & manage own courses) ──────────────────
@@ -217,7 +216,11 @@ router.get('/classes/:id', (req, res) => {
   const lessons = db.prepare('SELECT * FROM lessons WHERE class_id=? ORDER BY lesson_order,created_at').all(req.params.id);
   const homework = db.prepare('SELECT * FROM homework WHERE class_id=? ORDER BY hw_order,created_at').all(req.params.id);
   homework.forEach((h) => { delete h.feedback_rubric; }); // nội bộ, không hiển thị trên web
-  const assistants = db.prepare('SELECT * FROM class_assistants WHERE class_id=? ORDER BY created_at').all(req.params.id);
+  const assistants = db.prepare(`
+    SELECT a.*, (SELECT COUNT(*) FROM class_assistants x WHERE x.assistant_id=a.id) class_count
+    FROM class_assistants ca JOIN assistants a ON ca.assistant_id=a.id
+    WHERE ca.class_id=? ORDER BY ca.created_at
+  `).all(req.params.id);
   res.json({ ...cls, students, chapters, lessons, homework, assistants });
 });
 
@@ -511,73 +514,81 @@ router.delete('/chapters/:id', (req, res) => {
   res.json({ message: 'Đã xóa chương' });
 });
 
-// ── Trợ giảng của lớp (thông tin liên hệ + lịch làm việc trong tuần) ───
+// ── Trợ giảng (bản ghi dùng chung, gán cho nhiều lớp — sửa ở đâu cũng đồng bộ) ───
+// Giáo viên quản lý được 1 trợ giảng nếu trợ giảng đó đang dạy ít nhất 1 lớp của mình; admin quản lý tất cả.
+function canManageAssistant(db, user, assistantId) {
+  if (user.role !== 'teacher') return true;
+  return !!db.prepare(`
+    SELECT 1 FROM class_assistants ca JOIN classes c ON ca.class_id=c.id
+    WHERE ca.assistant_id=? AND c.teacher_id=? LIMIT 1
+  `).get(assistantId, user.id);
+}
+
+function canManageClass(db, user, classId) {
+  const cls = db.prepare('SELECT * FROM classes WHERE id=?').get(classId);
+  if (!cls) return null;
+  if (user.role === 'teacher' && cls.teacher_id !== user.id) return false;
+  return cls;
+}
+
 router.post('/classes/:id/assistants', (req, res) => {
   const { full_name, phone, facebook_url } = req.body;
   if (!full_name) return res.status(400).json({ message: 'Cần họ tên trợ giảng' });
   const db = getDb();
-  const cls = db.prepare('SELECT * FROM classes WHERE id=?').get(req.params.id);
-  if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp' });
-  if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  const cls = canManageClass(db, req.user, req.params.id);
+  if (cls === null) return res.status(404).json({ message: 'Không tìm thấy lớp' });
+  if (cls === false) return res.status(403).json({ message: 'Forbidden' });
   const result = db.prepare(
-    'INSERT INTO class_assistants (class_id,full_name,phone,facebook_url) VALUES (?,?,?,?)'
-  ).run(req.params.id, full_name, phone || null, facebook_url || null);
+    'INSERT INTO assistants (full_name,phone,facebook_url) VALUES (?,?,?)'
+  ).run(full_name, phone || null, facebook_url || null);
+  db.prepare('INSERT INTO class_assistants (class_id,assistant_id) VALUES (?,?)').run(req.params.id, result.lastInsertRowid);
   res.status(201).json({ id: result.lastInsertRowid, full_name });
 });
 
-// Thêm lại 1 trợ giảng đã tạo ở lớp khác: sao chép thông tin (và ảnh, nếu có) thành 1 bản ghi mới
-// cho lớp này, vì class_assistants không dùng chung 1 bản ghi cho nhiều lớp.
+// Gán 1 trợ giảng đã có vào lớp này: chỉ tạo liên kết, KHÔNG sao chép thông tin, nên thông tin và
+// lịch làm việc luôn dùng chung một bản ghi giữa tất cả các lớp trợ giảng đó tham gia.
 router.post('/classes/:id/assistants/reuse', (req, res) => {
   const { source_id } = req.body;
   if (!source_id) return res.status(400).json({ message: 'Cần chọn trợ giảng' });
   const db = getDb();
-  const cls = db.prepare('SELECT * FROM classes WHERE id=?').get(req.params.id);
-  if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp' });
-  if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
-  const src = db.prepare(
-    'SELECT ca.*,c.teacher_id FROM class_assistants ca JOIN classes c ON ca.class_id=c.id WHERE ca.id=?'
-  ).get(source_id);
-  if (!src) return res.status(404).json({ message: 'Không tìm thấy trợ giảng' });
-  if (req.user.role === 'teacher' && src.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
-  let photo = null;
-  if (src.photo) {
-    const srcPath = path.join(__dirname, '../../uploads/assistants', src.photo);
-    if (fs.existsSync(srcPath)) {
-      photo = `${uuidv4()}${path.extname(src.photo)}`;
-      fs.copyFileSync(srcPath, path.join(__dirname, '../../uploads/assistants', photo));
-    }
+  const cls = canManageClass(db, req.user, req.params.id);
+  if (cls === null) return res.status(404).json({ message: 'Không tìm thấy lớp' });
+  if (cls === false) return res.status(403).json({ message: 'Forbidden' });
+  const assistant = db.prepare('SELECT * FROM assistants WHERE id=?').get(source_id);
+  if (!assistant) return res.status(404).json({ message: 'Không tìm thấy trợ giảng' });
+  if (!canManageAssistant(db, req.user, source_id)) return res.status(403).json({ message: 'Forbidden' });
+  if (db.prepare('SELECT 1 FROM class_assistants WHERE class_id=? AND assistant_id=?').get(req.params.id, source_id)) {
+    return res.status(400).json({ message: 'Trợ giảng đã có trong lớp này' });
   }
-  const result = db.prepare(
-    'INSERT INTO class_assistants (class_id,full_name,phone,facebook_url,photo) VALUES (?,?,?,?,?)'
-  ).run(req.params.id, src.full_name, src.phone, src.facebook_url, photo);
-  res.status(201).json({ id: result.lastInsertRowid, full_name: src.full_name });
+  db.prepare('INSERT INTO class_assistants (class_id,assistant_id) VALUES (?,?)').run(req.params.id, source_id);
+  res.status(201).json({ id: assistant.id, full_name: assistant.full_name });
 });
 
 router.put('/assistants/:id', (req, res) => {
   const { full_name, phone, facebook_url } = req.body;
   const db = getDb();
-  const a = db.prepare('SELECT ca.*,c.teacher_id FROM class_assistants ca JOIN classes c ON ca.class_id=c.id WHERE ca.id=?').get(req.params.id);
+  const a = db.prepare('SELECT * FROM assistants WHERE id=?').get(req.params.id);
   if (!a) return res.status(404).json({ message: 'Không tìm thấy' });
-  if (req.user.role === 'teacher' && a.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  if (!canManageAssistant(db, req.user, req.params.id)) return res.status(403).json({ message: 'Forbidden' });
   const sets = []; const vals = [];
   if (full_name) { sets.push('full_name=?'); vals.push(full_name); }
   if (phone !== undefined) { sets.push('phone=?'); vals.push(phone || null); }
   if (facebook_url !== undefined) { sets.push('facebook_url=?'); vals.push(facebook_url || null); }
-  if (sets.length > 0) { vals.push(req.params.id); db.prepare(`UPDATE class_assistants SET ${sets.join(',')} WHERE id=?`).run(...vals); }
+  if (sets.length > 0) { vals.push(req.params.id); db.prepare(`UPDATE assistants SET ${sets.join(',')} WHERE id=?`).run(...vals); }
   res.json({ message: 'Đã cập nhật' });
 });
 
 router.post('/assistants/:id/photo', uploadAssistantPhoto.single('photo'), (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'Cần file ảnh' });
   const db = getDb();
-  const a = db.prepare('SELECT ca.*,c.teacher_id FROM class_assistants ca JOIN classes c ON ca.class_id=c.id WHERE ca.id=?').get(req.params.id);
+  const a = db.prepare('SELECT * FROM assistants WHERE id=?').get(req.params.id);
   if (!a) return res.status(404).json({ message: 'Không tìm thấy' });
-  if (req.user.role === 'teacher' && a.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  if (!canManageAssistant(db, req.user, req.params.id)) return res.status(403).json({ message: 'Forbidden' });
   if (a.photo) {
     const old = path.join(__dirname, '../../uploads/assistants', a.photo);
     if (fs.existsSync(old)) { try { fs.unlinkSync(old); } catch {} }
   }
-  db.prepare('UPDATE class_assistants SET photo=? WHERE id=?').run(req.file.filename, req.params.id);
+  db.prepare('UPDATE assistants SET photo=? WHERE id=?').run(req.file.filename, req.params.id);
   res.json({ photo: req.file.filename });
 });
 
@@ -586,24 +597,34 @@ router.put('/assistants/:id/schedule', (req, res) => {
   const { schedule } = req.body;
   if (!schedule || typeof schedule !== 'object') return res.status(400).json({ message: 'Dữ liệu lịch không hợp lệ' });
   const db = getDb();
-  const a = db.prepare('SELECT ca.*,c.teacher_id FROM class_assistants ca JOIN classes c ON ca.class_id=c.id WHERE ca.id=?').get(req.params.id);
+  const a = db.prepare('SELECT * FROM assistants WHERE id=?').get(req.params.id);
   if (!a) return res.status(404).json({ message: 'Không tìm thấy' });
-  if (req.user.role === 'teacher' && a.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
-  db.prepare('UPDATE class_assistants SET schedule=? WHERE id=?').run(JSON.stringify(schedule), req.params.id);
+  if (!canManageAssistant(db, req.user, req.params.id)) return res.status(403).json({ message: 'Forbidden' });
+  db.prepare('UPDATE assistants SET schedule=? WHERE id=?').run(JSON.stringify(schedule), req.params.id);
   res.json({ message: 'Đã lưu lịch làm việc' });
 });
 
-router.delete('/assistants/:id', (req, res) => {
+// Gỡ trợ giảng khỏi 1 lớp. Nếu họ không còn dạy lớp nào khác thì xóa hẳn hồ sơ (kèm ảnh),
+// vì lúc đó không còn nơi nào truy cập tới trợ giảng này nữa.
+router.delete('/classes/:classId/assistants/:assistantId', (req, res) => {
   const db = getDb();
-  const a = db.prepare('SELECT ca.*,c.teacher_id FROM class_assistants ca JOIN classes c ON ca.class_id=c.id WHERE ca.id=?').get(req.params.id);
-  if (!a) return res.status(404).json({ message: 'Không tìm thấy' });
-  if (req.user.role === 'teacher' && a.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
-  if (a.photo) {
-    const f = path.join(__dirname, '../../uploads/assistants', a.photo);
-    if (fs.existsSync(f)) { try { fs.unlinkSync(f); } catch {} }
+  const cls = canManageClass(db, req.user, req.params.classId);
+  if (cls === null) return res.status(404).json({ message: 'Không tìm thấy lớp' });
+  if (cls === false) return res.status(403).json({ message: 'Forbidden' });
+  const { classId, assistantId } = req.params;
+  if (!db.prepare('SELECT 1 FROM class_assistants WHERE class_id=? AND assistant_id=?').get(classId, assistantId)) {
+    return res.status(404).json({ message: 'Không tìm thấy trợ giảng trong lớp' });
   }
-  db.prepare('DELETE FROM class_assistants WHERE id=?').run(req.params.id);
-  res.json({ message: 'Đã xóa trợ giảng' });
+  db.prepare('DELETE FROM class_assistants WHERE class_id=? AND assistant_id=?').run(classId, assistantId);
+  if (!db.prepare('SELECT 1 FROM class_assistants WHERE assistant_id=? LIMIT 1').get(assistantId)) {
+    const a = db.prepare('SELECT photo FROM assistants WHERE id=?').get(assistantId);
+    if (a && a.photo) {
+      const f = path.join(__dirname, '../../uploads/assistants', a.photo);
+      if (fs.existsSync(f)) { try { fs.unlinkSync(f); } catch {} }
+    }
+    db.prepare('DELETE FROM assistants WHERE id=?').run(assistantId);
+  }
+  res.json({ message: 'Đã gỡ trợ giảng khỏi lớp' });
 });
 
 // ── Lessons ────────────────────────────────────────────────────────────

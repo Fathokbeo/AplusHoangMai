@@ -9,7 +9,7 @@ const PERIOD_ORDER: Period[] = ['morning', 'afternoon', 'evening'];
 interface Props {
   open: boolean;
   onClose: () => void;
-  assistant: { id: number; full_name: string; schedule?: any } | null;
+  assistant: { id: number; full_name: string; schedule?: any; class_count?: number } | null;
   editable: boolean;
   onSave?: (schedule: AssistantSchedule) => Promise<void>;
 }
@@ -72,6 +72,11 @@ export default function AssistantScheduleModal({ open, onClose, assistant, edita
       <div style={{ fontSize: '0.78rem', color: '#888', marginBottom: 10 }}>
         {editing ? 'Nhập nội dung cho từng ca (để trống nếu trợ giảng không làm việc ca đó).' : 'Ô trống nghĩa là trợ giảng không làm việc ca đó.'}
       </div>
+      {editing && (assistant?.class_count || 0) > 1 && (
+        <div style={{ background: '#E3F2FD', color: '#1565C0', borderRadius: 8, padding: '0.6rem 0.75rem', fontSize: '0.8rem', marginBottom: 10 }}>
+          Lịch này dùng chung cho {assistant?.class_count} lớp của trợ giảng, sửa ở đây sẽ đồng bộ sang tất cả các lớp đó.
+        </div>
+      )}
       <div style={{ overflowX: 'auto' }}>
         <table style={{ minWidth: 760 }}>
           <thead>

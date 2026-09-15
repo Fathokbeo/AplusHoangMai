@@ -76,7 +76,10 @@ router.get('/my-classes/:id', (req, res) => {
     };
   });
 
-  const assistants = db.prepare('SELECT * FROM class_assistants WHERE class_id=? ORDER BY created_at').all(req.params.id);
+  const assistants = db.prepare(`
+    SELECT a.* FROM class_assistants ca JOIN assistants a ON ca.assistant_id=a.id
+    WHERE ca.class_id=? ORDER BY ca.created_at
+  `).all(req.params.id);
 
   // Điểm TB + xếp hạng của học sinh trong lớp này (quá hạn chưa nộp = 0 điểm)
   const mine = classRanking(db, req.params.id).get(req.user.id) || {};

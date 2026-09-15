@@ -61,17 +61,28 @@ function initSchema() {
       FOREIGN KEY (student_id) REFERENCES users(id)
     );
 
-    -- Trợ giảng của lớp học: thông tin liên hệ + lịch làm việc trong tuần (JSON, 7 ngày × 7 ca)
-    CREATE TABLE IF NOT EXISTS class_assistants (
+    -- Trợ giảng: thông tin liên hệ + lịch làm việc trong tuần (JSON, 7 ngày × 7 ca).
+    -- Mỗi trợ giảng là MỘT bản ghi duy nhất dùng chung cho mọi lớp họ tham gia (xem class_assistants),
+    -- nên sửa thông tin hay lịch làm việc ở lớp nào cũng đồng bộ sang tất cả các lớp còn lại.
+    CREATE TABLE IF NOT EXISTS assistants (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      class_id INTEGER NOT NULL,
       full_name TEXT NOT NULL,
       photo TEXT,
       phone TEXT,
       facebook_url TEXT,
       schedule TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Trợ giảng nào dạy lớp nào (1 trợ giảng nhiều lớp, 1 lớp nhiều trợ giảng)
+    CREATE TABLE IF NOT EXISTS class_assistants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      class_id INTEGER NOT NULL,
+      assistant_id INTEGER NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (class_id) REFERENCES classes(id)
+      UNIQUE(class_id, assistant_id),
+      FOREIGN KEY (class_id) REFERENCES classes(id),
+      FOREIGN KEY (assistant_id) REFERENCES assistants(id)
     );
 
     -- Chương: nhóm bài giảng & bài tập trong một lớp, có thứ tự
@@ -346,6 +357,52 @@ function initSchema() {
   // NULL = không giới hạn thời gian (như bài tập thường, chỉ theo "Hạn nộp bài" chung).
   if (!hwCols.some(c => c.name === 'time_limit_minutes')) {
     db.exec('ALTER TABLE homework ADD COLUMN time_limit_minutes INTEGER');
+  }
+
+  // Migration: trước đây mỗi lớp giữ 1 BẢN SAO riêng của trợ giảng (class_assistants chứa luôn họ tên,
+  // ảnh, SĐT, lịch làm việc) nên sửa ở lớp này không ảnh hưởng lớp khác. Nay tách thành bảng assistants
+  // dùng chung + class_assistants chỉ còn là bảng liên kết, để mọi thay đổi tự đồng bộ giữa các lớp.
+  // Các bản sao TRÙNG KHÍT (cùng họ tên + SĐT + Facebook, và có ít nhất 1 thông tin liên hệ) được gộp
+  // thành 1 trợ giảng dùng chung. Chỉ trùng mỗi họ tên thì KHÔNG gộp, tránh nhầm 2 người khác nhau.
+  const caCols = db.prepare('PRAGMA table_info(class_assistants)').all();
+  if (!caCols.some(c => c.name === 'assistant_id')) {
+    db.transaction(() => {
+      const legacy = db.prepare('SELECT * FROM class_assistants ORDER BY created_at, id').all();
+      const groups = new Map();
+      for (const r of legacy) {
+        const contact = `${r.phone || ''}|${r.facebook_url || ''}`;
+        const key = contact === '|' ? `row:${r.id}` : `${r.full_name}|${contact}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(r);
+      }
+      const insAssistant = db.prepare('INSERT INTO assistants (full_name,photo,phone,facebook_url,schedule) VALUES (?,?,?,?,?)');
+      const links = [];
+      for (const rows of groups.values()) {
+        const first = rows[0];
+        const withPhoto = rows.find(r => r.photo);
+        const withSchedule = rows.find(r => r.schedule);
+        const assistantId = insAssistant.run(
+          first.full_name, withPhoto ? withPhoto.photo : null, first.phone, first.facebook_url,
+          withSchedule ? withSchedule.schedule : null,
+        ).lastInsertRowid;
+        for (const r of rows) links.push({ class_id: r.class_id, assistant_id: assistantId, created_at: r.created_at });
+      }
+      db.exec('DROP TABLE class_assistants');
+      db.exec(`
+        CREATE TABLE class_assistants (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          class_id INTEGER NOT NULL,
+          assistant_id INTEGER NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(class_id, assistant_id),
+          FOREIGN KEY (class_id) REFERENCES classes(id),
+          FOREIGN KEY (assistant_id) REFERENCES assistants(id)
+        )
+      `);
+      // OR IGNORE: phòng trường hợp 1 lớp có 2 bản sao trùng khít của cùng 1 người
+      const insLink = db.prepare('INSERT OR IGNORE INTO class_assistants (class_id,assistant_id,created_at) VALUES (?,?,?)');
+      for (const l of links) insLink.run(l.class_id, l.assistant_id, l.created_at);
+    })();
   }
 
   // Đồng bộ dữ liệu: mỗi khóa học chỉ do 1 giáo viên phụ trách (courses.created_by) nên mọi lớp trong khóa
