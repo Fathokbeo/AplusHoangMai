@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import {
   LayoutDashboard, Users, BookOpen, GraduationCap, Image, LogOut,
-  ChevronLeft, School, LayoutTemplate
+  ChevronLeft, School, LayoutTemplate, UserCog
 } from 'lucide-react';
 
 interface Props {
@@ -26,6 +26,7 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
     { to: '/admin/users', icon: Users, label: 'Quản lý tài khoản' },
     { to: '/admin/courses', icon: BookOpen, label: 'Khóa học' },
     { to: '/admin/classes', icon: School, label: 'Lớp học' },
+    { to: '/teacher/assistants', icon: UserCog, label: 'Trợ giảng' },
     { to: '/admin/content', icon: LayoutTemplate, label: 'Nội dung trang' },
     { to: '/admin/ads', icon: Image, label: 'Quảng cáo' },
   ];
@@ -33,6 +34,7 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
   const teacherNav = [
     { to: '/teacher', icon: LayoutDashboard, label: 'Khóa học của tôi' },
     { to: '/teacher/students', icon: GraduationCap, label: 'Học sinh' },
+    { to: '/teacher/assistants', icon: UserCog, label: 'Trợ giảng' },
   ];
 
   const studentNav = [

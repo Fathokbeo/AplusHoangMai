@@ -82,14 +82,17 @@ router.get('/all-students', (req, res) => {
   res.json(db.prepare("SELECT id,username,full_name,parent_phone FROM users WHERE role='student' AND active=1 ORDER BY full_name").all());
 });
 
-// Trợ giảng đã có (để gán thêm vào lớp khác). ?exclude_class_id= bỏ những người đã có trong lớp đó.
+// Trợ giảng đã có: dùng cho trang quản lý trợ giảng và cho việc gán thêm vào lớp khác.
+// ?exclude_class_id= bỏ những người đã có trong lớp đó.
 router.get('/all-assistants', (req, res) => {
   const db = getDb();
   const p = [];
   let q = `
-    SELECT a.id, a.full_name, a.phone, a.facebook_url, a.photo,
+    SELECT a.id, a.full_name, a.phone, a.facebook_url, a.photo, a.schedule,
       (SELECT GROUP_CONCAT(cl.title, ', ') FROM class_assistants ca JOIN classes cl ON ca.class_id=cl.id
-        WHERE ca.assistant_id=a.id AND cl.active=1) class_titles
+        WHERE ca.assistant_id=a.id AND cl.active=1) class_titles,
+      (SELECT COUNT(*) FROM class_assistants ca JOIN classes cl ON ca.class_id=cl.id
+        WHERE ca.assistant_id=a.id AND cl.active=1) class_count
     FROM assistants a
     WHERE EXISTS (
       SELECT 1 FROM class_assistants ca JOIN classes cl ON ca.class_id=cl.id

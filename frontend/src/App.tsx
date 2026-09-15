@@ -25,6 +25,7 @@ import TeacherCourseDetail from './pages/teacher/TeacherCourseDetail';
 import ClassDetail from './pages/teacher/ClassDetail';
 import HomeworkDetail from './pages/teacher/HomeworkDetail';
 import StudentManagement from './pages/teacher/StudentManagement';
+import AssistantManagement from './pages/teacher/AssistantManagement';
 
 import StudentDashboard from './pages/student/StudentDashboard';
 import StudentClasses from './pages/student/StudentClasses';
@@ -77,6 +78,7 @@ function AppRoutes() {
         <Route path="classes/:id" element={<ClassDetail />} />
         <Route path="homework/:id" element={<HomeworkDetail />} />
         <Route path="students" element={<StudentManagement />} />
+        <Route path="assistants" element={<AssistantManagement />} />
       </Route>
 
       {/* Student */}
