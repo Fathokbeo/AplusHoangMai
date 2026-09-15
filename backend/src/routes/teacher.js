@@ -3,6 +3,7 @@ const router = express.Router();
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
+const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { uploadVideo, uploadCourseThumbnail, uploadLessonFile, uploadAssistantPhoto } = require('../middleware/upload');
@@ -80,6 +81,27 @@ router.post('/students', (req, res) => {
 router.get('/all-students', (req, res) => {
   const db = getDb();
   res.json(db.prepare("SELECT id,username,full_name,parent_phone FROM users WHERE role='student' AND active=1 ORDER BY full_name").all());
+});
+
+// Trợ giảng đã từng tạo ở các lớp khác, để chọn thêm lại thay vì nhập lại từ đầu.
+// Trùng cùng họ tên+SĐT+Facebook (cùng 1 người, từng thêm ở nhiều lớp) chỉ giữ bản mới nhất.
+router.get('/all-assistants', (req, res) => {
+  const db = getDb();
+  const p = [];
+  let q = `
+    SELECT ca.id, ca.full_name, ca.phone, ca.facebook_url, ca.photo, cl.title class_title
+    FROM class_assistants ca JOIN classes cl ON ca.class_id=cl.id
+    WHERE cl.active=1`;
+  if (req.user.role === 'teacher') { q += ' AND cl.teacher_id=?'; p.push(req.user.id); }
+  const rows = db.prepare(q + ' ORDER BY ca.full_name, ca.created_at DESC').all(...p);
+  const seen = new Set();
+  const result = rows.filter((r) => {
+    const key = `${r.full_name}|${r.phone || ''}|${r.facebook_url || ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  res.json(result);
 });
 
 // ── Courses (teacher can create & manage own courses) ──────────────────
@@ -501,6 +523,34 @@ router.post('/classes/:id/assistants', (req, res) => {
     'INSERT INTO class_assistants (class_id,full_name,phone,facebook_url) VALUES (?,?,?,?)'
   ).run(req.params.id, full_name, phone || null, facebook_url || null);
   res.status(201).json({ id: result.lastInsertRowid, full_name });
+});
+
+// Thêm lại 1 trợ giảng đã tạo ở lớp khác: sao chép thông tin (và ảnh, nếu có) thành 1 bản ghi mới
+// cho lớp này, vì class_assistants không dùng chung 1 bản ghi cho nhiều lớp.
+router.post('/classes/:id/assistants/reuse', (req, res) => {
+  const { source_id } = req.body;
+  if (!source_id) return res.status(400).json({ message: 'Cần chọn trợ giảng' });
+  const db = getDb();
+  const cls = db.prepare('SELECT * FROM classes WHERE id=?').get(req.params.id);
+  if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp' });
+  if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  const src = db.prepare(
+    'SELECT ca.*,c.teacher_id FROM class_assistants ca JOIN classes c ON ca.class_id=c.id WHERE ca.id=?'
+  ).get(source_id);
+  if (!src) return res.status(404).json({ message: 'Không tìm thấy trợ giảng' });
+  if (req.user.role === 'teacher' && src.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  let photo = null;
+  if (src.photo) {
+    const srcPath = path.join(__dirname, '../../uploads/assistants', src.photo);
+    if (fs.existsSync(srcPath)) {
+      photo = `${uuidv4()}${path.extname(src.photo)}`;
+      fs.copyFileSync(srcPath, path.join(__dirname, '../../uploads/assistants', photo));
+    }
+  }
+  const result = db.prepare(
+    'INSERT INTO class_assistants (class_id,full_name,phone,facebook_url,photo) VALUES (?,?,?,?,?)'
+  ).run(req.params.id, src.full_name, src.phone, src.facebook_url, photo);
+  res.status(201).json({ id: result.lastInsertRowid, full_name: src.full_name });
 });
 
 router.put('/assistants/:id', (req, res) => {

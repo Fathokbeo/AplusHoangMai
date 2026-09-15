@@ -3,13 +3,14 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../../lib/api';
 import Modal from '../../components/Modal';
 import { toast } from '../../components/Toast';
-import { ArrowLeft, School, Users, BookOpen, Plus, Trash2, ChevronRight } from 'lucide-react';
+import { ArrowLeft, School, Users, BookOpen, Plus, Edit, Trash2, ChevronRight } from 'lucide-react';
 
 export default function AdminCourseDetail() {
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
   const [course, setCourse] = useState<any>(null);
   const [modal, setModal] = useState(false);
+  const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState({ title: '', description: '' });
   const [loading, setLoading] = useState(false);
 
@@ -27,15 +28,35 @@ export default function AdminCourseDetail() {
     }
   };
 
-  const createClass = async () => {
+  const openCreate = () => {
+    setEditing(null);
+    setForm({ title: '', description: '' });
+    setModal(true);
+  };
+
+  const openEdit = (cls: any) => {
+    setEditing(cls);
+    setForm({ title: cls.title, description: cls.description || '' });
+    setModal(true);
+  };
+
+  const saveClass = async () => {
     if (!form.title) { toast.error('Cần tiêu đề lớp học'); return; }
     setLoading(true);
     try {
-      await api.post(`/admin/courses/${courseId}/classes`, {
-        title: form.title,
-        description: form.description,
-      });
-      toast.success('Đã tạo lớp học');
+      if (editing) {
+        await api.put(`/teacher/classes/${editing.id}`, {
+          title: form.title,
+          description: form.description,
+        });
+        toast.success('Đã cập nhật lớp học');
+      } else {
+        await api.post(`/admin/courses/${courseId}/classes`, {
+          title: form.title,
+          description: form.description,
+        });
+        toast.success('Đã tạo lớp học');
+      }
       setModal(false);
       setForm({ title: '', description: '' });
       fetchCourse();
@@ -90,7 +111,7 @@ export default function AdminCourseDetail() {
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
         <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#1A1A2E' }}>Các lớp học trong khóa</h2>
-        <button className="btn btn-primary btn-sm" onClick={() => setModal(true)}>
+        <button className="btn btn-primary btn-sm" onClick={openCreate}>
           <Plus size={14} /> Thêm lớp
         </button>
       </div>
@@ -99,7 +120,7 @@ export default function AdminCourseDetail() {
         <div style={{ background: 'white', borderRadius: 12, padding: '3rem', textAlign: 'center', color: '#999' }}>
           <School size={36} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
           <div style={{ marginBottom: 12 }}>Chưa có lớp học nào</div>
-          <button className="btn btn-outline btn-sm" onClick={() => setModal(true)}>Thêm lớp học</button>
+          <button className="btn btn-outline btn-sm" onClick={openCreate}>Thêm lớp học</button>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
@@ -124,6 +145,9 @@ export default function AdminCourseDetail() {
                     Chi tiết <ChevronRight size={13} />
                   </button>
                 </Link>
+                <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openEdit(cls)}>
+                  <Edit size={14} />
+                </button>
                 <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} onClick={() => deleteClass(cls)}>
                   <Trash2 size={14} />
                 </button>
@@ -136,12 +160,12 @@ export default function AdminCourseDetail() {
       <Modal
         open={modal}
         onClose={() => setModal(false)}
-        title="Thêm lớp học vào khóa"
+        title={editing ? 'Chỉnh sửa lớp học' : 'Thêm lớp học vào khóa'}
         footer={
           <>
             <button className="btn btn-ghost" onClick={() => setModal(false)}>Hủy</button>
-            <button className="btn btn-primary" onClick={createClass} disabled={loading}>
-              {loading ? 'Đang tạo...' : 'Tạo lớp'}
+            <button className="btn btn-primary" onClick={saveClass} disabled={loading}>
+              {loading ? 'Đang lưu...' : editing ? 'Lưu thay đổi' : 'Tạo lớp'}
             </button>
           </>
         }
