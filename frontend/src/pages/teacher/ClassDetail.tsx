@@ -16,7 +16,7 @@ import AssistantScheduleModal from '../../components/AssistantScheduleModal';
 import FacebookIcon from '../../components/FacebookIcon';
 import {
   Users, BookOpen, ClipboardList, Edit, Trash2,
-  UserPlus, UserMinus, Play, File, ChevronLeft, Upload, Clock, Eye, Layers, Video, Search,
+  UserPlus, UserMinus, Play, File, ChevronLeft, Upload, Clock, Eye, EyeOff, Layers, Video, Search,
   ChevronDown, ChevronRight, Trophy, FileSpreadsheet, Download, Paperclip, FileText, X, Plus, GripVertical,
   UserCog, Phone, Camera, Calendar, Repeat
 } from 'lucide-react';
@@ -84,6 +84,9 @@ export default function ClassDetail() {
   const [chapterForm, setChapterForm] = useState({ title: '', chapter_order: '0', subject: 'algebra' as 'algebra' | 'geometry' });
   const [studentSearch, setStudentSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  // Xem mật khẩu học sinh: bật "Hiện mật khẩu" để lộ hết, hoặc bấm mắt từng dòng
+  const [showStudentPw, setShowStudentPw] = useState(false);
+  const [revealedStudentPw, setRevealedStudentPw] = useState<Set<number>>(new Set());
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
   // Danh sách bài giảng/bài tập nào (theo key "<chương>-lessons"/"-homework") đang được bung ra trong 1 chương —
   // mặc định thu gọn, chỉ hiện khi bấm mở.
@@ -204,6 +207,12 @@ export default function ClassDetail() {
     toast.success('Đã xóa học sinh');
     fetchClass();
   };
+
+  const toggleRevealStudentPw = (sid: number) => setRevealedStudentPw((prev) => {
+    const next = new Set(prev);
+    next.has(sid) ? next.delete(sid) : next.add(sid);
+    return next;
+  });
 
   const toggleStudentSelect = (sid: number) => setSelectedIds((prev) => {
     const next = new Set(prev);
@@ -865,6 +874,9 @@ export default function ClassDetail() {
               />
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn btn-outline btn-sm" onClick={() => setShowStudentPw(!showStudentPw)} title={showStudentPw ? 'Ẩn tất cả mật khẩu' : 'Hiện tất cả mật khẩu'}>
+                {showStudentPw ? <EyeOff size={15} /> : <Eye size={15} />} {showStudentPw ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+              </button>
               <button className="btn btn-secondary" onClick={openExcelModal} title="Tạo tài khoản hàng loạt từ file Excel">
                 <FileSpreadsheet size={15} /> Nhập Excel
               </button>
@@ -896,10 +908,12 @@ export default function ClassDetail() {
                 <th style={{ width: 40 }}>
                   <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllStudents} style={{ cursor: 'pointer', width: 16, height: 16 }} />
                 </th>
-                <th>#</th><th>Họ tên</th><th>Tên đăng nhập</th><th>Số điện thoại</th><th></th>
+                <th>#</th><th>Họ tên</th><th>Tên đăng nhập</th><th>Mật khẩu</th><th>Số điện thoại</th><th></th>
               </tr></thead>
               <tbody>
-                {visibleStudents.map((s: any, i: number) => (
+                {visibleStudents.map((s: any, i: number) => {
+                  const pwRevealed = showStudentPw || revealedStudentPw.has(s.id);
+                  return (
                   <tr key={s.id}
                     draggable={!studentSearch}
                     onDragStart={() => { draggedStudentId.current = s.id; }}
@@ -920,6 +934,18 @@ export default function ClassDetail() {
                     <td style={{ color: '#999' }}>{i + 1}</td>
                     <td><strong>{s.full_name}</strong></td>
                     <td style={{ color: '#888', fontFamily: 'monospace' }}>{s.username}</td>
+                    <td style={{ fontFamily: 'monospace', color: '#555' }}>
+                      {s.plain_password ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <span>{pwRevealed ? s.plain_password : '••••••'}</span>
+                          {!showStudentPw && (
+                            <button className="btn btn-ghost btn-sm btn-icon" style={{ padding: 2 }} onClick={() => toggleRevealStudentPw(s.id)} title={pwRevealed ? 'Ẩn' : 'Hiện'}>
+                              {pwRevealed ? <EyeOff size={13} /> : <Eye size={13} />}
+                            </button>
+                          )}
+                        </span>
+                      ) : <span style={{ color: '#bbb' }}>—</span>}
+                    </td>
                     <td style={{ color: '#888' }}>{s.parent_phone || '—'}</td>
                     <td>
                       <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} title="Gỡ khỏi lớp" onClick={() => removeStudent(s.id, s.full_name)}>
@@ -927,12 +953,13 @@ export default function ClassDetail() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
                 {(!cls.students || cls.students.length === 0) && (
-                  <tr><td colSpan={7} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Chưa có học sinh</td></tr>
+                  <tr><td colSpan={8} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Chưa có học sinh</td></tr>
                 )}
                 {cls.students?.length > 0 && visibleStudents.length === 0 && (
-                  <tr><td colSpan={7} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Không tìm thấy học sinh phù hợp</td></tr>
+                  <tr><td colSpan={8} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Không tìm thấy học sinh phù hợp</td></tr>
                 )}
               </tbody>
             </table>

@@ -208,7 +208,7 @@ router.get('/classes/:id', (req, res) => {
   // Chưa từng kéo thả sắp xếp → LUÔN hiển thị theo bảng chữ cái (tên riêng) tự động, kể cả khi vừa
   // thêm/xóa học sinh. Đã từng kéo thả → giữ đúng thứ tự đã lưu (sort_order), học sinh mới xếp cuối.
   const students = db.prepare(`
-    SELECT u.id,u.username,u.full_name,u.parent_phone,cs.sort_order FROM class_students cs
+    SELECT u.id,u.username,u.full_name,u.parent_phone,u.plain_password,cs.sort_order FROM class_students cs
     JOIN users u ON cs.student_id=u.id WHERE cs.class_id=? AND u.active=1
   `).all(req.params.id);
   students.sort((a, b) => (cls.custom_student_order ? (a.sort_order - b.sort_order) : 0) || compareVietnameseName(a.full_name, b.full_name));
