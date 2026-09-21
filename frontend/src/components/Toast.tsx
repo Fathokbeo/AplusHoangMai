@@ -37,7 +37,15 @@ export default function ToastContainer() {
   const icons = { success: CheckCircle, error: XCircle, info: AlertCircle };
 
   return (
-    <div style={{ position: 'fixed', top: 16, right: 16, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 8, minWidth: 280 }}>
+    // pointerEvents 'none': thùng chứa này luôn nằm trên màn hình kề cả khi không có thông báo nào.
+    // Nếu để mặc định, nó nuốt mọi thao tác chạm trong vùng của mình — trên điện thoại khi thu phóng
+    // trang thì vùng đó phủ gần hết màn hình, làm các nút bên dưới (ví dụ nút 3 gạch) bấm không ăn.
+    // Từng thẻ thông báo vẫn nhận chạm nhờ pointerEvents 'auto' bên dưới.
+    <div style={{
+      position: 'fixed', top: 16, right: 16, zIndex: 9999,
+      display: 'flex', flexDirection: 'column', gap: 8,
+      width: 280, maxWidth: 'calc(100vw - 32px)', pointerEvents: 'none',
+    }}>
       {toasts.map(({ id, message, type }) => {
         const Icon = icons[type];
         return (
@@ -53,7 +61,8 @@ export default function ToastContainer() {
               gap: 10,
               boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
               animation: 'slideUp 0.25s ease',
-              maxWidth: 360,
+              maxWidth: '100%',
+              pointerEvents: 'auto',
             }}
           >
             <Icon size={18} style={{ flexShrink: 0 }} />
