@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../../lib/api';
+import { buildContentSections } from '../../lib/classContent';
 import VideoPlayer from '../../components/VideoPlayer';
 import Modal from '../../components/Modal';
 import GradingDetails from '../../components/GradingDetails';
@@ -58,6 +59,12 @@ export default function StudentClassDetail() {
   const isMobile = useIsMobile();
 
   useEffect(() => { fetchClass(); }, [id]);
+
+  // Bài chưa phân chương hiện thẳng ngoài, không có khung chương để bấm mở — mở sẵn 2 mục cho dễ thấy.
+  useEffect(() => {
+    if (!cls) return;
+    setExpandedSections((prev) => new Set(prev).add('orphan-lessons').add('orphan-homework'));
+  }, [cls?.id]);
 
   // Tự làm mới khi có bài vừa nộp đang được AI chấm nền, để cập nhật điểm
   useEffect(() => {
@@ -178,22 +185,12 @@ export default function StudentClassDetail() {
 
   const chapters: any[] = cls.chapters || [];
 
-  // Nội dung lớp gom theo chương, tách riêng Đại số (hiển thị trước) và Hình học (sau) — mỗi môn
-  // đánh số thứ tự độc lập. Cuối cùng là nhóm "Chưa phân chương" nếu có bài lẻ chưa gán chương.
+  // Nội dung lớp gom theo chương: Đại số → Hình học → các phần "Khác" do giáo viên đặt tên.
+  // Phần nào không có chương thì không hiện. Bài chưa gán chương: học sinh KHÔNG thấy khung
+  // "Chưa phân chương" như bên giáo viên, mà thấy thẳng bài giảng & bài tập ở cuối trang.
   const lessonsAll: any[] = cls.lessons || [];
   const homeworkAll: any[] = cls.homework || [];
-  const toChapterGroup = (ch: any) => ({
-    key: String(ch.id), chapter: ch,
-    lessons: lessonsAll.filter((l: any) => l.chapter_id === ch.id),
-    homework: homeworkAll.filter((h: any) => h.chapter_id === ch.id),
-  });
-  const algebraGroups = chapters.filter((ch: any) => (ch.subject || 'algebra') === 'algebra').map(toChapterGroup);
-  const geometryGroups = chapters.filter((ch: any) => ch.subject === 'geometry').map(toChapterGroup);
-  const orphanLessons = lessonsAll.filter((l: any) => !l.chapter_id || !chapters.some((c: any) => c.id === l.chapter_id));
-  const orphanHomework = homeworkAll.filter((h: any) => !h.chapter_id || !chapters.some((c: any) => c.id === h.chapter_id));
-  const orphanGroup = (orphanLessons.length || orphanHomework.length)
-    ? { key: 'orphan', chapter: null, lessons: orphanLessons, homework: orphanHomework }
-    : null;
+  const { sections: contentSections, orphan: orphanGroup } = buildContentSections(chapters, lessonsAll, homeworkAll);
   const scheduleAssistant = (cls.assistants || []).find((a: any) => a.id === scheduleAssistantId) || null;
 
   const toggleChapter = (key: string) => setExpandedChapters((prev) => {
@@ -440,6 +437,36 @@ export default function StudentClassDetail() {
   };
 
   // Một chương dạng accordion: bấm để mở/đóng, mở ra mới thấy bài giảng & bài tập
+  // Ruột một nhóm: danh sách bài giảng & bài tập. standalone = hiện thẳng (bài chưa phân chương),
+  // không nằm trong khung chương nên không cần đường kẻ trên và có đệm trên đầy đủ.
+  const renderGroupBody = (group: any, standalone = false) => {
+    const lc = group.lessons.length, hc = group.homework.length;
+    const lessonsKey = `${group.key}-lessons`, hwKey = `${group.key}-homework`;
+    const lessonsOpen = expandedSections.has(lessonsKey), hwOpen = expandedSections.has(hwKey);
+    return (
+      <div style={{ padding: standalone ? '1.25rem' : '0 1.25rem 1.25rem', display: 'flex', flexDirection: 'column', gap: 16, borderTop: standalone ? 'none' : '1px solid #F0F0F0' }}>
+        <div style={{ marginTop: standalone ? 0 : 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, cursor: lc > 0 ? 'pointer' : 'default' }} onClick={() => lc > 0 && toggleSection(lessonsKey)}>
+            {lc > 0 && (lessonsOpen ? <ChevronDown size={14} color="#aaa" /> : <ChevronRight size={14} color="#aaa" />)}
+            <BookOpen size={14} color="#1565C0" /><span style={{ fontWeight: 700, fontSize: '0.85rem' }}>Bài giảng ({lc})</span>
+          </div>
+          {lc === 0 ? <div style={{ fontSize: '0.8rem', color: '#aaa' }}>Chưa có bài giảng</div> : lessonsOpen && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{group.lessons.map((l: any, i: number) => renderLessonCard(l, i))}</div>
+          )}
+        </div>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, cursor: hc > 0 ? 'pointer' : 'default' }} onClick={() => hc > 0 && toggleSection(hwKey)}>
+            {hc > 0 && (hwOpen ? <ChevronDown size={14} color="#aaa" /> : <ChevronRight size={14} color="#aaa" />)}
+            <ClipboardList size={14} color="#6A1B9A" /><span style={{ fontWeight: 700, fontSize: '0.85rem' }}>Bài tập ({hc})</span>
+          </div>
+          {hc === 0 ? <div style={{ fontSize: '0.8rem', color: '#aaa' }}>Chưa có bài tập</div> : hwOpen && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{group.homework.map((hw: any, i: number) => renderHomeworkCard(hw, i))}</div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderChapterAccordion = (group: any, idx: number) => {
     const open = expandedChapters.has(group.key);
     const lc = group.lessons.length, hc = group.homework.length;
@@ -447,40 +474,15 @@ export default function StudentClassDetail() {
       <div key={group.key} className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <div onClick={() => toggleChapter(group.key)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '1rem 1.25rem', cursor: 'pointer' }}>
           {open ? <ChevronDown size={18} color="#888" /> : <ChevronRight size={18} color="#888" />}
-          <div style={{ width: 36, height: 36, background: group.chapter ? '#E3F2FD' : '#F5F5F5', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            {group.chapter ? <span style={{ fontWeight: 700, color: '#1565C0', fontSize: '0.9rem' }}>{idx + 1}</span> : <Layers size={16} color="#999" />}
+          <div style={{ width: 36, height: 36, background: '#E3F2FD', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <span style={{ fontWeight: 700, color: '#1565C0', fontSize: '0.9rem' }}>{idx + 1}</span>
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 700, fontSize: '0.95rem', color: group.chapter ? '#1A1A2E' : '#777' }}>{group.chapter ? group.chapter.title : 'Chưa phân chương'}</div>
+            <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#1A1A2E' }}>{group.chapter.title}</div>
             <div style={{ fontSize: '0.78rem', color: '#888', marginTop: 2 }}>{lc} bài giảng · {hc} bài tập</div>
           </div>
         </div>
-        {open && (() => {
-          const lessonsKey = `${group.key}-lessons`, hwKey = `${group.key}-homework`;
-          const lessonsOpen = expandedSections.has(lessonsKey), hwOpen = expandedSections.has(hwKey);
-          return (
-          <div style={{ padding: '0 1.25rem 1.25rem', display: 'flex', flexDirection: 'column', gap: 16, borderTop: '1px solid #F0F0F0' }}>
-            <div style={{ marginTop: 14 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, cursor: lc > 0 ? 'pointer' : 'default' }} onClick={() => lc > 0 && toggleSection(lessonsKey)}>
-                {lc > 0 && (lessonsOpen ? <ChevronDown size={14} color="#aaa" /> : <ChevronRight size={14} color="#aaa" />)}
-                <BookOpen size={14} color="#1565C0" /><span style={{ fontWeight: 700, fontSize: '0.85rem' }}>Bài giảng ({lc})</span>
-              </div>
-              {lc === 0 ? <div style={{ fontSize: '0.8rem', color: '#aaa' }}>Chưa có bài giảng</div> : lessonsOpen && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{group.lessons.map((l: any, i: number) => renderLessonCard(l, i))}</div>
-              )}
-            </div>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, cursor: hc > 0 ? 'pointer' : 'default' }} onClick={() => hc > 0 && toggleSection(hwKey)}>
-                {hc > 0 && (hwOpen ? <ChevronDown size={14} color="#aaa" /> : <ChevronRight size={14} color="#aaa" />)}
-                <ClipboardList size={14} color="#6A1B9A" /><span style={{ fontWeight: 700, fontSize: '0.85rem' }}>Bài tập ({hc})</span>
-              </div>
-              {hc === 0 ? <div style={{ fontSize: '0.8rem', color: '#aaa' }}>Chưa có bài tập</div> : hwOpen && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{group.homework.map((hw: any, i: number) => renderHomeworkCard(hw, i))}</div>
-              )}
-            </div>
-          </div>
-          );
-        })()}
+        {open && renderGroupBody(group)}
       </div>
     );
   };
@@ -548,33 +550,24 @@ export default function StudentClassDetail() {
 
       {/* Danh sách chương → mở chương ra mới thấy bài giảng & bài tập. Đại số trước, Hình học sau. */}
       {activeTab === 'content' && (
-        algebraGroups.length === 0 && geometryGroups.length === 0 && !orphanGroup ? (
+        contentSections.length === 0 && !orphanGroup ? (
           <div style={{ textAlign: 'center', color: '#999', padding: '2rem', background: 'white', borderRadius: 12 }}>Chưa có nội dung</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
-            {algebraGroups.length > 0 && (
-              <div>
+            {contentSections.map((sec) => (
+              <div key={sec.key}>
                 <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#1A1A2E', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 7 }}>
-                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#1565C0', display: 'inline-block' }} /> Đại số
+                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: sec.color, display: 'inline-block' }} /> {sec.label}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {algebraGroups.map((g, i) => renderChapterAccordion(g, i))}
+                  {sec.groups.map((g, i) => renderChapterAccordion(g, i))}
                 </div>
               </div>
-            )}
-            {geometryGroups.length > 0 && (
-              <div>
-                <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#1A1A2E', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 7 }}>
-                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#6A1B9A', display: 'inline-block' }} /> Hình học
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {geometryGroups.map((g, i) => renderChapterAccordion(g, i))}
-                </div>
-              </div>
-            )}
+            ))}
+            {/* Bài chưa phân chương: hiện thẳng bài giảng & bài tập, không có khung "Chưa phân chương" */}
             {orphanGroup && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {renderChapterAccordion(orphanGroup, 0)}
+              <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                {renderGroupBody(orphanGroup, true)}
               </div>
             )}
           </div>

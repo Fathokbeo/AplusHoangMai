@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../../lib/api';
+import { buildContentSections, chapterSubject, existingSectionTitles, sectionKey, type ChapterSubject } from '../../lib/classContent';
 import Modal from '../../components/Modal';
 import VideoPlayer from '../../components/VideoPlayer';
 import FileViewer from '../../components/FileViewer';
@@ -81,7 +82,7 @@ export default function ClassDetail() {
   const [hwParts, setHwParts] = useState<PartsConfig>(emptyPartsConfig());
   const [hsaConfig, setHsaConfig] = useState<HsaConfig>(emptyHsaConfig());
   const [hwFiles, setHwFiles] = useState<{ pdf?: File; answer?: File }>({});
-  const [chapterForm, setChapterForm] = useState({ title: '', chapter_order: '0', subject: 'algebra' as 'algebra' | 'geometry' });
+  const [chapterForm, setChapterForm] = useState({ title: '', chapter_order: '0', subject: 'algebra' as ChapterSubject, section_title: '' });
   const [studentSearch, setStudentSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   // Xem mật khẩu học sinh: bật "Hiện mật khẩu" để lộ hết, hoặc bấm mắt từng dòng
@@ -348,10 +349,11 @@ export default function ClassDetail() {
   const nextOrder = (items: any[] | undefined, field: string) =>
     ((items && items.length) ? Math.max(0, ...items.map((x: any) => Number(x[field]) || 0)) : 0) + 1;
 
-  // Số thứ tự chương kế tiếp, TÍNH RIÊNG theo môn (Đại số/Hình học độc lập nhau). excludeId: bỏ qua
-  // chính chương đang sửa khi đổi môn, để không tự cộng thêm chương đó vào phép đếm.
-  const nextChapterOrder = (chaptersList: any[] | undefined, subject: 'algebra' | 'geometry', excludeId?: number) =>
-    nextOrder((chaptersList || []).filter((c: any) => (c.subject || 'algebra') === subject && c.id !== excludeId), 'chapter_order');
+  // Số thứ tự chương kế tiếp, TÍNH RIÊNG theo từng phần (Đại số / Hình học / mỗi tên phần trong mục Khác
+  // đều đánh số độc lập nhau). excludeId: bỏ qua chính chương đang sửa khi đổi phần, để không tự cộng thêm nó vào phép đếm.
+  const nextChapterOrder = (chaptersList: any[] | undefined, subject: ChapterSubject, sectionTitle: string, excludeId?: number) =>
+    nextOrder((chaptersList || []).filter((c: any) => chapterSubject(c) === subject && c.id !== excludeId
+      && (subject !== 'other' || sectionKey(c.section_title) === sectionKey(sectionTitle))), 'chapter_order');
 
   // Bài giảng/bài tập CÙNG một chương (chapterId null/'' = nhóm "Chưa phân chương"). Dùng để đánh số
   // ĐỘC LẬP theo từng chương — bài giảng và bài tập cũng đánh số riêng, không liên quan nhau.
@@ -373,13 +375,13 @@ export default function ClassDetail() {
   // Chapter CRUD
   const openCreateChapter = () => {
     setEditingChapter(null);
-    setChapterForm({ title: '', chapter_order: String(nextChapterOrder(cls?.chapters, 'algebra')), subject: 'algebra' });
+    setChapterForm({ title: '', chapter_order: String(nextChapterOrder(cls?.chapters, 'algebra', '')), subject: 'algebra', section_title: '' });
     setChapterModal(true);
   };
 
   const openEditChapter = (ch: any) => {
     setEditingChapter(ch);
-    setChapterForm({ title: ch.title, chapter_order: String(ch.chapter_order), subject: ch.subject === 'geometry' ? 'geometry' : 'algebra' });
+    setChapterForm({ title: ch.title, chapter_order: String(ch.chapter_order), subject: chapterSubject(ch), section_title: ch.section_title || '' });
     setChapterModal(true);
   };
 
@@ -662,22 +664,17 @@ export default function ClassDetail() {
     (a: any) => a.full_name || ''
   );
 
-  // Nội dung lớp gom theo chương, tách riêng Đại số (hiển thị trước) và Hình học (sau) — mỗi môn
-  // đánh số thứ tự độc lập. Cuối cùng là nhóm "Chưa phân chương" nếu có bài lẻ chưa gán chương.
+  // Nội dung lớp gom theo chương: Đại số → Hình học → các phần "Khác" do giáo viên tự đặt tên.
+  // Phần nào không có chương nào thì không hiện. Cuối cùng là nhóm "Chưa phân chương" nếu có bài lẻ
+  // chưa gán chương — nhóm này chỉ giáo viên thấy, học sinh chỉ thấy thẳng bài giảng & bài tập bên trong.
   const lessonsAll: any[] = cls.lessons || [];
   const homeworkAll: any[] = cls.homework || [];
-  const toChapterGroup = (ch: any) => ({
-    key: String(ch.id), chapter: ch,
-    lessons: lessonsAll.filter((l: any) => l.chapter_id === ch.id),
-    homework: homeworkAll.filter((h: any) => h.chapter_id === ch.id),
-  });
-  const algebraGroups = chapters.filter((ch: any) => (ch.subject || 'algebra') === 'algebra').map(toChapterGroup);
-  const geometryGroups = chapters.filter((ch: any) => ch.subject === 'geometry').map(toChapterGroup);
-  const orphanLessons = lessonsAll.filter((l: any) => !l.chapter_id || !chapters.some((c: any) => c.id === l.chapter_id));
-  const orphanHomework = homeworkAll.filter((h: any) => !h.chapter_id || !chapters.some((c: any) => c.id === h.chapter_id));
-  const orphanGroup = (orphanLessons.length || orphanHomework.length)
-    ? { key: 'orphan', chapter: null, lessons: orphanLessons, homework: orphanHomework }
-    : null;
+  const { sections: contentSections, orphan: orphanGroup } = buildContentSections(chapters, lessonsAll, homeworkAll);
+  const sectionTitleSuggestions = existingSectionTitles(chapters);
+  // Ô chọn chương (khi thêm bài giảng/bài tập): kèm tên phần để khỏi nhầm chương trùng tên giữa các phần.
+  const chapterOptions = contentSections.flatMap((sec) =>
+    sec.groups.map((g: any) => <option key={g.chapter.id} value={g.chapter.id}>{sec.label} · {g.chapter.title}</option>)
+  );
 
   const toggleChapter = (key: string) => setExpandedChapters((prev) => {
     const next = new Set(prev);
@@ -976,36 +973,22 @@ export default function ClassDetail() {
             <button className="btn btn-secondary" onClick={() => openCreateLesson()}><BookOpen size={15} /> Thêm bài giảng</button>
             <button className="btn btn-primary" onClick={() => openCreateHw()}><ClipboardList size={15} /> Thêm bài tập</button>
           </div>
-          {algebraGroups.length === 0 && geometryGroups.length === 0 && !orphanGroup ? (
+          {contentSections.length === 0 && !orphanGroup ? (
             <div style={{ textAlign: 'center', color: '#999', padding: '2rem', background: 'white', borderRadius: 12 }}>
               Chưa có nội dung. Hãy thêm chương, bài giảng hoặc bài tập.
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
-              <div>
-                <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#1A1A2E', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 7 }}>
-                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#1565C0', display: 'inline-block' }} /> Đại số
-                </div>
-                {algebraGroups.length === 0 ? (
-                  <div style={{ fontSize: '0.82rem', color: '#aaa' }}>Chưa có chương Đại số</div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {algebraGroups.map((g, i) => renderChapterAccordion(g, i))}
+              {contentSections.map((sec) => (
+                <div key={sec.key}>
+                  <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#1A1A2E', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <span style={{ width: 9, height: 9, borderRadius: '50%', background: sec.color, display: 'inline-block' }} /> {sec.label}
                   </div>
-                )}
-              </div>
-              <div>
-                <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#1A1A2E', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 7 }}>
-                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#6A1B9A', display: 'inline-block' }} /> Hình học
-                </div>
-                {geometryGroups.length === 0 ? (
-                  <div style={{ fontSize: '0.82rem', color: '#aaa' }}>Chưa có chương Hình học</div>
-                ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {geometryGroups.map((g, i) => renderChapterAccordion(g, i))}
+                    {sec.groups.map((g, i) => renderChapterAccordion(g, i))}
                   </div>
-                )}
-              </div>
+                </div>
+              ))}
               {orphanGroup && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {renderChapterAccordion(orphanGroup, 0)}
@@ -1240,7 +1223,7 @@ export default function ClassDetail() {
         <div className="form-group">
           <label className="label">Phân môn</label>
           <div style={{ display: 'flex', gap: 4, background: '#F5F5F5', padding: 4, borderRadius: 10 }}>
-            {(['algebra', 'geometry'] as const).map((subj) => (
+            {(['algebra', 'geometry', 'other'] as const).map((subj) => (
               <button key={subj} type="button" className="btn"
                 style={{
                   flex: 1, border: 'none',
@@ -1250,17 +1233,34 @@ export default function ClassDetail() {
                 }}
                 onClick={() => setChapterForm({
                   ...chapterForm, subject: subj,
-                  chapter_order: String(nextChapterOrder(cls?.chapters, subj, editingChapter?.id)),
+                  chapter_order: String(nextChapterOrder(cls?.chapters, subj, chapterForm.section_title, editingChapter?.id)),
                 })}>
-                {subj === 'algebra' ? 'Đại số' : 'Hình học'}
+                {subj === 'algebra' ? 'Đại số' : subj === 'geometry' ? 'Hình học' : 'Khác'}
               </button>
             ))}
           </div>
         </div>
+        {chapterForm.subject === 'other' && (
+          <div className="form-group">
+            <label className="label">Tên phần</label>
+            <input className="input" list="chapter-section-titles" placeholder="vd: Ôn thi HSA, Chuyên đề nâng cao..."
+              value={chapterForm.section_title}
+              onChange={(e) => setChapterForm({
+                ...chapterForm, section_title: e.target.value,
+                chapter_order: String(nextChapterOrder(cls?.chapters, 'other', e.target.value, editingChapter?.id)),
+              })} />
+            <datalist id="chapter-section-titles">
+              {sectionTitleSuggestions.map((t) => <option key={t} value={t} />)}
+            </datalist>
+            <div style={{ fontSize: '0.75rem', color: '#888', marginTop: 4 }}>
+              Các chương cùng tên phần sẽ gom chung một mục mang tên đó. Để trống thì mục hiện tên là “Khác”.
+            </div>
+          </div>
+        )}
         <div className="form-group">
           <label className="label">Thứ tự</label>
           <input className="input" type="number" min={0} value={chapterForm.chapter_order} onChange={(e) => setChapterForm({ ...chapterForm, chapter_order: e.target.value })} />
-          <div style={{ fontSize: '0.75rem', color: '#888', marginTop: 4 }}>Số nhỏ hiển thị trước. Đại số và Hình học đánh số độc lập với nhau.</div>
+          <div style={{ fontSize: '0.75rem', color: '#888', marginTop: 4 }}>Số nhỏ hiển thị trước. Mỗi phần (Đại số, Hình học, và từng tên phần trong mục Khác) đánh số độc lập với nhau.</div>
         </div>
       </Modal>
 
@@ -1375,7 +1375,7 @@ export default function ClassDetail() {
           <label className="label">Chương</label>
           <select className="input" value={lessonForm.chapter_id} onChange={(e) => setLessonForm({ ...lessonForm, chapter_id: e.target.value })}>
             <option value="">— Chưa phân chương —</option>
-            {chapters.map((ch) => <option key={ch.id} value={ch.id}>{ch.title}</option>)}
+            {chapterOptions}
           </select>
         </div>
         <div className="form-group">
@@ -1505,7 +1505,7 @@ export default function ClassDetail() {
             <label className="label">Chương</label>
             <select className="input" value={hwForm.chapter_id} onChange={(e) => setHwForm({ ...hwForm, chapter_id: e.target.value })}>
               <option value="">— Chưa phân chương —</option>
-              {chapters.map((ch) => <option key={ch.id} value={ch.id}>{ch.title}</option>)}
+              {chapterOptions}
             </select>
           </div>
           <div className="form-group">

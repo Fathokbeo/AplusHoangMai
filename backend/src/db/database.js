@@ -339,6 +339,12 @@ function initSchema() {
   if (!chapterCols.some(c => c.name === 'subject')) {
     db.exec("ALTER TABLE chapters ADD COLUMN subject TEXT DEFAULT 'algebra'");
   }
+  // Migration: ngoài Đại số/Hình học còn mục 'other' (Khác) — giáo viên tự đặt tên phần.
+  // section_title: tên phần do giáo viên nhập (chỉ dùng khi subject='other'); các chương cùng
+  // section_title gom chung một tiêu đề. Để trống thì hiển thị là "Khác".
+  if (!chapterCols.some(c => c.name === 'section_title')) {
+    db.exec('ALTER TABLE chapters ADD COLUMN section_title TEXT');
+  }
   // Migration: "quy chuẩn nhận xét" (JSON) do AI soạn ĐÚNG 1 LẦN khi giáo viên tạo/cập nhật đáp án —
   // dùng để chấm tự động (không dùng AI) tạo nhận xét khái quát cho phần trắc nghiệm/đúng-sai/trả lời ngắn.
   // KHÔNG hiển thị trên web, chỉ dùng nội bộ khi chấm bài (xem gradingQueue.js).

@@ -476,21 +476,30 @@ router.put('/classes/:id/students/reorder', (req, res) => {
 });
 
 // ── Chapters (chương: nhóm bài giảng & bài tập) ───────────────────────
+// Phân môn: 'algebra' (Đại số) | 'geometry' (Hình học) | 'other' (Khác — giáo viên tự đặt tên phần).
+const normSubject = (s) => (s === 'geometry' || s === 'other' ? s : 'algebra');
+// Tên phần chỉ có nghĩa với mục 'other'; để trống thì phần đó hiển thị là "Khác".
+const normSectionTitle = (subject, raw) => {
+  if (normSubject(subject) !== 'other') return null;
+  const t = String(raw ?? '').trim();
+  return t ? t.slice(0, 120) : null;
+};
+
 router.post('/classes/:id/chapters', (req, res) => {
-  const { title, chapter_order, subject } = req.body;
+  const { title, chapter_order, subject, section_title } = req.body;
   if (!title) return res.status(400).json({ message: 'Cần tên chương' });
   const db = getDb();
   const cls = db.prepare('SELECT * FROM classes WHERE id=?').get(req.params.id);
   if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp' });
   if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
   const result = db.prepare(
-    'INSERT INTO chapters (class_id,title,chapter_order,subject) VALUES (?,?,?,?)'
-  ).run(req.params.id, title, parseInt(chapter_order) || 0, subject === 'geometry' ? 'geometry' : 'algebra');
+    'INSERT INTO chapters (class_id,title,chapter_order,subject,section_title) VALUES (?,?,?,?,?)'
+  ).run(req.params.id, title, parseInt(chapter_order) || 0, normSubject(subject), normSectionTitle(subject, section_title));
   res.status(201).json({ id: result.lastInsertRowid, title });
 });
 
 router.put('/chapters/:id', (req, res) => {
-  const { title, chapter_order, subject } = req.body;
+  const { title, chapter_order, subject, section_title } = req.body;
   const db = getDb();
   const ch = db.prepare('SELECT ch.*,c.teacher_id FROM chapters ch JOIN classes c ON ch.class_id=c.id WHERE ch.id=?').get(req.params.id);
   if (!ch) return res.status(404).json({ message: 'Không tìm thấy' });
@@ -498,7 +507,13 @@ router.put('/chapters/:id', (req, res) => {
   const sets = []; const vals = [];
   if (title) { sets.push('title=?'); vals.push(title); }
   if (chapter_order !== undefined) { sets.push('chapter_order=?'); vals.push(parseInt(chapter_order) || 0); }
-  if (subject !== undefined) { sets.push('subject=?'); vals.push(subject === 'geometry' ? 'geometry' : 'algebra'); }
+  // Đổi phân môn thì tính lại luôn tên phần (chuyển khỏi 'other' là xoá tên phần cũ).
+  if (subject !== undefined) {
+    sets.push('subject=?'); vals.push(normSubject(subject));
+    sets.push('section_title=?'); vals.push(normSectionTitle(subject, section_title !== undefined ? section_title : ch.section_title));
+  } else if (section_title !== undefined) {
+    sets.push('section_title=?'); vals.push(normSectionTitle(ch.subject, section_title));
+  }
   if (sets.length > 0) { vals.push(req.params.id); db.prepare(`UPDATE chapters SET ${sets.join(',')} WHERE id=?`).run(...vals); }
   res.json({ message: 'Đã cập nhật' });
 });
