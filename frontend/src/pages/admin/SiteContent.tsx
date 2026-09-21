@@ -27,14 +27,6 @@ const COLLECTIONS: Record<string, { label: string; dir: string; titleKey: string
       { key: 'description', label: 'Giới thiệu', type: 'textarea' },
     ],
   },
-  'featured-courses': {
-    label: 'Khóa học tiêu biểu', dir: 'featured_courses', titleKey: 'title',
-    fields: [
-      { key: 'title', label: 'Tên khóa học', type: 'text', required: true },
-      { key: 'student_count', label: 'Số học sinh', type: 'text', placeholder: 'vd: 120 học sinh' },
-      { key: 'description', label: 'Mô tả', type: 'textarea' },
-    ],
-  },
   'achievements': {
     label: 'Kinh nghiệm & Thành tích', dir: 'achievements', titleKey: 'title',
     fields: [
@@ -243,7 +235,6 @@ function SettingsForm() {
 const TABS = [
   { key: 'featured-students', label: 'Học sinh tiêu biểu' },
   { key: 'staff', label: 'Giáo viên & Trợ giảng' },
-  { key: 'featured-courses', label: 'Khóa học tiêu biểu' },
   { key: 'achievements', label: 'Kinh nghiệm' },
   { key: 'settings', label: 'Liên hệ & Trang chủ' },
 ];
@@ -252,7 +243,10 @@ export default function SiteContent() {
   const [tab, setTab] = useState('featured-students');
   return (
     <div className="fade-in">
-      <h1 className="page-title" style={{ marginBottom: '1.25rem' }}>Nội dung trang giới thiệu</h1>
+      <h1 className="page-title" style={{ marginBottom: '0.5rem' }}>Nội dung trang giới thiệu</h1>
+      <p style={{ margin: '0 0 1.25rem', color: '#888', fontSize: '0.86rem' }}>
+        Mục <b>Khóa học tiêu biểu</b> trên trang chủ lấy thẳng từ <b>Quản lý khóa học</b>, không cần nhập riêng ở đây nữa.
+      </p>
 
       <div style={{ display: 'flex', gap: 4, background: '#F5F5F5', padding: 4, borderRadius: 10, marginBottom: '1.5rem', flexWrap: 'wrap', width: 'fit-content' }}>
         {TABS.map((t) => (

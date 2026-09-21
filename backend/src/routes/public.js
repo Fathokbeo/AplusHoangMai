@@ -7,9 +7,15 @@ router.get('/ads', (req, res) => {
   res.json(db.prepare('SELECT * FROM advertisements WHERE active=1 ORDER BY ad_order,created_at').all());
 });
 
+// Danh sách khóa học công khai — kèm sĩ số để dùng luôn cho mục "Khóa học tiêu biểu" ở trang chủ
 router.get('/courses', (req, res) => {
   const db = getDb();
-  res.json(db.prepare('SELECT id,title,description,thumbnail FROM courses WHERE active=1 ORDER BY created_at DESC').all());
+  res.json(db.prepare(`
+    SELECT c.id, c.title, c.description, c.thumbnail,
+    (SELECT COUNT(DISTINCT cs.student_id) FROM class_students cs JOIN classes cl ON cs.class_id=cl.id
+     WHERE cl.course_id=c.id AND cl.active=1) student_count
+    FROM courses c WHERE c.active=1 ORDER BY c.created_at DESC
+  `).all());
 });
 
 // Chi tiết công khai 1 khóa học: thông tin giáo viên, sĩ số, tên các chương (không kèm bài giảng/bài tập bên trong)

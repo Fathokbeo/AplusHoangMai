@@ -6,11 +6,7 @@ import Layout from './components/Layout';
 
 import Login from './pages/Login';
 import Home from './pages/Home';
-import FeaturedStudents from './pages/public/FeaturedStudents';
-import OurTeachers from './pages/public/OurTeachers';
-import FeaturedCourses from './pages/public/FeaturedCourses';
 import CourseDetail from './pages/public/CourseDetail';
-import Achievements from './pages/public/Achievements';
 
 import AdminDashboard from './pages/admin/AdminDashboard';
 import UserManagement from './pages/admin/UserManagement';
@@ -53,11 +49,12 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
-      <Route path="/hoc-sinh" element={<FeaturedStudents />} />
-      <Route path="/giao-vien" element={<OurTeachers />} />
-      <Route path="/khoa-hoc" element={<FeaturedCourses />} />
+      {/* Các mục giới thiệu nằm ngay trên trang chủ: giữ đường dẫn cũ, chuyển hướng về đúng mục */}
+      <Route path="/hoc-sinh" element={<Navigate to="/#hoc-sinh" replace />} />
+      <Route path="/giao-vien" element={<Navigate to="/#giao-vien" replace />} />
+      <Route path="/khoa-hoc" element={<Navigate to="/#khoa-hoc" replace />} />
+      <Route path="/kinh-nghiem" element={<Navigate to="/#kinh-nghiem" replace />} />
       <Route path="/courses/:id" element={<CourseDetail />} />
-      <Route path="/kinh-nghiem" element={<Achievements />} />
       <Route path="/login" element={user ? <Navigate to={`/${user.role}`} replace /> : <Login />} />
 
       {/* Admin */}
