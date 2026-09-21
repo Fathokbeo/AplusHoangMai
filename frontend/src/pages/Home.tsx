@@ -256,7 +256,7 @@ export default function Home() {
       {/* 4. Kinh nghiệm & Thành tích */}
       <Section id="kinh-nghiem" title="Kinh nghiệm & Thành tích" subtitle="Hành trình phát triển của trung tâm qua các năm" icon={Award} color="#E65100" alt>
         {achievements.length === 0 ? <Empty text="Chưa có thông tin thành tích" /> : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1100 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
             {achievements.map((a, i) => (
               <div key={a.id} style={{
                 background: 'white', borderRadius: 16, overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
