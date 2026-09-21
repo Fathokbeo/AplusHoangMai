@@ -2,6 +2,7 @@ import { useState, useEffect, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
+import { PAGE_MAX } from '../lib/layout';
 import { Phone, MapPin, Clock, Mail, ExternalLink, Menu, X, LogIn, LogOut, User } from 'lucide-react';
 
 const NAV = [
@@ -42,7 +43,7 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
         boxShadow: solid ? '0 2px 12px rgba(0,0,0,0.1)' : 'none',
         transition: 'all 0.3s', padding: '0 2rem',
       }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 70 }}>
+        <div style={{ maxWidth: PAGE_MAX, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 70 }}>
           <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
             <img src="/logo.jpg" alt="Logo" style={{ height: 44, borderRadius: 8 }} />
             <div>
@@ -115,7 +116,7 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
 
       {/* Contact */}
       <section id="contact" style={{ background: '#F0F0F3', padding: '2.5rem 2rem' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+        <div style={{ maxWidth: PAGE_MAX, margin: '0 auto' }}>
           <h2 style={{ fontSize: '1.4rem', fontWeight: 800, marginBottom: '1.25rem', color: '#1A1A2E' }}>
             <Phone size={20} style={{ verticalAlign: 'middle', marginRight: 8, color: '#C62828' }} />
             Liên hệ

@@ -4,6 +4,7 @@ import AdCarousel from '../components/AdCarousel';
 import PublicLayout from '../components/PublicLayout';
 import FacebookIcon from '../components/FacebookIcon';
 import api from '../lib/api';
+import { PAGE_MAX } from '../lib/layout';
 import { BookOpen, ChevronRight, ChevronDown, Trophy, Users, GraduationCap, Award, Calendar, UserCircle, Phone } from 'lucide-react';
 
 /* Mỗi mục = 1 ô thống kê ở trên + 1 khối nội dung ngay trên trang chủ.
@@ -28,7 +29,7 @@ function scrollToSection(id: string) {
 function Section({ id, title, subtitle, icon: Icon, color, alt, children }: any) {
   return (
     <section id={id} style={{ background: alt ? 'white' : 'transparent', scrollMarginTop: SCROLL_OFFSET, padding: '2.25rem 2rem' }}>
-      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+      <div style={{ maxWidth: PAGE_MAX, margin: '0 auto' }}>
         <div style={{ marginBottom: '1.5rem' }}>
           <h2 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 800, color: '#1A1A2E', display: 'flex', alignItems: 'center', gap: 10 }}>
             <Icon size={22} color={color} /> {title}
@@ -120,7 +121,7 @@ export default function Home() {
   return (
     <PublicLayout>
       {/* Hero / Carousel */}
-      <section style={{ maxWidth: 1200, margin: '0 auto', padding: '2rem 2rem 0' }}>
+      <section style={{ maxWidth: PAGE_MAX, margin: '0 auto', padding: '2rem 2rem 0' }}>
         {ads.length > 0 ? (
           <AdCarousel ads={ads} />
         ) : (
@@ -142,7 +143,7 @@ export default function Home() {
       </section>
 
       {/* Thống kê — mỗi ô là lối tắt cuộn xuống mục tương ứng bên dưới */}
-      <section style={{ maxWidth: 1200, margin: '0 auto', padding: '1.5rem 2rem 1rem' }}>
+      <section style={{ maxWidth: PAGE_MAX, margin: '0 auto', padding: '1.5rem 2rem 1rem' }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 16 }}>
           {SECTIONS.map(({ id, nav, statLabel, statKey, statFallback, icon: Icon, color, bg }) => (
             <a key={id} href={`#${id}`} onClick={(e) => { e.preventDefault(); scrollToSection(id); }}
@@ -255,7 +256,7 @@ export default function Home() {
       {/* 4. Kinh nghiệm & Thành tích */}
       <Section id="kinh-nghiem" title="Kinh nghiệm & Thành tích" subtitle="Hành trình phát triển của trung tâm qua các năm" icon={Award} color="#E65100" alt>
         {achievements.length === 0 ? <Empty text="Chưa có thông tin thành tích" /> : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1000 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1100 }}>
             {achievements.map((a, i) => (
               <div key={a.id} style={{
                 background: 'white', borderRadius: 16, overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
@@ -282,7 +283,7 @@ export default function Home() {
 
       {/* Features */}
       <section style={{ background: '#1A1A2E', padding: '3rem 2rem' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', textAlign: 'center' }}>
+        <div style={{ maxWidth: PAGE_MAX, margin: '0 auto', textAlign: 'center' }}>
           <h2 style={{ color: 'white', fontWeight: 800, fontSize: '1.5rem', marginBottom: '2rem' }}>Tại sao chọn APLUS Hoàng Mai?</h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 20 }}>
             {[
