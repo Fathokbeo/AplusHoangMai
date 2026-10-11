@@ -313,6 +313,14 @@ function initSchema() {
   if (!subCols.some(c => c.name === 'submit_count')) {
     db.exec('ALTER TABLE submissions ADD COLUMN submit_count INTEGER DEFAULT 0');
   }
+  // Migration: nộp nhiều lần lấy điểm CAO NHẤT — cất lần nộp tốt nhất trước đó trong lúc lần mới chờ chấm
+  // (xem services/bestAttempt.js). best_score tách riêng để SQL dùng COALESCE(score,best_score).
+  if (!subCols.some(c => c.name === 'best_attempt')) {
+    db.exec('ALTER TABLE submissions ADD COLUMN best_attempt TEXT');
+  }
+  if (!subCols.some(c => c.name === 'best_score')) {
+    db.exec('ALTER TABLE submissions ADD COLUMN best_score REAL');
+  }
   // Migration: link Facebook + SĐT của giáo viên/trợ giảng để học sinh liên hệ
   const staffCols = db.prepare("PRAGMA table_info(staff)").all();
   if (!staffCols.some(c => c.name === 'facebook_url')) {

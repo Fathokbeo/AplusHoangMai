@@ -11,6 +11,7 @@ const { computeMaxScore, DEFAULT_POINTS } = require('../services/homeworkScoring
 const { compareVietnameseName } = require('../services/vietnameseName');
 const { generateFeedbackRubric } = require('../services/aiGrading');
 const { redactSecrets } = require('../services/security');
+const { archiveBeforeResubmit, settleBest, parseBest, bestFilenames } = require('../services/bestAttempt');
 
 router.use(authMiddleware);
 
@@ -108,6 +109,14 @@ function submissionFilenames(sub) {
     try { const a = JSON.parse(sub.files); if (Array.isArray(a) && a.length) return a; } catch { /* ignore */ }
   }
   return sub && sub.file_path ? [sub.file_path] : [];
+}
+
+// Bài nộp đang chờ chấm lần mới (score NULL) nhưng có lần trước đã có điểm → trả về kết quả lần
+// trước (điểm cao nhất hiện có), kèm cờ showing_best để giao diện báo "đang chấm lần nộp mới".
+function withBestFallback(sub) {
+  const best = sub.score === null || sub.score === undefined ? parseBest(sub.best_attempt) : null;
+  if (!best) return sub;
+  return { ...sub, score: best.score, feedback: best.feedback, grading_details: best.grading_details, graded_at: best.graded_at, graded_by_ai: best.graded_by_ai, showing_best: true };
 }
 
 // ── Create homework (teacher/admin) ────────────────────────────────────
@@ -244,9 +253,9 @@ router.put(
 router.delete('/homework/:id', requireRole('teacher', 'admin'), (req, res) => {
   const db = getDb();
   // Xóa các bài nộp tham chiếu trước (tránh lỗi FOREIGN KEY)
-  const subs = db.prepare('SELECT file_path,files FROM submissions WHERE homework_id=?').all(req.params.id);
+  const subs = db.prepare('SELECT file_path,files,best_attempt FROM submissions WHERE homework_id=?').all(req.params.id);
   subs.forEach(s => {
-    submissionFilenames(s).forEach(name => {
+    [...submissionFilenames(s), ...bestFilenames(s)].forEach(name => {
       const f = path.join(__dirname, '../../uploads/submissions', name);
       if (fs.existsSync(f)) fs.unlinkSync(f);
     });
@@ -276,9 +285,12 @@ router.get('/homework/:id', (req, res) => {
     const submission = db.prepare('SELECT * FROM submissions WHERE homework_id=? AND student_id=?').get(req.params.id, req.user.id);
     const { grading_note, ...hwPublic } = hw; // ẩn ghi chú chấm của giáo viên
     // Nhận xét + chi tiết từng câu chỉ hiện cùng lúc với đáp án (theo "Thời gian xem đáp án").
-    const safeSubmission = submission
-      ? { ...submission, feedback: canSeeAnswer ? submission.feedback : null, grading_details: canSeeAnswer ? submission.grading_details : null }
+    // Lần nộp mới đang chờ chấm mà đã có lần trước có điểm → hiện kết quả lần trước (điểm cao nhất)
+    const view = submission ? withBestFallback(submission) : null;
+    const safeSubmission = view
+      ? { ...view, feedback: canSeeAnswer ? view.feedback : null, grading_details: canSeeAnswer ? view.grading_details : null }
       : null;
+    if (safeSubmission) delete safeSubmission.best_attempt;
     // Giới hạn số lần nộp bài (nếu giáo viên có đặt): hết hạn hoặc hết lượt đều không cho nộp nữa.
     const attemptsUsed = submission?.submit_count || 0;
     const attemptsLeft = hw.max_attempts ? Math.max(0, hw.max_attempts - attemptsUsed) : null;
@@ -306,7 +318,7 @@ router.get('/homework/:id', (req, res) => {
   const roster = db.prepare(`
     SELECT u.id student_id, u.username, u.full_name, cs.sort_order,
            s.id submission_id, s.file_path, s.files, s.structured_answers, s.submitted_at,
-           s.score, s.feedback, s.graded_at, s.graded_by_ai, s.grading_details, s.grading_status, s.submit_count
+           s.score, s.feedback, s.graded_at, s.graded_by_ai, s.grading_details, s.grading_status, s.submit_count, s.best_score
     FROM class_students cs JOIN users u ON cs.student_id=u.id
     LEFT JOIN submissions s ON s.homework_id=? AND s.student_id=u.id
     WHERE cs.class_id=? AND u.active=1
@@ -403,13 +415,9 @@ router.post(
     const filenames = uploaded.map(f => f.filename);
     const filesJson = filenames.length ? JSON.stringify(filenames) : null;
 
-    if (existing) {
-      // Xóa các file của lần nộp trước
-      submissionFilenames(existing).forEach(name => {
-        const old = path.join(__dirname, '../../uploads/submissions', name);
-        if (fs.existsSync(old)) fs.unlinkSync(old);
-      });
-    }
+    // Nộp lại: cất lần nộp có điểm cao nhất (kèm file) để so với lần mới sau khi chấm; file của lần
+    // không cần giữ thì xóa luôn.
+    const best = existing ? archiveBeforeResubmit(existing) : { bestJson: null, bestScore: null };
 
     // Có đáp án (file tự luận hoặc key objective) → đưa vào hàng đợi chấm AI ('pending'); không có → giáo viên chấm tay (NULL)
     const aiGrade = needsAiGrading(hw);
@@ -418,8 +426,8 @@ router.post(
 
     let submissionId;
     if (existing) {
-      db.prepare('UPDATE submissions SET file_path=?,files=?,structured_answers=?,submitted_at=?,score=NULL,feedback=NULL,grading_details=NULL,graded_at=NULL,graded_by_ai=0,grading_status=?,grading_attempts=0,submit_count=? WHERE id=?')
-        .run(filenames[0] || null, filesJson, structuredJson, now, initialStatus, newSubmitCount, existing.id);
+      db.prepare('UPDATE submissions SET file_path=?,files=?,structured_answers=?,submitted_at=?,score=NULL,feedback=NULL,grading_details=NULL,graded_at=NULL,graded_by_ai=0,grading_status=?,grading_attempts=0,submit_count=?,best_attempt=?,best_score=? WHERE id=?')
+        .run(filenames[0] || null, filesJson, structuredJson, now, initialStatus, newSubmitCount, best.bestJson, best.bestScore, existing.id);
       submissionId = existing.id;
     } else {
       const r = db.prepare('INSERT INTO submissions (homework_id,student_id,file_path,files,structured_answers,submitted_at,grading_status,grading_attempts,submit_count) VALUES (?,?,?,?,?,?,?,0,?)')
@@ -445,7 +453,9 @@ router.put('/submissions/:id/grade', requireRole('teacher', 'admin'), (req, res)
   const db = getDb();
   db.prepare('UPDATE submissions SET score=?,feedback=?,graded_at=?,graded_by_ai=0 WHERE id=?')
     .run(score, feedback, new Date().toISOString(), req.params.id);
-  res.json({ message: 'Đã chấm điểm' });
+  // Học sinh nộp nhiều lần → giữ lần có điểm cao nhất
+  const kept = settleBest(db, req.params.id);
+  res.json({ message: kept === 'best' ? 'Đã chấm điểm — lần nộp trước có điểm cao hơn nên được giữ làm điểm chính thức' : 'Đã chấm điểm' });
 });
 
 // ── Re-grade with AI (giáo viên bấm chấm lại — chờ kết quả ngay) ─────────
@@ -461,7 +471,9 @@ router.post('/submissions/:id/regrade', requireRole('teacher', 'admin'), async (
   try {
     const result = await gradeOne(Number(req.params.id), { force: true });
     if (!result) return res.status(400).json({ message: 'Không thể chấm bài này' });
-    res.json({ message: 'Đã chấm lại', score: result.score, feedback: result.feedback, details: result.details });
+    // gradeOne có thể đã khôi phục lần nộp trước (điểm cao hơn) → đọc lại kết quả chính thức
+    const fin = db.prepare('SELECT score,feedback,grading_details FROM submissions WHERE id=?').get(req.params.id);
+    res.json({ message: 'Đã chấm lại', score: fin.score, feedback: fin.feedback, details: fin.grading_details ? JSON.parse(fin.grading_details) : [] });
   } catch (err) {
     res.status(500).json({ message: 'Lỗi chấm bài: ' + redactSecrets(err.message) });
   }

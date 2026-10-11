@@ -1,5 +1,6 @@
 const path = require('path');
 const fs = require('fs');
+const { bestFilenames } = require('./bestAttempt');
 
 const UP = path.join(__dirname, '../../uploads');
 
@@ -15,12 +16,14 @@ function rmSubmissionFiles(sub) {
   if (sub.files) {
     try { JSON.parse(sub.files).forEach((name) => rmFile('submissions', name)); } catch {}
   }
+  bestFilenames(sub).forEach((name) => rmFile('submissions', name)); // lần nộp điểm cao nhất đang cất
+
 }
 
 // Xóa VĨNH VIỄN một học sinh: toàn bộ bài nộp (+ file), liên kết lớp, rồi tài khoản.
 // Dùng khi xóa lớp/khóa hoặc khi giáo viên xóa hàng loạt → tiết kiệm dữ liệu.
 function hardDeleteStudent(db, studentId) {
-  const subs = db.prepare('SELECT file_path,files FROM submissions WHERE student_id=?').all(studentId);
+  const subs = db.prepare('SELECT file_path,files,best_attempt FROM submissions WHERE student_id=?').all(studentId);
   subs.forEach(rmSubmissionFiles);
   db.prepare('DELETE FROM submissions WHERE student_id=?').run(studentId);
   db.prepare('DELETE FROM homework_attempts WHERE student_id=?').run(studentId);
@@ -39,7 +42,7 @@ function hardDeleteClass(db, classId, { purgeStudents = true } = {}) {
 
   const homeworks = db.prepare('SELECT id,pdf_file,answer_file FROM homework WHERE class_id=?').all(classId);
   for (const hw of homeworks) {
-    const subs = db.prepare('SELECT file_path,files FROM submissions WHERE homework_id=?').all(hw.id);
+    const subs = db.prepare('SELECT file_path,files,best_attempt FROM submissions WHERE homework_id=?').all(hw.id);
     subs.forEach(rmSubmissionFiles);
     db.prepare('DELETE FROM submissions WHERE homework_id=?').run(hw.id);
     db.prepare('DELETE FROM homework_attempts WHERE homework_id=?').run(hw.id);

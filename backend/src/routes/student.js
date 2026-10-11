@@ -4,6 +4,7 @@ const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { stripAnswers, stripHsaAnswers } = require('../services/homeworkParts');
 const { classRanking, studentOverallAverage } = require('../services/classRanking');
+const { parseBest } = require('../services/bestAttempt');
 
 router.use(authMiddleware, requireRole('student'));
 
@@ -50,7 +51,7 @@ router.get('/my-classes/:id', (req, res) => {
   );
   const homework = db.prepare(`
     SELECT h.id,h.class_id,h.chapter_id,h.title,h.description,h.pdf_file,h.answer_file,h.solution_video_url,h.due_date,h.answer_visible_date,h.max_score,h.created_at,h.parts_config,h.max_attempts,h.exam_type,h.hsa_config,h.time_limit_minutes,
-           s.id submission_id,s.score,s.feedback,s.grading_details,s.submitted_at,s.graded_at,s.file_path submitted_file,s.files submitted_files,s.structured_answers,s.graded_by_ai,s.grading_status,s.submit_count
+           s.id submission_id,s.score,s.feedback,s.grading_details,s.submitted_at,s.graded_at,s.file_path submitted_file,s.files submitted_files,s.structured_answers,s.graded_by_ai,s.grading_status,s.submit_count,s.best_attempt
     FROM homework h LEFT JOIN submissions s ON h.id=s.homework_id AND s.student_id=?
     WHERE h.class_id=? ORDER BY h.hw_order,h.created_at
   `).all(req.user.id, req.params.id).map(hw => {
@@ -60,6 +61,10 @@ router.get('/my-classes/:id', (req, res) => {
     // Lượt làm đang dở (bấm "Làm bài" nhưng chưa nộp lại kể từ đó) → còn hiệu lực để tính đồng hồ đếm ngược
     const attemptStartedAt = attemptStarts.get(hw.id);
     const attemptInProgress = attemptStartedAt && (!hw.submitted_at || attemptStartedAt > hw.submitted_at);
+    // Nộp nhiều lần lấy điểm CAO NHẤT: lần mới đang chờ chấm → tạm hiện kết quả lần trước có điểm
+    const best = hw.score === null ? parseBest(hw.best_attempt) : null;
+    if (best) Object.assign(hw, { score: best.score, feedback: best.feedback, grading_details: best.grading_details, graded_at: best.graded_at, graded_by_ai: best.graded_by_ai, showing_best: true });
+    delete hw.best_attempt;
     return {
       ...hw,
       hsa_config: stripHsaAnswers(hw.hsa_config), // ẩn đáp án HSA, chỉ giữ kiểu câu (TN/TLN) + ghi chú
@@ -131,7 +136,7 @@ router.get('/stats', (req, res) => {
   const db = getDb();
   const classCount = db.prepare('SELECT COUNT(*) c FROM class_students WHERE student_id=?').get(req.user.id).c;
   const submittedCount = db.prepare('SELECT COUNT(*) c FROM submissions WHERE student_id=?').get(req.user.id).c;
-  const gradedCount = db.prepare('SELECT COUNT(*) c FROM submissions WHERE student_id=? AND score IS NOT NULL').get(req.user.id).c;
+  const gradedCount = db.prepare('SELECT COUNT(*) c FROM submissions WHERE student_id=? AND COALESCE(score,best_score) IS NOT NULL').get(req.user.id).c;
   // Điểm TB (thang 10): bài đã quá hạn mà chưa nộp được tính 0 điểm.
   const avgScore = studentOverallAverage(db, req.user.id);
   res.json({ classCount, submittedCount, gradedCount, avgScore });

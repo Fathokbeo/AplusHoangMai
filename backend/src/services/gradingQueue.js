@@ -4,6 +4,7 @@ const path = require('path');
 const { getDb } = require('../db/database');
 const { gradeSubmission, extractAnswerKey } = require('./aiGrading');
 const { needsAiGrading, hasAnswerKey, parsePartsConfig, partEnabled, missingKeyIndices, applyExtractedKeys, PART_LABELS, parseHsaConfig, hasHsaAnswerKey } = require('./homeworkParts');
+const { settleBest } = require('./bestAttempt');
 const { scoreStructured, scoreHsa, partMax, round2, rawMaxScore, scaleToTarget, composeAutoFeedback } = require('./homeworkScoring');
 
 const MAX_ATTEMPTS = 5;            // số lần thử chấm tối đa trước khi đánh dấu thất bại
@@ -63,6 +64,7 @@ function gradeHsaSubmission(db, sub, submissionId) {
     : `Đúng ${correct}/${cfg.questions.length} câu — tổng điểm ${total}/${cfg.questions.length}.`;
   db.prepare("UPDATE submissions SET score=?,feedback=?,grading_details=?,graded_at=?,graded_by_ai=0,grading_status='done' WHERE id=?")
     .run(total, feedback, JSON.stringify(det.details), new Date().toISOString(), submissionId);
+  settleBest(db, submissionId); // nộp nhiều lần → giữ lần có điểm cao nhất
   console.log(`[grading-queue] ✅ Đã chấm bài nộp #${submissionId} (HSA): ${total}/${cfg.questions.length}`);
   return { score: total, feedback, details: det.details };
 }
@@ -214,6 +216,7 @@ async function gradeOne(submissionId, { force = false } = {}) {
 
     db.prepare("UPDATE submissions SET score=?,feedback=?,grading_details=?,graded_at=?,graded_by_ai=?,grading_status='done' WHERE id=?")
       .run(total, feedback, JSON.stringify(details), new Date().toISOString(), needAi ? 1 : 0, submissionId);
+    settleBest(db, submissionId); // nộp nhiều lần → giữ lần có điểm cao nhất
     console.log(`[grading-queue] ✅ Đã chấm bài nộp #${submissionId}: ${total}/${sub.max_score}${needAi ? ' (auto+AI)' : ' (auto)'}`);
     return { score: total, feedback, details };
   } catch (err) {

@@ -53,7 +53,7 @@ function classAverages(db, classId, nowIso, month) {
     .all(classId)
     .filter((hw) => ymOf(monthAnchor(hw)) === targetYm);
   const subs = db.prepare(`
-    SELECT s.homework_id,s.student_id,s.score
+    SELECT s.homework_id,s.student_id,COALESCE(s.score,s.best_score) score
     FROM submissions s JOIN homework h ON s.homework_id=h.id
     WHERE h.class_id=?
   `).all(classId);
@@ -111,7 +111,7 @@ function studentOverallAverage(db, studentId, nowIso) {
   const ref = new Date(now);
   const rows = db.prepare(`
     SELECT h.due_date,h.max_score,h.created_at,
-      (SELECT s.score FROM submissions s WHERE s.homework_id=h.id AND s.student_id=?) AS score
+      (SELECT COALESCE(s.score,s.best_score) FROM submissions s WHERE s.homework_id=h.id AND s.student_id=?) AS score
     FROM homework h
     JOIN class_students cs ON cs.class_id=h.class_id AND cs.student_id=?
   `).all(studentId, studentId)

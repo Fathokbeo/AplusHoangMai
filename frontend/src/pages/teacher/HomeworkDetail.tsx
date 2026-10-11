@@ -7,6 +7,7 @@ import StructuredAnswerReview from '../../components/StructuredAnswerReview';
 import FileViewer from '../../components/FileViewer';
 import { toast } from '../../components/Toast';
 import { parsePartsConfig, hasObjectiveParts } from '../../lib/homeworkParts';
+import { summarizeEssayFeedback } from '../../lib/feedbackSummary';
 import { ChevronLeft, Users, CheckCircle, XCircle, Clock, Bot, Star, Eye, Download, Repeat } from 'lucide-react';
 
 // Danh sách URL file của một bài nộp (hỗ trợ cũ: 1 file, mới: nhiều file dạng JSON)
@@ -86,6 +87,8 @@ export default function HomeworkDetail() {
   };
 
   // Xuất bảng điểm CẢ LỚP ra file Excel (.xlsx): STT, Họ và tên, Trạng thái, Điểm, Nhận xét
+  // Nhận xét trong Excel là bản CHUẨN FORM rút gọn (chỉ phần tự luận: đầy đủ / thiếu câu nào / sai câu nào),
+  // không phải nhận xét chi tiết học sinh thấy trên web.
   // Thứ tự lấy nguyên từ server (đã khớp với thứ tự đã kéo thả trong danh sách học sinh của lớp)
   const exportExcel = async () => {
     const rowsSrc = (hw.roster || []) as any[];
@@ -99,9 +102,9 @@ export default function HomeworkDetail() {
       s.full_name || '',
       s.submission_id ? 'Đã nộp' : 'Chưa nộp',
       s.submission_id
-        ? (s.score !== null && s.score !== undefined ? s.score : 'Chưa chấm')
+        ? (s.score ?? s.best_score ?? 'Chưa chấm') // lần mới đang chờ chấm → điểm cao nhất lần trước
         : (overdue ? 0 : ''),
-      s.feedback || '',
+      summarizeEssayFeedback(s, hw),
     ]);
     const aoa = [
       [hw.title],
@@ -112,7 +115,7 @@ export default function HomeworkDetail() {
     ];
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 10 }, { wch: 8 }, { wch: 60 }];
+    ws['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 10 }, { wch: 8 }, { wch: 45 }];
     ws['!merges'] = [
       { s: { r: 0, c: 0 }, e: { r: 0, c: 4 } },
       { s: { r: 1, c: 0 }, e: { r: 1, c: 4 } },

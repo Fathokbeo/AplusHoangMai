@@ -33,7 +33,7 @@ function submittedFileUrls(hw: any): string[] {
 export default function StudentClassDetail() {
   const { id } = useParams();
   const [cls, setCls] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'content' | 'assistants'>('content');
+  const [activeTab, setActiveTab] = useState<'content' | 'todo' | 'assistants'>('content');
   const [scheduleAssistantId, setScheduleAssistantId] = useState<number | null>(null);
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
   // Danh sách bài giảng/bài tập nào (theo key "<chương>-lessons"/"-homework") đang được bung ra trong 1 chương —
@@ -68,7 +68,7 @@ export default function StudentClassDetail() {
 
   // Tự làm mới khi có bài vừa nộp đang được AI chấm nền, để cập nhật điểm
   useEffect(() => {
-    const pending = cls?.homework?.some((hw: any) => hw.submission_id && hw.score === null && (hw.grading_status === 'pending' || hw.grading_status === 'grading'));
+    const pending = cls?.homework?.some((hw: any) => hw.submission_id && (hw.score === null || hw.showing_best) && (hw.grading_status === 'pending' || hw.grading_status === 'grading'));
     if (!pending) return;
     const t = setInterval(fetchClass, 8000);
     return () => clearInterval(t);
@@ -191,6 +191,10 @@ export default function StudentClassDetail() {
   const lessonsAll: any[] = cls.lessons || [];
   const homeworkAll: any[] = cls.homework || [];
   const { sections: contentSections, orphan: orphanGroup } = buildContentSections(chapters, lessonsAll, homeworkAll);
+  // Bài tập cần làm: có hạn nộp, còn hạn/còn lượt và học sinh CHƯA nộp — hạn gần nhất lên đầu
+  const todoHomework = homeworkAll
+    .filter((hw) => hw.due_date && hw.can_submit && !hw.submission_id)
+    .sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime());
   const scheduleAssistant = (cls.assistants || []).find((a: any) => a.id === scheduleAssistantId) || null;
 
   const toggleChapter = (key: string) => setExpandedChapters((prev) => {
@@ -338,6 +342,13 @@ export default function StudentClassDetail() {
                     {hw.answer_visible_date ? ` (lúc ${new Date(hw.answer_visible_date).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })})` : ''}.
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Nộp lại, lần mới đang chờ chấm → đang hiện điểm cao nhất của lần trước */}
+            {!!hw.showing_best && (
+              <div style={{ marginTop: 8, fontSize: '0.78rem', color: '#1565C0' }}>
+                Đang hiện điểm cao nhất các lần nộp trước — lần nộp mới đang chờ chấm, chỉ thay nếu điểm cao hơn.
               </div>
             )}
 
@@ -535,10 +546,11 @@ export default function StudentClassDetail() {
         </div>
       </div>
 
-      {/* Tabs: Nội dung / Trợ giảng */}
-      <div style={{ display: 'flex', gap: 4, background: '#F5F5F5', padding: 4, borderRadius: 10, marginBottom: '1.25rem', width: isMobile ? '100%' : 'fit-content' }}>
+      {/* Tabs: Nội dung / Bài tập cần làm / Trợ giảng */}
+      <div style={{ display: 'flex', gap: 4, background: '#F5F5F5', padding: 4, borderRadius: 10, marginBottom: '1.25rem', width: isMobile ? '100%' : 'fit-content', flexWrap: 'wrap' }}>
         {[
           { key: 'content' as const, label: 'Nội dung', icon: Layers },
+          { key: 'todo' as const, label: `Bài tập cần làm (${todoHomework.length})`, icon: ClipboardList },
           { key: 'assistants' as const, label: `Trợ giảng (${cls.assistants?.length || 0})`, icon: UserCog },
         ].map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => setActiveTab(key)} className="btn"
@@ -570,6 +582,20 @@ export default function StudentClassDetail() {
                 {renderGroupBody(orphanGroup, true)}
               </div>
             )}
+          </div>
+        )
+      )}
+
+      {/* Bài tập cần làm: chỉ bài có hạn & chưa nộp, nộp bài ngay tại đây (dùng chung thẻ bài tập) */}
+      {activeTab === 'todo' && (
+        todoHomework.length === 0 ? (
+          <div style={{ textAlign: 'center', color: '#999', padding: '2rem', background: 'white', borderRadius: 12 }}>
+            <CheckCircle size={36} color="#2E7D32" style={{ margin: '0 auto 12px', opacity: 0.5 }} />
+            <div>Không có bài tập nào cần nộp</div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {todoHomework.map((hw, i) => renderHomeworkCard(hw, i))}
           </div>
         )
       )}
