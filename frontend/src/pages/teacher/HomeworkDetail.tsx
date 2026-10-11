@@ -7,7 +7,7 @@ import StructuredAnswerReview from '../../components/StructuredAnswerReview';
 import FileViewer from '../../components/FileViewer';
 import { toast } from '../../components/Toast';
 import { parsePartsConfig, hasObjectiveParts } from '../../lib/homeworkParts';
-import { summarizeEssayFeedback } from '../../lib/feedbackSummary';
+import { summarizeEssayFeedback, homeworkHasEssay } from '../../lib/feedbackSummary';
 import { ChevronLeft, Users, CheckCircle, XCircle, Clock, Bot, Star, Eye, Download, Repeat } from 'lucide-react';
 
 // Danh sách URL file của một bài nộp (hỗ trợ cũ: 1 file, mới: nhiều file dạng JSON)
@@ -87,8 +87,7 @@ export default function HomeworkDetail() {
   };
 
   // Xuất bảng điểm CẢ LỚP ra file Excel (.xlsx): STT, Họ và tên, Trạng thái, Điểm, Nhận xét
-  // Nhận xét trong Excel là bản CHUẨN FORM rút gọn (chỉ phần tự luận: đầy đủ / thiếu câu nào / sai câu nào),
-  // không phải nhận xét chi tiết học sinh thấy trên web.
+  // + (bài có tự luận) cột "Nhận xét tự luận" chuẩn form ngắn gọn: đầy đủ / thiếu câu nào / sai câu nào.
   // Thứ tự lấy nguyên từ server (đã khớp với thứ tự đã kéo thả trong danh sách học sinh của lớp)
   const exportExcel = async () => {
     const rowsSrc = (hw.roster || []) as any[];
@@ -96,7 +95,8 @@ export default function HomeworkDetail() {
     const XLSX = await import('xlsx');
     const overdue = hw.due_date ? new Date() > new Date(hw.due_date) : false;
 
-    const header = ['STT', 'Họ và tên', 'Trạng thái', 'Điểm', 'Nhận xét'];
+    const essay = homeworkHasEssay(hw);
+    const header = ['STT', 'Họ và tên', 'Trạng thái', 'Điểm', 'Nhận xét', ...(essay ? ['Nhận xét tự luận'] : [])];
     const rows = rowsSrc.map((s: any, i: number) => [
       i + 1,
       s.full_name || '',
@@ -104,7 +104,8 @@ export default function HomeworkDetail() {
       s.submission_id
         ? (s.score ?? s.best_score ?? 'Chưa chấm') // lần mới đang chờ chấm → điểm cao nhất lần trước
         : (overdue ? 0 : ''),
-      summarizeEssayFeedback(s, hw),
+      s.feedback || '',
+      ...(essay ? [summarizeEssayFeedback(s, hw)] : []),
     ]);
     const aoa = [
       [hw.title],
@@ -115,10 +116,11 @@ export default function HomeworkDetail() {
     ];
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 10 }, { wch: 8 }, { wch: 45 }];
+    const lastCol = header.length - 1;
+    ws['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 10 }, { wch: 8 }, { wch: 60 }, ...(essay ? [{ wch: 40 }] : [])];
     ws['!merges'] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 4 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 4 } },
+      { s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: lastCol } },
     ];
 
     const wb = XLSX.utils.book_new();
