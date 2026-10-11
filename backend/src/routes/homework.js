@@ -103,6 +103,18 @@ function sanitizeTimeLimit(raw) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+// Tên gốc của file upload (multer đọc tên UTF-8 thành latin1 → đổi lại cho đúng tiếng Việt)
+function originalName(f) {
+  if (!f) return null;
+  try { return Buffer.from(f.originalname, 'latin1').toString('utf8'); } catch { return f.originalname; }
+}
+
+function rmHomeworkFile(name) {
+  if (!name) return;
+  const f = path.join(__dirname, '../../uploads/homework', name);
+  if (fs.existsSync(f)) { try { fs.unlinkSync(f); } catch { /* ignore */ } }
+}
+
 // Lấy danh sách tên file của một bài nộp (hỗ trợ cũ: file_path đơn, mới: files JSON)
 function submissionFilenames(sub) {
   if (sub && sub.files) {
@@ -155,15 +167,16 @@ router.post(
     const finalTimeLimit = examType === 'hsa' ? sanitizeTimeLimit(time_limit_minutes) : null;
 
     const result = db.prepare(`
-      INSERT INTO homework (class_id,title,description,pdf_file,answer_file,due_date,answer_visible_date,max_score,grading_note,chapter_id,solution_video_url,parts_config,hw_order,max_attempts,exam_type,hsa_config,time_limit_minutes)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      INSERT INTO homework (class_id,title,description,pdf_file,answer_file,due_date,answer_visible_date,max_score,grading_note,chapter_id,solution_video_url,parts_config,hw_order,max_attempts,exam_type,hsa_config,time_limit_minutes,pdf_name,answer_name)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       req.params.classId, title, description || null,
       req.files?.pdf_file?.[0]?.filename || null,
       req.files?.answer_file?.[0]?.filename || null,
       due_date || null, answer_visible_date || null, finalMax,
       grading_note || null, chapter_id || null, solution_video_url || null,
-      partsJson, parseInt(hw_order) || 0, finalMaxAttempts, examType, hsaJson, finalTimeLimit
+      partsJson, parseInt(hw_order) || 0, finalMaxAttempts, examType, hsaJson, finalTimeLimit,
+      originalName(req.files?.pdf_file?.[0]), originalName(req.files?.answer_file?.[0])
     );
     scheduleRubricGeneration(result.lastInsertRowid, req.files?.answer_file?.[0]?.filename || null, partsJson);
     res.status(201).json({ id: result.lastInsertRowid, title });
@@ -236,8 +249,15 @@ router.put(
     }
 
     const newAnswerFile = req.files?.answer_file?.[0]?.filename;
-    if (req.files?.pdf_file?.[0]) { sets.push('pdf_file=?'); vals.push(req.files.pdf_file[0].filename); }
-    if (newAnswerFile) { sets.push('answer_file=?'); vals.push(newAnswerFile); }
+    // Thay file mới → xóa file cũ trên đĩa, lưu kèm tên gốc để hiện trong form sửa
+    if (req.files?.pdf_file?.[0]) {
+      sets.push('pdf_file=?', 'pdf_name=?'); vals.push(req.files.pdf_file[0].filename, originalName(req.files.pdf_file[0]));
+      rmHomeworkFile(hw.pdf_file);
+    }
+    if (newAnswerFile) {
+      sets.push('answer_file=?', 'answer_name=?'); vals.push(newAnswerFile, originalName(req.files.answer_file[0]));
+      rmHomeworkFile(hw.answer_file);
+    }
 
     if (sets.length > 0) { vals.push(req.params.id); db.prepare(`UPDATE homework SET ${sets.join(',')} WHERE id=?`).run(...vals); }
 
@@ -249,6 +269,25 @@ router.put(
     res.json({ message: 'Đã cập nhật' });
   }
 );
+
+// ── Xóa file đề / file đáp án đã đính kèm của bài tập (kind: 'pdf' | 'answer') ──
+router.delete('/homework/:id/files/:kind', requireRole('teacher', 'admin'), (req, res) => {
+  const kind = req.params.kind;
+  if (kind !== 'pdf' && kind !== 'answer') return res.status(400).json({ message: 'Loại file không hợp lệ' });
+  const db = getDb();
+  const hw = db.prepare('SELECT h.*,c.teacher_id FROM homework h JOIN classes c ON h.class_id=c.id WHERE h.id=?').get(req.params.id);
+  if (!hw) return res.status(404).json({ message: 'Không tìm thấy' });
+  if (req.user.role === 'teacher' && hw.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  if (kind === 'pdf') {
+    rmHomeworkFile(hw.pdf_file);
+    db.prepare('UPDATE homework SET pdf_file=NULL,pdf_name=NULL WHERE id=?').run(hw.id);
+  } else {
+    rmHomeworkFile(hw.answer_file);
+    // Quy chuẩn nhận xét soạn từ file đáp án → bỏ luôn
+    db.prepare('UPDATE homework SET answer_file=NULL,answer_name=NULL,feedback_rubric=NULL WHERE id=?').run(hw.id);
+  }
+  res.json({ message: 'Đã xóa file' });
+});
 
 router.delete('/homework/:id', requireRole('teacher', 'admin'), (req, res) => {
   const db = getDb();

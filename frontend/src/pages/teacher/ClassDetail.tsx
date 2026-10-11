@@ -553,6 +553,18 @@ export default function ClassDetail() {
     }
   };
 
+  // Xóa file đề / file đáp án đã lưu của bài tập đang sửa
+  const deleteHwFile = async (kind: 'pdf' | 'answer') => {
+    if (!editingHw) return;
+    try {
+      await api.delete(`/homework/${editingHw.id}/files/${kind}`);
+      setEditingHw(kind === 'pdf' ? { ...editingHw, pdf_file: null, pdf_name: null } : { ...editingHw, answer_file: null, answer_name: null });
+      fetchClass();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Lỗi xóa file');
+    }
+  };
+
   // Thêm file vào danh sách chờ upload của bài giảng (gộp, loại trùng tên+kích thước)
   const addLessonFiles = (kind: 'doc' | 'answer', incoming: FileList) => {
     const arr = Array.from(incoming);
@@ -1627,7 +1639,6 @@ export default function ClassDetail() {
               {hwFiles.pdf ? <span style={{ color: '#2E7D32', fontSize: '0.85rem' }}>✓ {hwFiles.pdf.name}</span> : <span style={{ fontSize: '0.82rem' }}><Upload size={16} style={{ verticalAlign: 'middle' }} /> Chọn PDF đề</span>}
             </div>
             <input ref={pdfRef} type="file" accept=".pdf" hidden onChange={(e) => { if (e.target.files?.[0]) setHwFiles({ ...hwFiles, pdf: e.target.files[0] }); }} />
-            {editingHw?.pdf_file && !hwFiles.pdf && <div style={{ fontSize: '0.75rem', color: '#2E7D32', marginTop: 4 }}>✓ Đã có file đề</div>}
           </div>
           <div className="form-group">
             <label className="label">File đáp án (PDF cho AI)</label>
@@ -1635,9 +1646,33 @@ export default function ClassDetail() {
               {hwFiles.answer ? <span style={{ color: '#2E7D32', fontSize: '0.85rem' }}>✓ {hwFiles.answer.name}</span> : <span style={{ fontSize: '0.82rem' }}><Upload size={16} style={{ verticalAlign: 'middle' }} /> Chọn PDF đáp án</span>}
             </div>
             <input ref={answerRef} type="file" accept=".pdf" hidden onChange={(e) => { if (e.target.files?.[0]) setHwFiles({ ...hwFiles, answer: e.target.files[0] }); }} />
-            {editingHw?.answer_file && !hwFiles.answer && <div style={{ fontSize: '0.75rem', color: '#2E7D32', marginTop: 4 }}>✓ Đã có đáp án (AI sẽ dùng file này)</div>}
           </div>
         </div>
+
+        {/* File đã lưu của bài tập (khi sửa): xem / xóa. Chọn file mới ở trên sẽ thay file cũ khi lưu. */}
+        {editingHw && (editingHw.pdf_file || editingHw.answer_file) && (
+          <div className="form-group">
+            <label className="label">File đã đính kèm</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {([
+                { kind: 'pdf' as const, file: editingHw.pdf_file, name: editingHw.pdf_name || 'File đề bài.pdf', badge: 'Đề bài', color: '#E65100', cls: 'badge-orange', replacing: !!hwFiles.pdf },
+                { kind: 'answer' as const, file: editingHw.answer_file, name: editingHw.answer_name || 'File đáp án.pdf', badge: 'Đáp án', color: '#2E7D32', cls: 'badge-green', replacing: !!hwFiles.answer },
+              ]).filter((a) => a.file).map((a) => (
+                <div key={a.kind} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem', background: '#FAFAFA', border: '1px solid #EEE', borderRadius: 6, padding: '0.4rem 0.6rem', opacity: a.replacing ? 0.5 : 1 }}>
+                  <Paperclip size={13} color={a.color} style={{ flexShrink: 0 }} />
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: a.replacing ? 'line-through' : 'none' }} title={a.name}>
+                    {a.name} <span className={`badge ${a.cls}`} style={{ marginLeft: 6 }}>{a.replacing ? 'Sẽ được thay' : a.badge}</span>
+                  </span>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setViewFiles([`/uploads/homework/${a.file}`])}><Eye size={13} /> Xem</button>
+                  <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} title="Xóa file"
+                    onClick={() => { if (confirm(`Xóa file "${a.name}"?`)) deleteHwFile(a.kind); }}>
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Excel Import Modal: tạo tài khoản học sinh hàng loạt */}

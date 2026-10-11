@@ -321,6 +321,13 @@ function initSchema() {
   if (!subCols.some(c => c.name === 'best_score')) {
     db.exec('ALTER TABLE submissions ADD COLUMN best_score REAL');
   }
+  // Migration: tên gốc của file đề / file đáp án bài tập (file lưu trên đĩa bằng tên ngẫu nhiên)
+  if (!hwCols.some(c => c.name === 'pdf_name')) {
+    db.exec('ALTER TABLE homework ADD COLUMN pdf_name TEXT');
+  }
+  if (!hwCols.some(c => c.name === 'answer_name')) {
+    db.exec('ALTER TABLE homework ADD COLUMN answer_name TEXT');
+  }
   // Migration: link Facebook + SĐT của giáo viên/trợ giảng để học sinh liên hệ
   const staffCols = db.prepare("PRAGMA table_info(staff)").all();
   if (!staffCols.some(c => c.name === 'facebook_url')) {
