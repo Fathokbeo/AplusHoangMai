@@ -28,8 +28,8 @@ export default function HomeworkDetail() {
   const [loading, setLoading] = useState(false);
   const [regrading, setRegrading] = useState<number | null>(null);
   const [viewFiles, setViewFiles] = useState<string[] | null>(null);
-  // Bộ lọc danh sách cả lớp: tất cả / đã nộp / chưa nộp
-  const [filter, setFilter] = useState<'all' | 'submitted' | 'missing'>('all');
+  // Thanh chọn: tất cả / đã nộp / chưa nộp (lọc danh sách) hoặc "Nhận xét" (khối nhận xét cả lớp)
+  const [filter, setFilter] = useState<'all' | 'submitted' | 'missing' | 'review'>('all');
 
   useEffect(() => { fetchHw(); }, [id]);
 
@@ -218,9 +218,6 @@ export default function HomeworkDetail() {
         </div>
       )}
 
-      {/* Nhận xét: tổng quan điểm, phổ điểm, nhận xét ngắn từng học sinh */}
-      <HomeworkReport hw={hw} roster={roster} />
-
       {/* Danh sách cả lớp + bộ lọc đã nộp / chưa nộp */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <h2 className="section-title" style={{ margin: 0 }}>Danh sách lớp</h2>
@@ -231,6 +228,7 @@ export default function HomeworkDetail() {
               { key: 'all', label: `Tất cả (${roster.length})` },
               { key: 'submitted', label: `Đã nộp (${submittedCount})` },
               { key: 'missing', label: `Chưa nộp (${missingCount})` },
+              { key: 'review', label: 'Nhận xét' },
             ] as const).map(({ key, label }) => (
               <button key={key} className="btn btn-sm" onClick={() => setFilter(key)}
                 style={{ background: filter === key ? 'white' : 'transparent', boxShadow: filter === key ? '0 2px 6px rgba(0,0,0,0.08)' : 'none', color: filter === key ? '#C62828' : '#888', border: 'none' }}>
@@ -243,6 +241,10 @@ export default function HomeworkDetail() {
           </button>
         </div>
       </div>
+      {/* Mục "Nhận xét": tổng quan điểm, phổ điểm, nhận xét ngắn từng học sinh — thay cho bảng danh sách */}
+      {filter === 'review' ? (
+        <div style={{ marginTop: 12 }}><HomeworkReport hw={hw} roster={roster} /></div>
+      ) : (
       <div className="table-wrap" style={{ marginTop: 12 }}>
         <table>
           <thead>
@@ -337,6 +339,7 @@ export default function HomeworkDetail() {
           </tbody>
         </table>
       </div>
+      )}
 
       {/* Grade Modal */}
       <Modal open={gradeModal} onClose={() => setGradeModal(false)} title={`Chấm điểm: ${grading?.full_name}`}
