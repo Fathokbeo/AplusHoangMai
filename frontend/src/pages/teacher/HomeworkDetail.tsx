@@ -5,6 +5,7 @@ import Modal from '../../components/Modal';
 import GradingDetails from '../../components/GradingDetails';
 import StructuredAnswerReview from '../../components/StructuredAnswerReview';
 import FileViewer from '../../components/FileViewer';
+import HomeworkReport from '../../components/HomeworkReport';
 import { toast } from '../../components/Toast';
 import { parsePartsConfig, hasObjectiveParts } from '../../lib/homeworkParts';
 import { summarizeEssayFeedback, homeworkHasEssay } from '../../lib/feedbackSummary';
@@ -216,6 +217,9 @@ export default function HomeworkDetail() {
           )}
         </div>
       )}
+
+      {/* Nhận xét: tổng quan điểm, phổ điểm, nhận xét ngắn từng học sinh */}
+      <HomeworkReport hw={hw} roster={roster} />
 
       {/* Danh sách cả lớp + bộ lọc đã nộp / chưa nộp */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
