@@ -259,11 +259,14 @@ const PART_LABEL_TXT = { multiple_choice: 'Trắc nghiệm', true_false: 'Đúng
 //   <5đ: nhắc học lại + luyện tập thêm.
 // Ngưỡng liệt kê 1 phần vào câu nhận xét: Trắc nghiệm sai ≥2 câu; Đúng/Sai sai ≥2 Ý (không phải câu);
 // Trả lời ngắn sai ≥1 câu.
-// pct10: điểm phần khách quan quy đổi thang 10 (điểm thô / điểm tối đa phần khách quan × 10).
+// pct10: điểm quy đổi thang 10 — bài KHÔNG có tự luận: điểm phần khách quan; bài CÓ tự luận: điểm cả bài.
 // partStats: xem scoreStructured. topic: rubric.overview do AI soạn sẵn ĐÚNG 1 LẦN khi tạo/cập nhật
 // đáp án (xem aiGrading.generateFeedbackRubric + routes/homework.js) — có thể null nếu chưa có/lỗi.
-function composeAutoFeedback(pct10, partStats, topic) {
+// opts.essayNote: câu ngắn về phần Tự luận (xem essayIssueNote) — chỉ ghép vào khi điểm < 9.
+// opts.hasObjective (mặc định true): bài có phần khách quan (để câu mức 5–7đ nhắc "Trắc nghiệm, ...").
+function composeAutoFeedback(pct10, partStats, topic, opts = {}) {
   const topicTxt = topic || 'các dạng bài trong bài tập này';
+  const hasObjective = opts.hasObjective !== false;
   const mc = partStats && partStats.multiple_choice;
   const tf = partStats && partStats.true_false;
   const sa = partStats && partStats.short_answer;
@@ -273,20 +276,71 @@ function composeAutoFeedback(pct10, partStats, topic) {
   if (sa && sa.wrongIdx.length >= 1) wrongParts.push(PART_LABEL_TXT.short_answer);
 
   if (pct10 >= 9) return 'Con làm bài tốt, cố gắng phát huy.';
+  const essayNote = opts.essayNote || '';
+  // Các ý còn hạn chế, nối bằng dấu phẩy: "còn sai phần Trả lời ngắn, Phần Tự luận còn trình bày thiếu câu 1"
+  const issues = [];
+  if (wrongParts.length) issues.push(`còn sai phần ${wrongParts.join(', ')}`);
+  if (essayNote) issues.push(essayNote);
   if (pct10 >= 8) {
-    return wrongParts.length
-      ? `Con làm bài khá tốt tuy nhiên còn sai phần ${wrongParts.join(', ')} và cẩn thận hơn khi làm các dạng bài về ${topicTxt}.`
+    return issues.length
+      ? `Con làm bài khá tốt tuy nhiên ${issues.join(', ')} và cẩn thận hơn khi làm các dạng bài về ${topicTxt}.`
       : 'Con làm bài khá tốt, cố gắng phát huy hơn nữa.';
   }
   if (pct10 >= 7) {
-    return wrongParts.length
-      ? `Con làm bài khá ổn tuy nhiên còn sai phần ${wrongParts.join(', ')} và cẩn thận hơn khi làm các dạng bài về ${topicTxt}.`
+    return issues.length
+      ? `Con làm bài khá ổn tuy nhiên ${issues.join(', ')} và cẩn thận hơn khi làm các dạng bài về ${topicTxt}.`
       : 'Con làm bài khá ổn, cố gắng phát huy hơn nữa.';
   }
   if (pct10 >= 5) {
-    return `Con đã nắm được kiến thức tuy nhiên còn nhiều sai sót, cần cẩn thận hơn khi làm Trắc nghiệm, Đúng/Sai, Trả lời ngắn và luyện tập thêm các bài tập về ${topicTxt}.`;
+    const mid = [hasObjective ? 'cần cẩn thận hơn khi làm Trắc nghiệm, Đúng/Sai, Trả lời ngắn' : '', essayNote].filter(Boolean).join(', ');
+    return `Con đã nắm được kiến thức tuy nhiên còn nhiều sai sót${mid ? `, ${mid}` : ''} và luyện tập thêm các bài tập về ${topicTxt}.`;
   }
-  return `Con còn sai sót nhiều khi làm bài tập, cần chú ý học lại và luyện tập thêm các bài toán về ${topicTxt}.`;
+  return `Con còn sai sót nhiều khi làm bài tập${essayNote ? `, ${essayNote}` : ''}, cần chú ý học lại và luyện tập thêm các bài toán về ${topicTxt}.`;
+}
+
+// ── Nhận xét NGẮN cho phần Tự luận (thay cho đoạn nhận xét dài của AI) ─────────────────────────
+// Dựa vào kết quả AI chấm TỪNG CÂU tự luận (status + lời giải thích):
+//   - đúng hết → '' (không nhận xét)
+//   - bỏ trống/không làm          → "không làm câu …"
+//   - đúng một phần, thiếu bước/hình/lời giải → "trình bày thiếu câu …"
+//   - làm sai (tính sai, nhầm…)   → "cần cẩn thận hơn câu …"
+// Kết quả dạng: "Phần Tự luận còn trình bày thiếu câu 1, cần cẩn thận hơn câu 2, không làm câu 3".
+const ESSAY_NOT_DONE_RE = /không làm|chưa làm|bỏ trống|để trống|bỏ qua|không có (bài|lời giải)|không thấy (bài|lời giải)/i;
+const ESSAY_MISSING_RE = /thiếu|chưa đầy đủ|chưa đủ|sơ sài|chỉ ghi đáp số|không trình bày|chưa trình bày|không có hình|không vẽ hình/i;
+const ESSAY_WRONG_RE = /sai|nhầm|không đúng|không chính xác/i;
+const OBJECTIVE_Q_RE = /^\s*(tn\b|trắc nghiệm|đúng\s*[-/]\s*sai|đ\/s|tln\b|trả lời ngắn)/i;
+
+// "Tự luận câu 4.2c" / "Câu 2 (Tự luận)" → "4.2c" / "2"
+function essayQuestionLabel(q) {
+  const s = String(q || '');
+  const m = s.match(/câu\s*([0-9]+[a-zđ]?(?:\s*[.,]\s*[0-9a-z]+)*)/i);
+  if (m) return m[1].replace(/\s+/g, '');
+  return s.replace(/tự\s*luận/i, '').replace(/[():\-–]/g, ' ').trim() || s;
+}
+
+// Lọc các câu tự luận trong danh sách chi tiết AI trả về (bỏ các câu khách quan AI chấm hộ, nếu có)
+function essayDetailsOf(aiDetails) {
+  return (aiDetails || []).filter((d) => d && !OBJECTIVE_Q_RE.test(String(d.question || '')));
+}
+
+function essayIssueNote(essayDetails) {
+  const missing = [];
+  const careless = [];
+  const notDone = [];
+  const add = (arr, v) => { if (!arr.includes(v)) arr.push(v); };
+  (essayDetails || []).forEach((d) => {
+    if (!d || d.status === 'correct') return;
+    const label = essayQuestionLabel(d.question);
+    const c = String(d.comment || '');
+    if (ESSAY_NOT_DONE_RE.test(c)) add(notDone, label);
+    else if (d.status === 'partial' && (ESSAY_MISSING_RE.test(c) || !ESSAY_WRONG_RE.test(c))) add(missing, label);
+    else add(careless, label);
+  });
+  const parts = [];
+  if (missing.length) parts.push(`trình bày thiếu câu ${missing.join(', ')}`);
+  if (careless.length) parts.push(`cần cẩn thận hơn câu ${careless.join(', ')}`);
+  if (notDone.length) parts.push(`không làm câu ${notDone.join(', ')}`);
+  return parts.length ? `Phần Tự luận còn ${parts.join(', ')}` : '';
 }
 
 module.exports = {
@@ -305,4 +359,6 @@ module.exports = {
   scoreStructured,
   scoreHsa,
   composeAutoFeedback,
+  essayIssueNote,
+  essayDetailsOf,
 };

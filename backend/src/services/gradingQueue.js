@@ -5,7 +5,7 @@ const { getDb } = require('../db/database');
 const { gradeSubmission, extractAnswerKey } = require('./aiGrading');
 const { needsAiGrading, hasAnswerKey, parsePartsConfig, partEnabled, missingKeyIndices, applyExtractedKeys, PART_LABELS, parseHsaConfig, hasHsaAnswerKey } = require('./homeworkParts');
 const { settleBest } = require('./bestAttempt');
-const { scoreStructured, scoreHsa, partMax, round2, rawMaxScore, scaleToTarget, composeAutoFeedback } = require('./homeworkScoring');
+const { scoreStructured, scoreHsa, partMax, round2, rawMaxScore, scaleToTarget, composeAutoFeedback, essayIssueNote, essayDetailsOf } = require('./homeworkScoring');
 
 const MAX_ATTEMPTS = 5;            // số lần thử chấm tối đa trước khi đánh dấu thất bại
 const RETRY_DELAY_MS = 30_000;     // chờ trước khi thử lại một bài bị lỗi
@@ -25,6 +25,24 @@ function submissionFilenames(sub) {
     try { const a = JSON.parse(sub.files); if (Array.isArray(a) && a.length) return a; } catch { /* ignore */ }
   }
   return sub && sub.file_path ? [sub.file_path] : [];
+}
+
+// Phần khách quan do AI chấm hộ (học sinh không điền ở giao diện) không nằm trong partStats của máy chấm
+// → gộp các câu AI chấm chưa đúng vào thống kê để câu nhận xét vẫn nhắc đúng phần còn sai.
+function mergeAiObjectiveStats(partStats, aiDetails) {
+  const out = {};
+  Object.entries(partStats || {}).forEach(([k, st]) => { out[k] = { ...st, wrongIdx: [...(st.wrongIdx || [])] }; });
+  const keyOf = (q) => (/^\s*(tn\b|trắc nghiệm)/i.test(q) ? 'multiple_choice'
+    : /^\s*(đúng\s*[-/]\s*sai|đ\/s)/i.test(q) ? 'true_false'
+    : /^\s*(tln\b|trả lời ngắn)/i.test(q) ? 'short_answer' : null);
+  (aiDetails || []).forEach((d) => {
+    const k = keyOf(String(d.question || ''));
+    if (!k || d.status === 'correct') return;
+    if (!out[k]) out[k] = { total: 0, correct: 0, wrongIdx: [], wrongSub: 0 };
+    out[k].wrongIdx.push(-1);
+    if (k === 'true_false') out[k].wrongSub = (out[k].wrongSub || 0) + (d.status === 'wrong' ? 2 : 1);
+  });
+  return out;
 }
 
 function enqueue(submissionId) {
@@ -191,6 +209,9 @@ async function gradeOne(submissionId, { force = false } = {}) {
       aiFeedback = aiResult.feedback || '';
     }
 
+    // Chi tiết AI vừa chấm (trước khi thêm các ghi chú "chưa có đáp án" bên dưới)
+    const aiGradedDetails = aiDetails.slice();
+
     // Phần không thể chấm (chưa có đáp án & không có file đáp án) → ghi chú để giáo viên xử lý
     cannotGrade.forEach((k) => aiDetails.push({
       question: PART_LABELS[k] || k, status: 'partial',
@@ -202,17 +223,29 @@ async function gradeOne(submissionId, { force = false } = {}) {
     let total = cfg ? scaleToTarget(rawEarned, rawMaxScore(cfg), sub.max_score) : rawEarned;
     if (sub.max_score != null) total = Math.max(0, Math.min(sub.max_score, total));
     const details = [...det.details, ...aiDetails];
-    // Nhận xét khái quát cho phần khách quan chấm tự động (KHÔNG dùng AI) — chọn mẫu theo điểm phần
-    // khách quan quy đổi thang 10 + chủ đề bài (overview đã soạn sẵn 1 lần, xem homework.js).
-    // Ghép với nhận xét AI (nếu có phần AI chấm, vd tự luận).
+    // Nhận xét khái quát theo MẪU (KHÔNG dùng AI) — chọn mẫu theo thang điểm (quy đổi thang 10) + chủ đề
+    // bài (overview đã soạn sẵn 1 lần, xem homework.js).
+    //  - Bài CÓ tự luận: KHÔNG dùng đoạn nhận xét dài của AI. Phần Tự luận chỉ nhận xét ngắn theo từng câu
+    //    (trình bày thiếu / cần cẩn thận hơn / không làm), ghép chung 1 câu với phần khách quan; đúng hết
+    //    hoặc điểm cả bài ≥ 9 thì không nhắc tự luận. Mức điểm tính theo điểm CẢ BÀI.
+    //  - Bài KHÔNG có tự luận: giữ như cũ (mẫu theo điểm phần khách quan, ghép nhận xét AI nếu AI chấm hộ).
     let rubric = null;
     try { rubric = sub.feedback_rubric ? JSON.parse(sub.feedback_rubric) : null; } catch { rubric = null; }
+    const topic = rubric && rubric.overview;
     const objMaxPts = ['multiple_choice', 'true_false', 'short_answer']
       .reduce((s, k) => s + (det.gradedParts[k] ? partMax(cfg, k) : 0), 0);
-    const detFeedback = objMaxPts > 0
-      ? composeAutoFeedback((det.score / objMaxPts) * 10, det.partStats, rubric && rubric.overview)
-      : '';
-    const feedback = [detFeedback, aiFeedback].filter(Boolean).join(' ') || `Tổng điểm: ${total}/${sub.max_score}.`;
+    let feedback;
+    if (cfg ? partEnabled(cfg, 'essay') : aiEssay) {
+      const essayNote = aiEssay ? essayIssueNote(essayDetailsOf(aiGradedDetails)) : 'chưa làm Phần Tự luận';
+      const pct10 = sub.max_score > 0 ? (total / sub.max_score) * 10 : 0;
+      feedback = composeAutoFeedback(pct10, mergeAiObjectiveStats(det.partStats, aiGradedDetails), topic, {
+        essayNote,
+        hasObjective: objMaxPts > 0 || aiObjective.length > 0,
+      });
+    } else {
+      const detFeedback = objMaxPts > 0 ? composeAutoFeedback((det.score / objMaxPts) * 10, det.partStats, topic) : '';
+      feedback = [detFeedback, aiFeedback].filter(Boolean).join(' ') || `Tổng điểm: ${total}/${sub.max_score}.`;
+    }
 
     db.prepare("UPDATE submissions SET score=?,feedback=?,grading_details=?,graded_at=?,graded_by_ai=?,grading_status='done' WHERE id=?")
       .run(total, feedback, JSON.stringify(details), new Date().toISOString(), needAi ? 1 : 0, submissionId);

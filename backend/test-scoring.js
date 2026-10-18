@@ -1,5 +1,5 @@
 // Test CHẤM ĐIỂM TỰ ĐỘNG (deterministic) — không cần server, chạy: node test-scoring.js
-const { scoreStructured, computeMaxScore, saMatch, partMax, rawMaxScore, scaleToTarget } = require('./src/services/homeworkScoring');
+const { scoreStructured, computeMaxScore, saMatch, partMax, rawMaxScore, scaleToTarget, composeAutoFeedback, essayIssueNote, essayDetailsOf } = require('./src/services/homeworkScoring');
 const { parsePartsConfig, keyIsSet, missingKeyIndices, applyExtractedKeys } = require('./src/services/homeworkParts');
 
 let pass = 0, fail = 0; const out = [];
@@ -167,6 +167,40 @@ eq('saMatch rỗng', saMatch('', '5'), false);
   const r = scoreStructured(cfg, {});
   eq('Chưa điền + chưa có đáp án → pendingAi', r.pendingAi.includes('multiple_choice'), true);
   eq('... không vào aiKeyless', r.aiKeyless.includes('multiple_choice'), false);
+}
+
+// ── 13. Nhận xét ngắn phần Tự luận + ghép chung câu với phần khách quan ──
+{
+  const T = 'phương trình đường thẳng';
+  const sa1 = { short_answer: { total: 4, correct: 3, wrongIdx: [1] } };
+  const essay = [
+    { question: 'Tự luận câu 1', status: 'partial', comment: 'Thiếu hình vẽ minh họa' },
+    { question: 'Tự luận câu 2', status: 'wrong', comment: 'Tính sai delta' },
+    { question: 'Tự luận câu 3', status: 'correct', comment: 'Đúng' },
+  ];
+  const note = essayIssueNote(essay);
+  eq('Ghi chú tự luận', note, 'Phần Tự luận còn trình bày thiếu câu 1, cần cẩn thận hơn câu 2');
+  eq('Ví dụ của giáo viên (7,5đ, sai TLN, thiếu câu 1, sai câu 2)', composeAutoFeedback(7.5, sa1, T, { essayNote: note }),
+    'Con làm bài khá ổn tuy nhiên còn sai phần Trả lời ngắn, Phần Tự luận còn trình bày thiếu câu 1, cần cẩn thận hơn câu 2 và cẩn thận hơn khi làm các dạng bài về phương trình đường thẳng.');
+  eq('Không làm câu', essayIssueNote([{ question: 'Câu 4 (Tự luận)', status: 'wrong', comment: 'Học sinh bỏ trống' }]), 'Phần Tự luận còn không làm câu 4');
+  eq('Tự luận đúng hết → không nhận xét', essayIssueNote([{ question: 'Tự luận câu 1', status: 'correct' }]), '');
+  eq('Điểm ≥ 9 → không nhắc tự luận', composeAutoFeedback(9.25, {}, T, { essayNote: note }), 'Con làm bài tốt, cố gắng phát huy.');
+  eq('Chỉ lỗi tự luận (8đ)', composeAutoFeedback(8, {}, T, { essayNote: note }),
+    'Con làm bài khá tốt tuy nhiên Phần Tự luận còn trình bày thiếu câu 1, cần cẩn thận hơn câu 2 và cẩn thận hơn khi làm các dạng bài về phương trình đường thẳng.');
+  eq('Mức 5–7đ có tự luận', composeAutoFeedback(6, {}, T, { essayNote: note }),
+    'Con đã nắm được kiến thức tuy nhiên còn nhiều sai sót, cần cẩn thận hơn khi làm Trắc nghiệm, Đúng/Sai, Trả lời ngắn, Phần Tự luận còn trình bày thiếu câu 1, cần cẩn thận hơn câu 2 và luyện tập thêm các bài tập về phương trình đường thẳng.');
+  eq('Mức 5–7đ bài chỉ có tự luận', composeAutoFeedback(6, {}, T, { essayNote: note, hasObjective: false }),
+    'Con đã nắm được kiến thức tuy nhiên còn nhiều sai sót, Phần Tự luận còn trình bày thiếu câu 1, cần cẩn thận hơn câu 2 và luyện tập thêm các bài tập về phương trình đường thẳng.');
+  eq('Dưới 5đ có tự luận', composeAutoFeedback(4, {}, T, { essayNote: 'Phần Tự luận còn không làm câu 3' }),
+    'Con còn sai sót nhiều khi làm bài tập, Phần Tự luận còn không làm câu 3, cần chú ý học lại và luyện tập thêm các bài toán về phương trình đường thẳng.');
+  // Bài không có tự luận: giữ nguyên câu cũ
+  eq('Không tự luận — giữ nguyên (7đ)', composeAutoFeedback(7, sa1, T),
+    'Con làm bài khá ổn tuy nhiên còn sai phần Trả lời ngắn và cẩn thận hơn khi làm các dạng bài về phương trình đường thẳng.');
+  eq('Không tự luận — giữ nguyên (6đ)', composeAutoFeedback(6, {}, T),
+    'Con đã nắm được kiến thức tuy nhiên còn nhiều sai sót, cần cẩn thận hơn khi làm Trắc nghiệm, Đúng/Sai, Trả lời ngắn và luyện tập thêm các bài tập về phương trình đường thẳng.');
+  eq('Không tự luận — giữ nguyên (<5đ)', composeAutoFeedback(3, {}, T),
+    'Con còn sai sót nhiều khi làm bài tập, cần chú ý học lại và luyện tập thêm các bài toán về phương trình đường thẳng.');
+  eq('Lọc bỏ câu khách quan AI chấm hộ', essayDetailsOf([{ question: 'TN câu 1' }, { question: 'Đúng-Sai câu 2' }, { question: 'TLN câu 1' }, { question: 'Tự luận câu 1' }]).length, 1);
 }
 
 console.log(out.join('\n'));
