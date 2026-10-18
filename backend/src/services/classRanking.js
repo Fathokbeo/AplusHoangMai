@@ -125,4 +125,30 @@ function studentOverallAverage(db, studentId, nowIso) {
   return counted > 0 ? round1((sum / counted) * 10) : null;
 }
 
-module.exports = { classAverages, classRanking, classMonths, studentOverallAverage, isOverdue, ymOf };
+// Bảng xếp hạng lớp theo THÁNG (dùng chung cho giáo viên & học sinh).
+// month: 'YYYY-MM' (không hợp lệ/bỏ trống → tháng hiện tại). Trả về { month, months, current_month, students }
+// — students: có hạng đứng trước (hạng tăng dần), chưa có hạng xếp sau.
+function classRankingReport(db, classId, month) {
+  const currentYm = ymOf(new Date().toISOString());
+  const ym = /^\d{4}-\d{2}$/.test(String(month || '')) ? String(month) : currentYm;
+
+  const students = db.prepare(`
+    SELECT u.id, u.username, u.full_name FROM class_students cs
+    JOIN users u ON cs.student_id=u.id WHERE cs.class_id=? AND u.active=1
+  `).all(classId);
+
+  const rankMap = classRanking(db, classId, null, ym);
+  const rows = students.map((s) => {
+    const r = rankMap.get(s.id) || {};
+    return { ...s, avg: r.avg ?? null, counted: r.counted ?? 0, graded: r.graded ?? 0, rank: r.rank ?? null };
+  });
+  rows.sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity) || (b.avg ?? -1) - (a.avg ?? -1));
+
+  // Các tháng có bài tập để chọn xem lại; luôn kèm tháng hiện tại
+  const months = classMonths(db, classId);
+  if (!months.includes(currentYm)) { months.push(currentYm); months.sort(); months.reverse(); }
+
+  return { month: ym, months, current_month: currentYm, students: rows };
+}
+
+module.exports = { classAverages, classRanking, classRankingReport, classMonths, studentOverallAverage, isOverdue, ymOf };

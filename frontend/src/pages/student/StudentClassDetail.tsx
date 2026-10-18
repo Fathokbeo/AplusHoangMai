@@ -13,6 +13,7 @@ import { toast } from '../../components/Toast';
 import { parsePartsConfig, hasObjectiveParts, hasEssay, emptyStudentAnswers, PART_LABELS, PART_ORDER, type PartKey, parseHsaConfig, emptyHsaStudentAnswers, type HsaConfig, formatRemainingMs, formatDeadlineRemaining } from '../../lib/homeworkParts';
 import { parseAttachments, isViewableFile } from '../../lib/attachments';
 import AssistantScheduleModal from '../../components/AssistantScheduleModal';
+import RankingBoard from '../../components/RankingBoard';
 import FacebookIcon from '../../components/FacebookIcon';
 import {
   ChevronLeft, Play, ClipboardList, BookOpen, Upload, CheckCircle, Clock, Eye, Bot, Lock, FileText, Layers, Video,
@@ -33,7 +34,7 @@ function submittedFileUrls(hw: any): string[] {
 export default function StudentClassDetail() {
   const { id } = useParams();
   const [cls, setCls] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'content' | 'todo' | 'assistants'>('content');
+  const [activeTab, setActiveTab] = useState<'content' | 'todo' | 'assistants' | 'ranking'>('content');
   const [scheduleAssistantId, setScheduleAssistantId] = useState<number | null>(null);
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
   // Danh sách bài giảng/bài tập nào (theo key "<chương>-lessons"/"-homework") đang được bung ra trong 1 chương —
@@ -546,12 +547,13 @@ export default function StudentClassDetail() {
         </div>
       </div>
 
-      {/* Tabs: Nội dung / Bài tập cần làm / Trợ giảng */}
+      {/* Tabs: Nội dung / Bài tập cần làm / Trợ giảng / Xếp hạng */}
       <div style={{ display: 'flex', gap: 4, background: '#F5F5F5', padding: 4, borderRadius: 10, marginBottom: '1.25rem', width: isMobile ? '100%' : 'fit-content', flexWrap: 'wrap' }}>
         {[
           { key: 'content' as const, label: 'Nội dung', icon: Layers },
           { key: 'todo' as const, label: `Bài tập cần làm (${todoHomework.length})`, icon: ClipboardList },
           { key: 'assistants' as const, label: `Trợ giảng (${cls.assistants?.length || 0})`, icon: UserCog },
+          { key: 'ranking' as const, label: 'Xếp hạng', icon: Trophy },
         ].map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => setActiveTab(key)} className="btn"
             style={{ background: activeTab === key ? 'white' : 'transparent', boxShadow: activeTab === key ? '0 2px 6px rgba(0,0,0,0.08)' : 'none', color: activeTab === key ? '#C62828' : '#888', border: 'none', gap: 6 }}>
@@ -599,6 +601,9 @@ export default function StudentClassDetail() {
           </div>
         )
       )}
+
+      {/* Xếp hạng cả lớp theo tháng (giống giáo viên, ẩn tên đăng nhập của các bạn, tô dòng của mình) */}
+      {activeTab === 'ranking' && <RankingBoard url={`/student/my-classes/${id}/ranking`} />}
 
       {/* Trợ giảng: chỉ xem thông tin liên hệ + lịch làm việc, không sửa được */}
       {activeTab === 'assistants' && (

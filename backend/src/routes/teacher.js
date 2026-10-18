@@ -7,7 +7,7 @@ const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { uploadVideo, uploadCourseThumbnail, uploadLessonFile, uploadAssistantPhoto } = require('../middleware/upload');
 const { hardDeleteCourse, hardDeleteClass, hardDeleteStudent } = require('../services/cascade');
-const { classRanking, classMonths, ymOf } = require('../services/classRanking');
+const { classRankingReport } = require('../services/classRanking');
 const { compareVietnameseName } = require('../services/vietnameseName');
 
 router.use(authMiddleware, requireRole('teacher', 'admin'));
@@ -235,27 +235,7 @@ router.get('/classes/:id/ranking', (req, res) => {
   if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp' });
   if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
 
-  const currentYm = ymOf(new Date().toISOString());
-  const month = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : currentYm;
-
-  const students = db.prepare(`
-    SELECT u.id, u.username, u.full_name FROM class_students cs
-    JOIN users u ON cs.student_id=u.id WHERE cs.class_id=? AND u.active=1
-  `).all(req.params.id);
-
-  const rankMap = classRanking(db, req.params.id, null, month);
-  const rows = students.map((s) => {
-    const r = rankMap.get(s.id) || {};
-    return { ...s, avg: r.avg ?? null, counted: r.counted ?? 0, graded: r.graded ?? 0, rank: r.rank ?? null };
-  });
-  // Có hạng đứng trước (theo hạng tăng dần), chưa có hạng xếp sau
-  rows.sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity) || (b.avg ?? -1) - (a.avg ?? -1));
-
-  // Các tháng có bài tập để giáo viên chọn xem lại; luôn kèm tháng hiện tại
-  const months = classMonths(db, req.params.id);
-  if (!months.includes(currentYm)) { months.push(currentYm); months.sort(); months.reverse(); }
-
-  res.json({ month, months, current_month: currentYm, students: rows });
+  res.json(classRankingReport(db, req.params.id, req.query.month));
 });
 
 router.put('/classes/:id', (req, res) => {

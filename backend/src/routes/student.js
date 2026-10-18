@@ -3,7 +3,7 @@ const router = express.Router();
 const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { stripAnswers, stripHsaAnswers } = require('../services/homeworkParts');
-const { classRanking, studentOverallAverage } = require('../services/classRanking');
+const { classRanking, classRankingReport, studentOverallAverage } = require('../services/classRanking');
 const { parseBest } = require('../services/bestAttempt');
 
 router.use(authMiddleware, requireRole('student'));
@@ -89,6 +89,20 @@ router.get('/my-classes/:id', (req, res) => {
   // Điểm TB + xếp hạng của học sinh trong lớp này (quá hạn chưa nộp = 0 điểm)
   const mine = classRanking(db, req.params.id).get(req.user.id) || {};
   res.json({ ...cls, chapters, lessons, homework, assistants, my_avg: mine.avg ?? null, my_rank: mine.rank ?? null, rank_total: mine.total ?? 0 });
+});
+
+// Bảng xếp hạng lớp theo tháng cho học sinh (cùng cách tính với giáo viên).
+// Ẩn tên đăng nhập của các bạn khác, đánh dấu dòng của chính học sinh (is_me).
+router.get('/my-classes/:id/ranking', (req, res) => {
+  const db = getDb();
+  const enrolled = db.prepare('SELECT 1 FROM class_students WHERE class_id=? AND student_id=?').get(req.params.id, req.user.id);
+  if (!enrolled) return res.status(403).json({ message: 'Bạn không thuộc lớp này' });
+  const cls = db.prepare('SELECT id FROM classes WHERE id=? AND active=1').get(req.params.id);
+  if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp' });
+
+  const report = classRankingReport(db, req.params.id, req.query.month);
+  report.students = report.students.map(({ username, ...s }) => ({ ...s, is_me: s.id === req.user.id }));
+  res.json(report);
 });
 
 // Khóa học mà học sinh có ít nhất 1 lớp — dùng cho trang Tổng quan (chỉ hiện khóa học, bấm vào mới thấy lớp)

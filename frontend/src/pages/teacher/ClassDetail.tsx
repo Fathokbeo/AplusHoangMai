@@ -5,6 +5,7 @@ import { buildContentSections, chapterSubject, existingSectionTitles, sectionKey
 import Modal from '../../components/Modal';
 import VideoPlayer from '../../components/VideoPlayer';
 import FileViewer from '../../components/FileViewer';
+import RankingBoard from '../../components/RankingBoard';
 import PartsEditor from '../../components/PartsEditor';
 import HsaEditor from '../../components/HsaEditor';
 import useIsMobile from '../../lib/useIsMobile';
@@ -43,12 +44,6 @@ function normalizePhone(v: any): string {
   let s = String(v ?? '').replace(/[^\d+]/g, '');
   if (/^\d{9}$/.test(s) && !s.startsWith('0')) s = '0' + s;
   return s;
-}
-
-// 'YYYY-MM' → 'Tháng M/YYYY' cho ô chọn tháng xếp hạng
-function formatMonth(ym: string): string {
-  const [y, m] = (ym || '').split('-');
-  return y && m ? `Tháng ${parseInt(m)}/${y}` : ym;
 }
 
 // Badge hiển thị các phần đã bật của một bài tập (từ parts_config)
@@ -99,10 +94,6 @@ export default function ClassDetail() {
   const pdfRef = useRef<HTMLInputElement>(null);
   const answerRef = useRef<HTMLInputElement>(null);
   const draggedStudentId = useRef<number | null>(null);
-  // Xếp hạng theo tháng
-  const [ranking, setRanking] = useState<any>(null);
-  const [rankingMonth, setRankingMonth] = useState('');
-  const [rankingLoading, setRankingLoading] = useState(false);
   // File đính kèm bài giảng (chọn mới, chờ upload khi lưu)
   const [lessonFiles, setLessonFiles] = useState<{ doc: File[]; answer: File[] }>({ doc: [], answer: [] });
   const lessonDocRef = useRef<HTMLInputElement>(null);
@@ -129,22 +120,6 @@ export default function ClassDetail() {
   const [existingAssistantSearch, setExistingAssistantSearch] = useState('');
   const [selectedAssistantId, setSelectedAssistantId] = useState('');
   useEffect(() => { fetchClass(); }, [id]);
-
-  // Tải xếp hạng khi mở tab hoặc đổi tháng
-  useEffect(() => {
-    if (activeTab !== 'ranking') return;
-    (async () => {
-      setRankingLoading(true);
-      try {
-        const { data } = await api.get(`/teacher/classes/${id}/ranking`, { params: rankingMonth ? { month: rankingMonth } : {} });
-        setRanking(data);
-      } catch {
-        toast.error('Lỗi tải xếp hạng');
-      } finally {
-        setRankingLoading(false);
-      }
-    })();
-  }, [activeTab, rankingMonth, id]);
 
   // Khi mở lớp: nếu lớp chưa dùng chương thì mở sẵn nhóm "Chưa phân chương", còn lại để thu gọn
   useEffect(() => {
@@ -835,13 +810,6 @@ export default function ClassDetail() {
 
   const scheduleAssistant = (cls.assistants || []).find((a: any) => a.id === scheduleAssistantId) || null;
 
-  // Nhóm huy chương top 3 của tháng đang xem (đồng hạng → cùng huy chương)
-  const rankedStudents: any[] = ranking?.students || [];
-  const medalGroups = [
-    { rank: 1, medal: '🥇', label: 'Hạng Nhất', color: '#F9A825', bg: '#FFF8E1', border: '#FFE082' },
-    { rank: 2, medal: '🥈', label: 'Hạng Nhì', color: '#757575', bg: '#F5F5F5', border: '#E0E0E0' },
-    { rank: 3, medal: '🥉', label: 'Hạng Ba', color: '#8D6E63', bg: '#EFEBE9', border: '#D7CCC8' },
-  ].map((g) => ({ ...g, students: rankedStudents.filter((s) => s.rank === g.rank) }));
 
   return (
     <div className="fade-in">
@@ -1074,90 +1042,7 @@ export default function ClassDetail() {
       )}
 
       {/* Ranking tab: xếp hạng theo tháng, top 3 gắn huy chương vàng/bạc/đồng */}
-      {activeTab === 'ranking' && (
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: '0.82rem', color: '#888', lineHeight: 1.5 }}>
-              Xếp hạng theo <strong>điểm TB các bài tập trong tháng</strong> (quá hạn không nộp = 0 điểm). Sang tháng mới bảng tự reset — chọn tháng để xem lại.
-            </div>
-            <select className="input" style={{ width: 'auto', minWidth: 160 }} value={rankingMonth || ranking?.month || ''}
-              onChange={(e) => setRankingMonth(e.target.value)}>
-              {(ranking?.months || []).map((m: string) => (
-                <option key={m} value={m}>{formatMonth(m)}{m === ranking?.current_month ? ' (hiện tại)' : ''}</option>
-              ))}
-            </select>
-          </div>
-
-          {rankingLoading && !ranking ? (
-            <div style={{ padding: '2rem', color: '#999', textAlign: 'center' }}>Đang tải...</div>
-          ) : (
-            <>
-              {/* Podium top 3 */}
-              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
-                {medalGroups.map((g) => (
-                  <div key={g.rank} className="card" style={{ padding: '1rem 1.25rem', background: g.bg, border: `1px solid ${g.border}` }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                      <span style={{ fontSize: '1.6rem' }}>{g.medal}</span>
-                      <span style={{ fontWeight: 800, color: g.color, fontSize: '0.95rem' }}>{g.label}</span>
-                    </div>
-                    {g.students.length === 0 ? (
-                      <div style={{ fontSize: '0.82rem', color: '#aaa' }}>Chưa có</div>
-                    ) : g.students.map((s: any) => (
-                      <div key={s.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '4px 0' }}>
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{s.full_name}</div>
-                          <div style={{ fontSize: '0.75rem', color: '#999' }}>{s.username}</div>
-                        </div>
-                        <span style={{ fontWeight: 800, color: g.color, fontSize: '1.05rem' }}>{s.avg}</span>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-
-              {/* Bảng xếp hạng đầy đủ */}
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th style={{ width: 70 }}>Hạng</th>
-                      <th>Học sinh</th>
-                      <th>Điểm TB</th>
-                      <th>Số bài tính điểm</th>
-                      <th>Đã có điểm</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rankedStudents.map((s: any) => (
-                      <tr key={s.id}>
-                        <td>
-                          {s.rank ? (
-                            <span style={{ fontWeight: 800, fontSize: '0.95rem' }}>
-                              {s.rank <= 3 ? <span style={{ marginRight: 4 }}>{s.rank === 1 ? '🥇' : s.rank === 2 ? '🥈' : '🥉'}</span> : null}
-                              {s.rank}
-                            </span>
-                          ) : <span style={{ color: '#ccc' }}>—</span>}
-                        </td>
-                        <td><strong>{s.full_name}</strong><div style={{ fontSize: '0.78rem', color: '#999' }}>{s.username}</div></td>
-                        <td>
-                          {s.avg !== null
-                            ? <span style={{ fontWeight: 700, color: s.avg >= 8 ? '#2E7D32' : s.avg >= 5 ? '#E65100' : '#C62828' }}>{s.avg}/10</span>
-                            : <span style={{ color: '#ccc' }}>Chưa có</span>}
-                        </td>
-                        <td style={{ color: '#888' }}>{s.counted}</td>
-                        <td style={{ color: '#888' }}>{s.graded}</td>
-                      </tr>
-                    ))}
-                    {rankedStudents.length === 0 && (
-                      <tr><td colSpan={5} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Lớp chưa có học sinh</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-        </div>
-      )}
+      {activeTab === 'ranking' && <RankingBoard url={`/teacher/classes/${id}/ranking`} />}
 
       {/* Add Student Modal */}
       <Modal open={addStudentModal} onClose={() => setAddStudentModal(false)} title="Thêm học sinh vào lớp"
