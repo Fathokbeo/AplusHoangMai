@@ -9,6 +9,7 @@ import Home from './pages/Home';
 import CourseDetail from './pages/public/CourseDetail';
 
 import AdminDashboard from './pages/admin/AdminDashboard';
+import AdminOverview from './pages/admin/AdminOverview';
 import UserManagement from './pages/admin/UserManagement';
 import AdManagement from './pages/admin/AdManagement';
 import CourseManagement from './pages/admin/CourseManagement';
@@ -17,6 +18,7 @@ import ClassManagement from './pages/admin/ClassManagement';
 import SiteContent from './pages/admin/SiteContent';
 
 import TeacherDashboard from './pages/teacher/TeacherDashboard';
+import TeacherOverview from './pages/teacher/TeacherOverview';
 import TeacherCourseDetail from './pages/teacher/TeacherCourseDetail';
 import ClassDetail from './pages/teacher/ClassDetail';
 import HomeworkDetail from './pages/teacher/HomeworkDetail';
@@ -24,6 +26,7 @@ import StudentManagement from './pages/teacher/StudentManagement';
 import AssistantManagement from './pages/teacher/AssistantManagement';
 
 import StudentDashboard from './pages/student/StudentDashboard';
+import StudentOverview from './pages/student/StudentOverview';
 import StudentClasses from './pages/student/StudentClasses';
 import StudentCourseDetail from './pages/student/StudentCourseDetail';
 import StudentClassDetail from './pages/student/StudentClassDetail';
@@ -60,6 +63,7 @@ function AppRoutes() {
       {/* Admin */}
       <Route path="/admin" element={<ProtectedRoute role="admin"><Layout /></ProtectedRoute>}>
         <Route index element={<AdminDashboard />} />
+        <Route path="overview" element={<AdminOverview />} />
         <Route path="users" element={<UserManagement />} />
         <Route path="courses" element={<CourseManagement />} />
         <Route path="courses/:courseId" element={<AdminCourseDetail />} />
@@ -71,6 +75,7 @@ function AppRoutes() {
       {/* Teacher (admin cũng vào được) */}
       <Route path="/teacher" element={<ProtectedRoute role={['teacher', 'admin']}><Layout /></ProtectedRoute>}>
         <Route index element={<TeacherDashboard />} />
+        <Route path="overview" element={<TeacherOverview />} />
         <Route path="courses/:courseId" element={<TeacherCourseDetail />} />
         <Route path="classes/:id" element={<ClassDetail />} />
         <Route path="homework/:id" element={<HomeworkDetail />} />
@@ -81,6 +86,7 @@ function AppRoutes() {
       {/* Student */}
       <Route path="/student" element={<ProtectedRoute role="student"><Layout /></ProtectedRoute>}>
         <Route index element={<StudentDashboard />} />
+        <Route path="overview" element={<StudentOverview />} />
         <Route path="courses/:courseId" element={<StudentCourseDetail />} />
         <Route path="classes" element={<StudentClasses />} />
         <Route path="classes/:id" element={<StudentClassDetail />} />

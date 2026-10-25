@@ -175,6 +175,15 @@ tbody tr:hover { background: #FAFAFA; }
 .page-title { font-size: 1.5rem; font-weight: 700; color: #1A1A2E; margin-bottom: 1.5rem; }
 .section-title { font-size: 1.1rem; font-weight: 700; color: #1A1A2E; margin-bottom: 0.75rem; }
 
+/* Danh sách dạng dòng (trang Tổng quát) */
+.list { background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.list-row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; min-height: 56px; text-decoration: none; color: inherit; position: relative; transition: background 0.12s; }
+.list-row + .list-row { border-top: 1px solid #F2F2F2; }
+a.list-row:hover { background: #FFF8F8; }
+.list-row-main { flex: 1; min-width: 0; }
+.list-row-title { font-weight: 600; font-size: 0.93rem; color: #1A1A2E; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-row-sub { font-size: 0.8rem; color: #888; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ── Sidebar ──────────────────────────────────────────────── */
 .sidebar {
   width: 240px; min-width: 240px;
@@ -201,7 +210,7 @@ tbody tr:hover { background: #FAFAFA; }
 .nav-section { padding: 0.75rem 1.25rem 0.25rem; font-size: 0.73rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(255,255,255,0.35); }
 
 /* ── Main content ─────────────────────────────────────────── */
-.main-content { margin-left: 240px; min-height: 100vh; transition: margin-left 0.3s ease; }
+.main-content { margin-left: 240px; min-height: 100vh; min-width: 0; transition: margin-left 0.3s ease; }
 .main-content.sidebar-collapsed { margin-left: 0; }
 .main-content.no-sidebar { margin-left: 0; }
 .content-area { padding: 1.5rem 2rem; }

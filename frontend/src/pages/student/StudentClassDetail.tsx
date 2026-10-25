@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import api from '../../lib/api';
 import { buildContentSections } from '../../lib/classContent';
 import VideoPlayer from '../../components/VideoPlayer';
@@ -34,7 +34,13 @@ function submittedFileUrls(hw: any): string[] {
 export default function StudentClassDetail() {
   const { id } = useParams();
   const [cls, setCls] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'content' | 'todo' | 'assistants' | 'ranking'>('content');
+  const [searchParams] = useSearchParams();
+  type Tab = 'content' | 'todo' | 'assistants' | 'ranking';
+  // Mở thẳng một tab qua ?tab=… (vd từ "Việc cần làm" ở trang Tổng quát)
+  const [activeTab, setActiveTab] = useState<Tab>(() => {
+    const t = searchParams.get('tab');
+    return t === 'todo' || t === 'assistants' || t === 'ranking' ? t : 'content';
+  });
   const [scheduleAssistantId, setScheduleAssistantId] = useState<number | null>(null);
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
   // Danh sách bài giảng/bài tập nào (theo key "<chương>-lessons"/"-homework") đang được bung ra trong 1 chương —

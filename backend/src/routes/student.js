@@ -145,6 +145,40 @@ router.get('/my-courses/:courseId', (req, res) => {
   res.json({ ...course, classes: withRank });
 });
 
+// Tổng quan "thông minh" cho trang chủ học sinh: việc cần làm ở TẤT CẢ các lớp (bài còn hạn, chưa nộp,
+// hạn gần nhất trước), điểm vừa chấm gần đây, và tình hình từng lớp (điểm TB + hạng tháng này).
+router.get('/overview', (req, res) => {
+  const db = getDb();
+  const uid = req.user.id;
+  const now = new Date().toISOString();
+  const classes = db.prepare(`
+    SELECT cl.id, cl.title, co.title course_title, u.full_name teacher_name
+    FROM class_students cs JOIN classes cl ON cs.class_id=cl.id
+    LEFT JOIN courses co ON cl.course_id=co.id LEFT JOIN users u ON cl.teacher_id=u.id
+    WHERE cs.student_id=? AND cl.active=1 ORDER BY cl.created_at DESC
+  `).all(uid).map((c) => {
+    const mine = classRanking(db, c.id).get(uid) || {};
+    return { ...c, my_avg: mine.avg ?? null, my_rank: mine.rank ?? null, rank_total: mine.total ?? 0 };
+  });
+  const todo = db.prepare(`
+    SELECT h.id, h.title, h.due_date, h.exam_type, h.time_limit_minutes, h.max_score, cl.id class_id, cl.title class_title
+    FROM homework h JOIN classes cl ON h.class_id=cl.id
+    JOIN class_students cs ON cs.class_id=cl.id AND cs.student_id=?
+    LEFT JOIN submissions s ON s.homework_id=h.id AND s.student_id=?
+    WHERE cl.active=1 AND h.due_date IS NOT NULL AND h.due_date>=? AND s.id IS NULL
+    ORDER BY h.due_date LIMIT 20
+  `).all(uid, uid, now);
+  // Điểm hiệu lực = điểm cao nhất (lần mới đang chờ chấm thì lấy điểm lần trước)
+  const recent = db.prepare(`
+    SELECT h.id homework_id, h.title, h.max_score, cl.id class_id, cl.title class_title,
+           COALESCE(s.score, s.best_score) score, COALESCE(s.graded_at, s.submitted_at) at
+    FROM submissions s JOIN homework h ON s.homework_id=h.id JOIN classes cl ON h.class_id=cl.id
+    WHERE s.student_id=? AND cl.active=1 AND COALESCE(s.score, s.best_score) IS NOT NULL
+    ORDER BY at DESC LIMIT 5
+  `).all(uid);
+  res.json({ classes, todo, recent });
+});
+
 // Student's profile/stats
 router.get('/stats', (req, res) => {
   const db = getDb();

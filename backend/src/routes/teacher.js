@@ -7,7 +7,7 @@ const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { uploadVideo, uploadCourseThumbnail, uploadLessonFile, uploadAssistantPhoto } = require('../middleware/upload');
 const { hardDeleteCourse, hardDeleteClass, hardDeleteStudent } = require('../services/cascade');
-const { classRankingReport } = require('../services/classRanking');
+const { classRankingReport, classAverages } = require('../services/classRanking');
 const { compareVietnameseName } = require('../services/vietnameseName');
 
 router.use(authMiddleware, requireRole('teacher', 'admin'));
@@ -104,6 +104,64 @@ router.get('/all-assistants', (req, res) => {
     p.push(req.query.exclude_class_id);
   }
   res.json(db.prepare(q + ' ORDER BY a.full_name').all(...p));
+});
+
+// ── Tổng quan "thông minh" cho giáo viên: bài đến hạn HÔM NAY (đã hết hạn trong ngày + sắp hết hạn), số bài AI
+// đang chấm, hạn nộp từ ngày mai trở đi kèm tỉ lệ đã nộp, danh sách lớp kèm số liệu. Admin thấy toàn bộ lớp.
+// ?from=&to= (ISO): đầu & cuối "hôm nay" theo giờ máy người dùng; không gửi → theo giờ máy chủ.
+router.get('/overview', (req, res) => {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const iso = (v) => { const d = new Date(String(v || '')); return isNaN(d.getTime()) ? null : d.toISOString(); };
+  const d0 = new Date(); d0.setHours(0, 0, 0, 0);
+  const d1 = new Date(); d1.setHours(23, 59, 59, 999);
+  const dayFrom = iso(req.query.from) || d0.toISOString();
+  const dayTo = iso(req.query.to) || d1.toISOString();
+  const own = req.user.role === 'teacher' ? ' AND cl.teacher_id=?' : '';
+  const p = req.user.role === 'teacher' ? [req.user.id] : [];
+  const toGrade = db.prepare(`
+    SELECT s.id submission_id, s.submitted_at, s.grading_status, u.full_name,
+           h.id homework_id, h.title homework_title, cl.id class_id, cl.title class_title
+    FROM submissions s JOIN homework h ON s.homework_id=h.id JOIN classes cl ON h.class_id=cl.id JOIN users u ON s.student_id=u.id
+    WHERE cl.active=1 AND s.score IS NULL AND (s.grading_status IS NULL OR s.grading_status='failed')${own}
+    ORDER BY s.submitted_at LIMIT 30
+  `).all(...p);
+  const aiPending = db.prepare(`
+    SELECT COUNT(*) c FROM submissions s JOIN homework h ON s.homework_id=h.id JOIN classes cl ON h.class_id=cl.id
+    WHERE cl.active=1 AND s.grading_status IN ('pending','grading')${own}
+  `).get(...p).c;
+  const hwCols = `h.id, h.title, h.due_date, cl.id class_id, cl.title class_title,
+      (SELECT COUNT(*) FROM class_students cs JOIN users u ON u.id=cs.student_id WHERE cs.class_id=cl.id AND u.active=1) total,
+      (SELECT COUNT(*) FROM submissions s WHERE s.homework_id=h.id) submitted,
+      (SELECT COUNT(*) FROM submissions s WHERE s.homework_id=h.id AND s.score IS NULL AND (s.grading_status IS NULL OR s.grading_status='failed')) to_grade`;
+  // Hôm nay: hạn nộp nằm trong ngày (kể cả đã qua giờ hạn)
+  const today = db.prepare(`
+    SELECT ${hwCols} FROM homework h JOIN classes cl ON h.class_id=cl.id
+    WHERE cl.active=1 AND h.due_date IS NOT NULL AND h.due_date>=? AND h.due_date<=?${own}
+    ORDER BY h.due_date
+  `).all(dayFrom, dayTo, ...p);
+  // Sắp đến hạn: từ sau hôm nay trở đi
+  const upcoming = db.prepare(`
+    SELECT ${hwCols} FROM homework h JOIN classes cl ON h.class_id=cl.id
+    WHERE cl.active=1 AND h.due_date IS NOT NULL AND h.due_date>?${own}
+    ORDER BY h.due_date LIMIT 8
+  `).all(dayTo, ...p);
+  // Lớp học: sĩ số, số bài tập, bài chờ chấm tay, hạn nộp gần nhất, điểm TB cả lớp tháng này (thang 10)
+  const classes = db.prepare(`
+    SELECT cl.id, cl.title, co.title course_title,
+      (SELECT COUNT(*) FROM class_students cs JOIN users u ON u.id=cs.student_id WHERE cs.class_id=cl.id AND u.active=1) student_count,
+      (SELECT COUNT(*) FROM homework h WHERE h.class_id=cl.id) homework_count,
+      (SELECT COUNT(*) FROM submissions s JOIN homework h ON s.homework_id=h.id
+        WHERE h.class_id=cl.id AND s.score IS NULL AND (s.grading_status IS NULL OR s.grading_status='failed')) to_grade,
+      (SELECT MIN(h.due_date) FROM homework h WHERE h.class_id=cl.id AND h.due_date>=?) next_due
+    FROM classes cl LEFT JOIN courses co ON cl.course_id=co.id
+    WHERE cl.active=1${own}
+    ORDER BY co.title, cl.title
+  `).all(now, ...p).map((c) => {
+    const avgs = [...classAverages(db, c.id).values()].map((v) => v.avg).filter((v) => v !== null);
+    return { ...c, class_avg: avgs.length ? Math.round((avgs.reduce((a, b) => a + b, 0) / avgs.length) * 10) / 10 : null };
+  });
+  res.json({ today, to_grade: toGrade, ai_pending: aiPending, upcoming, classes, day: { from: dayFrom, to: dayTo } });
 });
 
 // ── Courses (teacher can create & manage own courses) ──────────────────
