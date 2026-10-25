@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { MessageSquareText, Download, Loader2, Check, CheckCheck, ChevronDown } from 'lucide-react';
 import { buildStudentReview, summarizeEssayFeedback, homeworkHasEssay, ERROR_TAGS, type ErrorTag } from '../lib/feedbackSummary';
 import useIsMobile from '../lib/useIsMobile';
@@ -8,7 +8,7 @@ import { toast } from './Toast';
 // + nhận xét từng học sinh (đầy đủ như file Excel: nhận xét chi tiết + nhận xét tự luận ngắn gọn) kèm
 // nhãn lỗi. Mức điểm tính theo tỉ lệ trên thang của bài (quy về thang 10). Tải được ra file PDF.
 // Cột "Điểm 10p" và "Điểm danh" nhập trực tiếp trên bảng (giáo viên / trợ giảng), lưu ngay khi thay đổi.
-// "Bài học hôm nay" và "Ngày" do giáo viên tự điền ngay dưới dải tiêu đề, lưu khi rời ô.
+// "Bài học hôm nay" (chữ to, đậm) và "Ngày" do giáo viên tự điền ngay trên dải tiêu đề, lưu khi rời ô.
 
 export type Attendance = 'present' | 'absent' | 'online' | 'other_shift';
 export type MarkUpdate = { student_id: number; quiz_score?: number | null; attendance?: Attendance | null };
@@ -70,9 +70,10 @@ function QuizInput({ value, onSave }: { value: number | null | undefined; onSave
   );
 }
 
-// Ô "Bài học hôm nay" / "Ngày": lưu khi rời ô hoặc nhấn Enter (ô ngày lưu luôn khi chọn xong một ngày)
-function InfoField({ label, type = 'text', value, placeholder, onSave }: {
-  label: string; type?: 'text' | 'date'; value: string; placeholder?: string; onSave: (v: string) => Promise<void>;
+// Ô "Bài học hôm nay" / "Ngày" trên dải tiêu đề (chữ trắng, nền trong suốt): lưu khi rời ô hoặc nhấn Enter
+// (ô ngày lưu luôn khi chọn xong một ngày). Gạch chân chuyển xanh khi đã lưu, vàng khi lỗi.
+function InfoField({ type = 'text', value, placeholder, ariaLabel, style, onSave }: {
+  type?: 'text' | 'date'; value: string; placeholder?: string; ariaLabel: string; style?: CSSProperties; onSave: (v: string) => Promise<void>;
 }) {
   const [text, setText] = useState(value);
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -92,28 +93,30 @@ function InfoField({ label, type = 'text', value, placeholder, onSave }: {
     }
   };
 
-  const border = state === 'saved' ? '#2E7D32' : state === 'error' ? '#C62828' : undefined;
+  const line = state === 'saved' ? '#A5D6A7' : state === 'error' ? '#FFEB3B' : 'rgba(255,255,255,0.45)';
   return (
-    <label style={{ display: 'block', minWidth: 0 }}>
-      <span style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#666', marginBottom: 5 }}>{label}</span>
-      <input
-        className="input"
-        type={type}
-        value={text}
-        maxLength={500}
-        placeholder={placeholder}
-        onChange={(e) => {
-          setText(e.target.value);
-          if (type === 'date' && e.target.value) commit(e.target.value);
-        }}
-        onBlur={(e) => commit(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-          if (e.key === 'Escape') { setText(value); (e.target as HTMLInputElement).blur(); }
-        }}
-        style={{ ...(border ? { borderColor: border } : {}), background: state === 'saving' ? '#FAFAFA' : 'white', transition: 'border-color 0.2s' }}
-      />
-    </label>
+    <input
+      className="report-head-input"
+      type={type}
+      value={text}
+      maxLength={500}
+      placeholder={placeholder}
+      aria-label={ariaLabel}
+      onChange={(e) => {
+        setText(e.target.value);
+        if (type === 'date' && e.target.value) commit(e.target.value);
+      }}
+      onBlur={(e) => commit(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        if (e.key === 'Escape') { setText(value); (e.target as HTMLInputElement).blur(); }
+      }}
+      style={{
+        background: 'transparent', color: 'white', border: 'none', borderBottom: `2px dashed ${line}`, outline: 'none',
+        fontFamily: 'inherit', padding: '2px 0', minWidth: 0, opacity: state === 'saving' ? 0.7 : 1, transition: 'border-color 0.2s',
+        colorScheme: 'dark', ...style,
+      }}
+    />
   );
 }
 
@@ -327,7 +330,8 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
 
   return (
     <div className="card" style={{ padding: 0, overflow: 'hidden', ...(forPdf ? { boxShadow: 'none', borderRadius: 0 } : {}) }}>
-      {/* Dải tiêu đề: tên mục + bài tập + nút tải ở hàng trên; lớp, hạn nộp, thang điểm dạng nhãn ở hàng dưới */}
+      {/* Dải tiêu đề: tên mục + bài tập + nút tải ở hàng trên; "Bài học hôm nay" (to, đậm) + ngày ở giữa;
+          lớp, hạn nộp, thang điểm dạng nhãn ở hàng dưới */}
       <div data-pdf-break style={{ background: 'linear-gradient(135deg, #C62828, #8E0000)', color: 'white', padding: isMobile ? '1rem 1.1rem' : '1.25rem 1.5rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 14 }}>
           <span style={{ width: isMobile ? 38 : 46, height: isMobile ? 38 : 46, borderRadius: 12, background: 'rgba(255,255,255,0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -346,7 +350,28 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
             </button>
           )}
         </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12, paddingLeft: isMobile ? 0 : 60 }}>
+        {(infoEditable || lesson || lessonDate) && (
+          <div style={{ marginTop: 14, paddingLeft: isMobile ? 0 : 60 }}>
+            {infoEditable && <style>{`.report-head-input::placeholder { color: rgba(255,255,255,0.6); }`}</style>}
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, fontSize: '0.72rem', letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700 }}>
+              <span style={{ opacity: 0.85 }}>Bài học hôm nay</span>
+              {infoEditable ? (
+                <>
+                  <span style={{ opacity: 0.6 }}>·</span>
+                  <InfoField type="date" value={lessonDate} ariaLabel="Ngày" onSave={(v) => onSaveInfo!({ report_date: v })}
+                    style={{ fontSize: '0.8rem', fontWeight: 700, letterSpacing: 0 }} />
+                </>
+              ) : lessonDate && <span style={{ opacity: 0.85 }}>· {viDate(lessonDate)}</span>}
+            </div>
+            {infoEditable ? (
+              <InfoField value={lesson} ariaLabel="Bài học hôm nay" placeholder="Bấm để nhập bài học hôm nay…" onSave={(v) => onSaveInfo!({ report_lesson: v })}
+                style={{ display: 'block', width: '100%', marginTop: 4, fontSize: isMobile ? '1.35rem' : '1.75rem', fontWeight: 800, lineHeight: 1.25 }} />
+            ) : lesson && (
+              <div style={{ marginTop: 4, fontSize: isMobile ? '1.35rem' : '1.75rem', fontWeight: 800, lineHeight: 1.25 }}>{lesson}</div>
+            )}
+          </div>
+        )}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 14, paddingLeft: isMobile ? 0 : 60 }}>
           {hw.class_title && (
             <span style={{ background: 'white', color: '#C62828', borderRadius: 99, padding: '3px 12px', fontSize: '0.8rem', fontWeight: 800 }}>Lớp {hw.class_title}</span>
           )}
@@ -361,20 +386,6 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
       </div>
 
       <div style={{ padding: isMobile ? '1rem' : '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: 22 }}>
-        {/* Bài học hôm nay + ngày: giáo viên tự điền; bản PDF in ra dạng chữ (bỏ qua nếu chưa điền) */}
-        {infoEditable ? (
-          <div data-pdf-break style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) 190px', gap: 12 }}>
-            <InfoField label="Bài học hôm nay" value={lesson} placeholder="vd: Phương trình đường thẳng — vị trí tương đối"
-              onSave={(v) => onSaveInfo!({ report_lesson: v })} />
-            <InfoField label="Ngày" type="date" value={lessonDate} onSave={(v) => onSaveInfo!({ report_date: v })} />
-          </div>
-        ) : (lesson || lessonDate) ? (
-          <div data-pdf-break style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 28px', border: '1px solid #EEE', borderLeft: '4px solid #C62828', borderRadius: 10, padding: '0.7rem 1rem', fontSize: '0.9rem', color: '#333' }}>
-            {lesson && <span style={{ flex: 1, minWidth: 0 }}><strong style={{ color: '#1A1A2E' }}>Bài học hôm nay:</strong> {lesson}</span>}
-            {lessonDate && <span><strong style={{ color: '#1A1A2E' }}>Ngày:</strong> {viDate(lessonDate)}</span>}
-          </div>
-        ) : null}
-
         {/* 4 ô tổng quan */}
         <div data-pdf-break style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, minmax(0, 1fr))', gap: 12 }}>
           {stats.map((st) => (
