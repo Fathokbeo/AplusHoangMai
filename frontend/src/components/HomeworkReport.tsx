@@ -340,7 +340,7 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: isMobile ? '1.2rem' : '1.45rem', fontWeight: 800, lineHeight: 1.2 }}>Nhận xét</div>
             <div style={{ fontSize: '0.88rem', opacity: 0.9, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: forPdf ? 'normal' : 'nowrap' }}>
-              {hw.title}
+              <strong>BTVN:</strong> {hw.title}
             </div>
           </div>
           {!forPdf && onDownload && (
