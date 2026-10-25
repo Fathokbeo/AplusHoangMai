@@ -536,6 +536,27 @@ router.put('/homework/:id/marks', requireRole('teacher', 'admin'), (req, res) =>
   res.json({ marks: saved });
 });
 
+// ── Thông tin buổi học ở mục "Nhận xét" (teacher/admin) ───────────────
+// Body: { report_lesson?, report_date? } — chỉ ghi các trường có gửi lên; chuỗi rỗng / null = xóa.
+router.put('/homework/:id/report-info', requireRole('teacher', 'admin'), (req, res) => {
+  const db = getDb();
+  const hw = db.prepare('SELECT h.id,c.teacher_id FROM homework h JOIN classes c ON h.class_id=c.id WHERE h.id=?').get(req.params.id);
+  if (!hw) return res.status(404).json({ message: 'Không tìm thấy' });
+  if (req.user.role === 'teacher' && hw.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  const body = req.body || {};
+  if ('report_lesson' in body) {
+    const v = String(body.report_lesson ?? '').trim();
+    if (v.length > 500) return res.status(400).json({ message: 'Nội dung bài học tối đa 500 ký tự' });
+    db.prepare('UPDATE homework SET report_lesson=? WHERE id=?').run(v || null, hw.id);
+  }
+  if ('report_date' in body) {
+    const v = String(body.report_date ?? '').trim();
+    if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) return res.status(400).json({ message: 'Ngày không hợp lệ' });
+    db.prepare('UPDATE homework SET report_date=? WHERE id=?').run(v || null, hw.id);
+  }
+  res.json(db.prepare('SELECT report_lesson,report_date FROM homework WHERE id=?').get(hw.id));
+});
+
 // ── Grade submission (teacher/admin) ──────────────────────────────────
 router.put('/submissions/:id/grade', requireRole('teacher', 'admin'), (req, res) => {
   const { score, feedback } = req.body;

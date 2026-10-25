@@ -393,6 +393,13 @@ function initSchema() {
   if (!hwCols.some(c => c.name === 'time_limit_minutes')) {
     db.exec('ALTER TABLE homework ADD COLUMN time_limit_minutes INTEGER');
   }
+  // Thông tin buổi học giáo viên tự điền ở mục "Nhận xét": bài học hôm nay + ngày học (YYYY-MM-DD).
+  if (!hwCols.some(c => c.name === 'report_lesson')) {
+    db.exec('ALTER TABLE homework ADD COLUMN report_lesson TEXT');
+  }
+  if (!hwCols.some(c => c.name === 'report_date')) {
+    db.exec('ALTER TABLE homework ADD COLUMN report_date TEXT');
+  }
 
   // Migration: trước đây mỗi lớp giữ 1 BẢN SAO riêng của trợ giảng (class_assistants chứa luôn họ tên,
   // ảnh, SĐT, lịch làm việc) nên sửa ở lớp này không ảnh hưởng lớp khác. Nay tách thành bảng assistants

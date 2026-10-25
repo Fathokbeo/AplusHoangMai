@@ -8,9 +8,14 @@ import { toast } from './Toast';
 // + nhận xét từng học sinh (đầy đủ như file Excel: nhận xét chi tiết + nhận xét tự luận ngắn gọn) kèm
 // nhãn lỗi. Mức điểm tính theo tỉ lệ trên thang của bài (quy về thang 10). Tải được ra file PDF.
 // Cột "Điểm 10p" và "Điểm danh" nhập trực tiếp trên bảng (giáo viên / trợ giảng), lưu ngay khi thay đổi.
+// "Bài học hôm nay" và "Ngày" do giáo viên tự điền ngay dưới dải tiêu đề, lưu khi rời ô.
 
 export type Attendance = 'present' | 'absent' | 'online' | 'other_shift';
 export type MarkUpdate = { student_id: number; quiz_score?: number | null; attendance?: Attendance | null };
+export type ReportInfo = { report_lesson?: string; report_date?: string };
+
+// "2026-10-25" → "25/10/2026"
+const viDate = (d?: string | null) => (d ? d.split('-').reverse().join('/') : '');
 
 export const ATTENDANCE_LABEL: Record<Attendance, string> = { present: 'Đi học', absent: 'Nghỉ', online: 'Online', other_shift: 'Trái ca' };
 const ATTENDANCE_OPTS: { key: Attendance; label: string; color: string; bg: string }[] = [
@@ -62,6 +67,53 @@ function QuizInput({ value, onSave }: { value: number | null | undefined; onSave
       }}
       style={{ width: 56, padding: '4px 6px', border: `1.5px solid ${border}`, borderRadius: 7, textAlign: 'center', fontSize: '0.88rem', fontWeight: 700, color: '#1A1A2E', background: state === 'saving' ? '#FAFAFA' : 'white', outline: 'none', transition: 'border-color 0.2s' }}
     />
+  );
+}
+
+// Ô "Bài học hôm nay" / "Ngày": lưu khi rời ô hoặc nhấn Enter (ô ngày lưu luôn khi chọn xong một ngày)
+function InfoField({ label, type = 'text', value, placeholder, onSave }: {
+  label: string; type?: 'text' | 'date'; value: string; placeholder?: string; onSave: (v: string) => Promise<void>;
+}) {
+  const [text, setText] = useState(value);
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  useEffect(() => { setText(value); }, [value]);
+
+  const commit = async (v: string) => {
+    const t = v.trim();
+    if (t === value) return;
+    setState('saving');
+    try {
+      await onSave(t);
+      setState('saved');
+      setTimeout(() => setState('idle'), 1200);
+    } catch {
+      setState('error');
+      setText(value);
+    }
+  };
+
+  const border = state === 'saved' ? '#2E7D32' : state === 'error' ? '#C62828' : undefined;
+  return (
+    <label style={{ display: 'block', minWidth: 0 }}>
+      <span style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#666', marginBottom: 5 }}>{label}</span>
+      <input
+        className="input"
+        type={type}
+        value={text}
+        maxLength={500}
+        placeholder={placeholder}
+        onChange={(e) => {
+          setText(e.target.value);
+          if (type === 'date' && e.target.value) commit(e.target.value);
+        }}
+        onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          if (e.key === 'Escape') { setText(value); (e.target as HTMLInputElement).blur(); }
+        }}
+        style={{ ...(border ? { borderColor: border } : {}), background: state === 'saving' ? '#FAFAFA' : 'white', transition: 'border-color 0.2s' }}
+      />
+    </label>
   );
 }
 
@@ -176,10 +228,12 @@ const TAG_SHORT: Record<ErrorTag, string> = Object.fromEntries(ERROR_TAGS.map((t
 // Bản PDF luôn dựng ở bố cục máy tính với bề rộng cố định (không phụ thuộc màn hình đang dùng)
 const PDF_WIDTH = 900;
 
-// "Nhận xét 12A1 18-10-2026.pdf" — ngày là ngày tải file
-function pdfFileName(classTitle: string | undefined) {
+// "Nhận xét 12A1 18-10-2026.pdf" — ngày là "Ngày" giáo viên đã điền, chưa điền thì lấy ngày tải file
+function pdfFileName(classTitle: string | undefined, reportDate?: string | null) {
   const d = new Date();
-  const date = `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+  const date = reportDate
+    ? reportDate.split('-').reverse().join('-')
+    : `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
   const cls = String(classTitle || '').replace(/[\\/:*?"<>|]/g, '').trim();
   return `Nhận xét ${cls ? `${cls} ` : ''}${date}.pdf`;
 }
@@ -227,10 +281,14 @@ type CardProps = {
   downloading?: boolean;
   onDownload?: () => void;
   onSaveMarks?: (marks: MarkUpdate[]) => Promise<void>;
+  onSaveInfo?: (info: ReportInfo) => Promise<void>;
 };
 
-function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false, onDownload, onSaveMarks }: CardProps) {
+function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false, onDownload, onSaveMarks, onSaveInfo }: CardProps) {
   const editable = !forPdf && !!onSaveMarks;
+  const infoEditable = !forPdf && !!onSaveInfo;
+  const lesson = String(hw.report_lesson || '');
+  const lessonDate = String(hw.report_date || '');
   const save = (m: MarkUpdate[]) => (onSaveMarks ? onSaveMarks(m) : Promise.resolve());
   const attCount = (k: Attendance) => roster.filter((s) => s.attendance === k).length;
   const unmarked = roster.filter((s) => !s.attendance);
@@ -269,36 +327,54 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
 
   return (
     <div className="card" style={{ padding: 0, overflow: 'hidden', ...(forPdf ? { boxShadow: 'none', borderRadius: 0 } : {}) }}>
-      {/* Dải tiêu đề */}
-      <div data-pdf-break style={{ background: 'linear-gradient(135deg, #C62828, #8E0000)', color: 'white', padding: isMobile ? '1rem 1.1rem' : '1.25rem 1.5rem', display: 'flex', alignItems: 'center', gap: 16 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: '0.72rem', letterSpacing: '0.14em', textTransform: 'uppercase', opacity: 0.8, fontWeight: 700 }}>
-            Bài tập về nhà{hw.due_date ? ` · hạn ${new Date(hw.due_date).toLocaleDateString('vi-VN')}` : ''}
-          </div>
-          <div style={{ fontSize: isMobile ? '1.25rem' : '1.55rem', fontWeight: 800, margin: '4px 0 2px', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <MessageSquareText size={isMobile ? 20 : 24} /> Nhận xét
-          </div>
-          <div style={{ fontSize: '0.85rem', opacity: 0.9, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: forPdf ? 'normal' : 'nowrap' }}>
-            {hw.title} · điểm tối đa {fmt(max)}
-          </div>
-        </div>
-        <div style={{ textAlign: 'right', flexShrink: 0, maxWidth: '40%', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
-          {hw.class_title && !isMobile && (
-            <div style={{ minWidth: 0, maxWidth: '100%' }}>
-              <div style={{ fontSize: '0.75rem', opacity: 0.8 }}>Lớp</div>
-              <div style={{ fontSize: '1.4rem', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hw.class_title}</div>
+      {/* Dải tiêu đề: tên mục + bài tập + nút tải ở hàng trên; lớp, hạn nộp, thang điểm dạng nhãn ở hàng dưới */}
+      <div data-pdf-break style={{ background: 'linear-gradient(135deg, #C62828, #8E0000)', color: 'white', padding: isMobile ? '1rem 1.1rem' : '1.25rem 1.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 14 }}>
+          <span style={{ width: isMobile ? 38 : 46, height: isMobile ? 38 : 46, borderRadius: 12, background: 'rgba(255,255,255,0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <MessageSquareText size={isMobile ? 19 : 23} />
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: isMobile ? '1.2rem' : '1.45rem', fontWeight: 800, lineHeight: 1.2 }}>Nhận xét</div>
+            <div style={{ fontSize: '0.88rem', opacity: 0.9, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: forPdf ? 'normal' : 'nowrap' }}>
+              {hw.title}
             </div>
-          )}
+          </div>
           {!forPdf && onDownload && (
             <button className="btn btn-sm" onClick={onDownload} disabled={downloading} title="Tải phần nhận xét ra file PDF"
-              style={{ background: 'white', color: '#C62828', border: 'none', fontWeight: 700 }}>
+              style={{ background: 'white', color: '#C62828', border: 'none', fontWeight: 700, flexShrink: 0 }}>
               {downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} {downloading ? 'Đang tạo...' : 'Tải PDF'}
             </button>
           )}
         </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12, paddingLeft: isMobile ? 0 : 60 }}>
+          {hw.class_title && (
+            <span style={{ background: 'white', color: '#C62828', borderRadius: 99, padding: '3px 12px', fontSize: '0.8rem', fontWeight: 800 }}>Lớp {hw.class_title}</span>
+          )}
+          {[
+            'Bài tập về nhà',
+            hw.due_date ? `Hạn nộp ${new Date(hw.due_date).toLocaleDateString('vi-VN')}` : null,
+            `Điểm tối đa ${fmt(max)}`,
+          ].filter(Boolean).map((t) => (
+            <span key={t} style={{ background: 'rgba(255,255,255,0.16)', borderRadius: 99, padding: '3px 12px', fontSize: '0.8rem', fontWeight: 600 }}>{t}</span>
+          ))}
+        </div>
       </div>
 
       <div style={{ padding: isMobile ? '1rem' : '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: 22 }}>
+        {/* Bài học hôm nay + ngày: giáo viên tự điền; bản PDF in ra dạng chữ (bỏ qua nếu chưa điền) */}
+        {infoEditable ? (
+          <div data-pdf-break style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) 190px', gap: 12 }}>
+            <InfoField label="Bài học hôm nay" value={lesson} placeholder="vd: Phương trình đường thẳng — vị trí tương đối"
+              onSave={(v) => onSaveInfo!({ report_lesson: v })} />
+            <InfoField label="Ngày" type="date" value={lessonDate} onSave={(v) => onSaveInfo!({ report_date: v })} />
+          </div>
+        ) : (lesson || lessonDate) ? (
+          <div data-pdf-break style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 28px', border: '1px solid #EEE', borderLeft: '4px solid #C62828', borderRadius: 10, padding: '0.7rem 1rem', fontSize: '0.9rem', color: '#333' }}>
+            {lesson && <span style={{ flex: 1, minWidth: 0 }}><strong style={{ color: '#1A1A2E' }}>Bài học hôm nay:</strong> {lesson}</span>}
+            {lessonDate && <span><strong style={{ color: '#1A1A2E' }}>Ngày:</strong> {viDate(lessonDate)}</span>}
+          </div>
+        ) : null}
+
         {/* 4 ô tổng quan */}
         <div data-pdf-break style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, minmax(0, 1fr))', gap: 12 }}>
           {stats.map((st) => (
@@ -448,7 +524,9 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
   );
 }
 
-export default function HomeworkReport({ hw, roster, onSaveMarks }: { hw: any; roster: any[]; onSaveMarks?: (marks: MarkUpdate[]) => Promise<void> }) {
+export default function HomeworkReport({ hw, roster, onSaveMarks, onSaveInfo }: {
+  hw: any; roster: any[]; onSaveMarks?: (marks: MarkUpdate[]) => Promise<void>; onSaveInfo?: (info: ReportInfo) => Promise<void>;
+}) {
   const isMobile = useIsMobile();
   const [exporting, setExporting] = useState(false);
   const pdfRef = useRef<HTMLDivElement>(null);
@@ -461,7 +539,7 @@ export default function HomeworkReport({ hw, roster, onSaveMarks }: { hw: any; r
     const frame = requestAnimationFrame(async () => {
       try {
         if (!pdfRef.current) throw new Error('no node');
-        await exportPdf(pdfRef.current, pdfFileName(hw.class_title));
+        await exportPdf(pdfRef.current, pdfFileName(hw.class_title, hw.report_date));
         if (!cancelled) toast.success('Đã tải file PDF');
       } catch {
         if (!cancelled) toast.error('Không tạo được file PDF');
@@ -474,7 +552,7 @@ export default function HomeworkReport({ hw, roster, onSaveMarks }: { hw: any; r
 
   return (
     <>
-      <ReportCard hw={hw} roster={roster} isMobile={isMobile} downloading={exporting} onDownload={() => setExporting(true)} onSaveMarks={onSaveMarks} />
+      <ReportCard hw={hw} roster={roster} isMobile={isMobile} downloading={exporting} onDownload={() => setExporting(true)} onSaveMarks={onSaveMarks} onSaveInfo={onSaveInfo} />
       {exporting && (
         <div style={{ position: 'fixed', left: -100000, top: 0, width: PDF_WIDTH, pointerEvents: 'none' }} aria-hidden>
           <div ref={pdfRef} style={{ width: PDF_WIDTH, background: 'white' }}>

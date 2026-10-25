@@ -5,7 +5,7 @@ import Modal from '../../components/Modal';
 import GradingDetails from '../../components/GradingDetails';
 import StructuredAnswerReview from '../../components/StructuredAnswerReview';
 import FileViewer from '../../components/FileViewer';
-import HomeworkReport, { ATTENDANCE_LABEL, type MarkUpdate } from '../../components/HomeworkReport';
+import HomeworkReport, { ATTENDANCE_LABEL, type MarkUpdate, type ReportInfo } from '../../components/HomeworkReport';
 import { toast } from '../../components/Toast';
 import { parsePartsConfig, hasObjectiveParts } from '../../lib/homeworkParts';
 import { summarizeEssayFeedback, homeworkHasEssay } from '../../lib/feedbackSummary';
@@ -58,6 +58,17 @@ export default function HomeworkDetail() {
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Không lưu được, vui lòng thử lại');
       fetchHw();
+      throw err;
+    }
+  };
+
+  // "Bài học hôm nay" / "Ngày" ở mục Nhận xét: lưu xong mới cập nhật giao diện
+  const saveReportInfo = async (info: ReportInfo) => {
+    try {
+      const { data } = await api.put(`/homework/${id}/report-info`, info);
+      setHw((prev: any) => prev && ({ ...prev, ...data }));
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Không lưu được, vui lòng thử lại');
       throw err;
     }
   };
@@ -261,7 +272,7 @@ export default function HomeworkDetail() {
       </div>
       {/* Mục "Nhận xét": tổng quan điểm, phổ điểm, nhận xét ngắn từng học sinh — thay cho bảng danh sách */}
       {filter === 'review' ? (
-        <div style={{ marginTop: 12 }}><HomeworkReport hw={hw} roster={roster} onSaveMarks={saveMarks} /></div>
+        <div style={{ marginTop: 12 }}><HomeworkReport hw={hw} roster={roster} onSaveMarks={saveMarks} onSaveInfo={saveReportInfo} /></div>
       ) : (
       <div className="table-wrap" style={{ marginTop: 12 }}>
         <table>
