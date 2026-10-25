@@ -8,7 +8,6 @@ import Login from './pages/Login';
 import Home from './pages/Home';
 import CourseDetail from './pages/public/CourseDetail';
 
-import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminOverview from './pages/admin/AdminOverview';
 import UserManagement from './pages/admin/UserManagement';
 import AdManagement from './pages/admin/AdManagement';
@@ -62,7 +61,7 @@ function AppRoutes() {
 
       {/* Admin */}
       <Route path="/admin" element={<ProtectedRoute role="admin"><Layout /></ProtectedRoute>}>
-        <Route index element={<AdminDashboard />} />
+        <Route index element={<Navigate to="/admin/overview" replace />} />
         <Route path="overview" element={<AdminOverview />} />
         <Route path="users" element={<UserManagement />} />
         <Route path="courses" element={<CourseManagement />} />

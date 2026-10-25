@@ -22,8 +22,7 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
   };
 
   const adminNav = [
-    { to: '/admin/overview', icon: Sparkles, label: 'Tổng quát' },
-    { to: '/admin', icon: LayoutDashboard, label: 'Tổng quan' },
+    { to: '/admin/overview', icon: LayoutDashboard, label: 'Tổng quan' },
     { to: '/admin/users', icon: Users, label: 'Quản lý tài khoản' },
     { to: '/admin/courses', icon: BookOpen, label: 'Khóa học' },
     { to: '/admin/classes', icon: School, label: 'Lớp học' },

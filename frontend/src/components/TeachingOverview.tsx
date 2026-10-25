@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronRight, Bot, CalendarCheck, CalendarClock, School } from 'lucide-react';
 import api from '../lib/api';
@@ -8,7 +8,8 @@ import useIsMobile from '../lib/useIsMobile';
 
 // Phần "Tổng quát" cho giáo viên (và admin): bài đến hạn HÔM NAY, bài sắp đến hạn kèm tỉ lệ đã nộp,
 // danh sách lớp kèm số liệu. Mỗi dòng bấm thẳng vào trang bài tập / lớp.
-export default function TeachingOverview({ onLoad }: { onLoad?: (ov: any) => void }) {
+// `replaceDeadlines`: nếu truyền vào thì hiện nội dung này thay cho hai mục "Hôm nay" / "Sắp đến hạn" (trang admin).
+export default function TeachingOverview({ onLoad, replaceDeadlines }: { onLoad?: (ov: any) => void; replaceDeadlines?: ReactNode }) {
   const isMobile = useIsMobile();
   const [ov, setOv] = useState<any>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -39,6 +40,7 @@ export default function TeachingOverview({ onLoad }: { onLoad?: (ov: any) => voi
         </div>
       )}
 
+      {replaceDeadlines ?? (
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(0, 1fr)', gap: 24, alignItems: 'start' }}>
         <section>
           <SectionHeader title="Hôm nay" count={today.length}
@@ -98,6 +100,7 @@ export default function TeachingOverview({ onLoad }: { onLoad?: (ov: any) => voi
           )}
         </section>
       </div>
+      )}
 
       {/* Lớp học: bấm để vào lớp */}
       <section style={{ marginTop: '2rem' }}>

@@ -76,9 +76,6 @@ export default function TeacherDashboard() {
     fetchCourses();
   };
 
-  const totalClasses = courses.reduce((s, c) => s + (c.class_count || 0), 0);
-  const totalStudents = courses.reduce((s, c) => s + (c.student_count || 0), 0);
-
   return (
     <div className="fade-in">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
@@ -89,25 +86,6 @@ export default function TeacherDashboard() {
         <button className="btn btn-primary" onClick={openCreate}>
           <Plus size={16} /> Tạo khóa học
         </button>
-      </div>
-
-      {/* Stats */}
-      <div className="stat-grid" style={{ marginBottom: '2rem' }}>
-        {[
-          { label: 'Khóa học', value: courses.length, icon: BookOpen, color: '#C62828', bg: '#FFEBEE' },
-          { label: 'Lớp học', value: totalClasses, icon: School, color: '#1565C0', bg: '#E3F2FD' },
-          { label: 'Tổng học sinh', value: totalStudents, icon: Users, color: '#2E7D32', bg: '#E8F5E9' },
-        ].map(({ label, value, icon: Icon, color, bg }) => (
-          <div key={label} className="stat-card">
-            <div className="stat-icon" style={{ background: bg }}>
-              <Icon size={20} style={{ color }} />
-            </div>
-            <div>
-              <div className="stat-value" style={{ color }}>{value}</div>
-              <div className="stat-label">{label}</div>
-            </div>
-          </div>
-        ))}
       </div>
 
       {/* Courses */}
