@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
+import HolidayBanner from './HolidayBanner';
 import useIsMobile from '../lib/useIsMobile';
 import useEdgeSwipe from '../lib/useEdgeSwipe';
 
@@ -34,6 +35,7 @@ export default function Layout() {
           else setCollapsed(!collapsed);
         }} />
         <div className="content-area">
+          <HolidayBanner />
           <Outlet />
         </div>
       </div>

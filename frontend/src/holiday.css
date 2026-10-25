@@ -1,0 +1,139 @@
+/* ── Giao diện theo dịp lễ ───────────────────────────────────────────────────
+   Chỉ có hiệu lực khi <html data-holiday="..."> (xem lib/holiday/store.ts). Mọi trang trí đều
+   pointer-events: none và nằm ngoài vùng thao tác: không che nút, không đổi bố cục khi tắt chủ đề. */
+
+/* Nền trang: hoa văn chủ đề mờ thay cho màu xám trơn */
+html[data-holiday] body { background: var(--hd-page-bg); }
+html[data-holiday] .main-content {
+  background-color: var(--hd-page-bg);
+  background-image: var(--hd-pattern);
+  background-size: 340px 340px;
+  background-attachment: fixed;
+}
+
+/* Chủ đề tối (Trung thu, Halloween): nền tối, vùng làm việc là tấm sáng nổi lên → chữ vẫn dễ đọc */
+html[data-holiday-dark] .content-area {
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 18px;
+  margin: 18px 18px 24px;
+  min-height: calc(100vh - 110px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+@media (max-width: 768px) {
+  html[data-holiday-dark] .content-area { margin: 14px 8px 16px; border-radius: 14px; }
+}
+
+/* Thanh bên: màu chủ đề + tranh minh họa ở khoảng trống phía dưới danh sách mục */
+html[data-holiday] .sidebar { background: var(--hd-sidebar); }
+html[data-holiday] .sidebar-nav {
+  background: var(--hd-sidebar-art) no-repeat center bottom 6px / 200px auto;
+  padding-bottom: 200px;
+}
+html[data-holiday] .nav-item.active { background: var(--hd-nav-active-bg); color: var(--hd-nav-active); border-left-color: var(--hd-nav-active); }
+html[data-holiday] .nav-item:hover { background: rgba(255, 255, 255, 0.1); }
+
+/* Thanh công cụ trên cùng: nền chủ đề + cụm sticker ở giữa + dải trang trí treo phía dưới */
+html[data-holiday] .topbar { background: var(--hd-topbar); }
+html[data-holiday] .topbar::before {
+  content: ''; position: absolute; left: 50%; top: 2px; width: 240px; height: 56px; transform: translateX(-50%);
+  background: var(--hd-topbar-art) no-repeat center / contain; pointer-events: none;
+}
+html[data-holiday] .topbar::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: -16px; height: 22px;
+  background: var(--hd-garland) repeat-x left top; pointer-events: none;
+}
+@media (max-width: 640px) {
+  html[data-holiday] .topbar::before { width: 150px; height: 40px; top: 9px; }
+}
+html[data-holiday-topbar-dark] .topbar { box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35); }
+html[data-holiday-topbar-dark] .topbar .btn-ghost { color: #E8EAF6; border-color: rgba(255, 255, 255, 0.28); background: rgba(255, 255, 255, 0.06); }
+html[data-holiday-topbar-dark] .topbar .btn-ghost:hover { background: rgba(255, 255, 255, 0.14); }
+
+/* Màu khung, nút chính, tiêu đề theo chủ đề */
+html[data-holiday] .btn-primary { background: var(--hd-primary); }
+html[data-holiday] .btn-primary:hover:not(:disabled) { background: var(--hd-primary-dark); }
+html[data-holiday] .btn-outline { color: var(--hd-primary); border-color: var(--hd-primary); }
+html[data-holiday] .btn-outline:hover:not(:disabled) { background: var(--hd-primary); color: white; }
+html[data-holiday] .page-title { color: var(--hd-title); }
+html[data-holiday] .card,
+html[data-holiday] .list,
+html[data-holiday] .stat-card,
+html[data-holiday] .table-wrap {
+  border: 1px solid color-mix(in srgb, var(--hd-primary) 16%, transparent);
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--hd-primary) 10%, transparent);
+}
+html[data-holiday] .stat-card { border-top: 3px solid color-mix(in srgb, var(--hd-primary) 55%, transparent); }
+
+/* Dải lời chúc */
+.hd-banner {
+  position: relative; display: flex; align-items: center; gap: 14px; margin-bottom: 18px;
+  padding: 0.75rem 0.9rem 0.75rem 1rem; border-radius: 14px; overflow: hidden;
+  background: linear-gradient(100deg, var(--hd-soft) 0%, #FFFFFF 70%);
+  border: 1px solid color-mix(in srgb, var(--hd-primary) 25%, transparent);
+  border-left: 5px solid var(--hd-primary);
+  box-shadow: 0 3px 14px color-mix(in srgb, var(--hd-primary) 12%, transparent);
+}
+.hd-banner-art { width: 150px; height: 40px; flex-shrink: 0; background: var(--hd-topbar-art) no-repeat center / contain; order: 2; }
+.hd-banner-label { font-size: 0.72rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--hd-primary); }
+.hd-banner-text { font-size: 0.9rem; font-weight: 600; color: #333; line-height: 1.45; }
+.hd-banner-close {
+  order: 3; flex-shrink: 0; width: 28px; height: 28px; border-radius: 8px; border: none; cursor: pointer;
+  background: transparent; color: #999; display: flex; align-items: center; justify-content: center;
+}
+.hd-banner-close:hover { background: rgba(0, 0, 0, 0.06); color: #555; }
+@media (max-width: 640px) {
+  .hd-banner-art { display: none; }
+  .hd-banner-text { font-size: 0.84rem; }
+}
+
+/* Khung nộp bài: viền màu chủ đề, thanh trên có hoa văn nhẹ + dải trang trí */
+html[data-holiday] .hd-submit { border: 4px solid var(--hd-primary); }
+html[data-holiday] .hd-submit-bar {
+  position: relative; z-index: 1;
+  background-color: var(--hd-soft);
+  background-image: linear-gradient(90deg, rgba(255,255,255,0.55), rgba(255,255,255,0.85)), var(--hd-pattern-light);
+  background-size: auto, 340px 340px;
+}
+html[data-holiday] .hd-submit-bar::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: -17px; height: 22px;
+  background: var(--hd-garland) repeat-x left top; pointer-events: none;
+}
+
+/* Trang công khai (trang chủ, chi tiết khóa học) */
+html[data-holiday] .public-root {
+  background-color: color-mix(in srgb, var(--hd-soft) 45%, #FFFFFF) !important;
+  background-image: var(--hd-pattern-light) !important;
+  background-size: 340px 340px !important;
+  background-attachment: fixed !important;
+}
+html[data-holiday] .public-nav::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: -16px; height: 22px;
+  background: var(--hd-garland) repeat-x left top; pointer-events: none;
+}
+
+/* Trang đăng nhập: nền chủ đề + tranh minh họa ở hai góc (nằm dưới khung đăng nhập) */
+html[data-holiday] .login-page {
+  background: var(--hd-pattern), var(--hd-login-bg) !important;
+  background-size: 340px 340px, auto !important;
+}
+html[data-holiday] .login-page::before,
+html[data-holiday] .login-page::after {
+  content: ''; position: fixed; pointer-events: none;
+  background: var(--hd-sidebar-art) no-repeat center / contain;
+}
+html[data-holiday] .login-page::before { left: 2vw; bottom: 2vh; width: 300px; height: 260px; }
+html[data-holiday] .login-page::after { right: 2vw; top: 3vh; width: 260px; height: 70px; background-image: var(--hd-topbar-art); }
+@media (max-width: 640px) {
+  html[data-holiday] .login-page::before { width: 170px; height: 150px; left: 0; bottom: 0; opacity: 0.75; }
+  html[data-holiday] .login-page::after { width: 200px; height: 54px; right: 50%; transform: translateX(50%); top: 8px; }
+}
+html[data-holiday] .login-page > * { position: relative; z-index: 1; }
+
+/* Nút Đăng xuất (chữ đỏ) bị chìm trên thanh bên màu chủ đề → đổi sang màu sáng */
+html[data-holiday] .sidebar button.nav-item { color: rgba(255, 255, 255, 0.85) !important; }
+html[data-holiday] .sidebar button.nav-item:hover { color: #FFFFFF !important; }
+
+/* Dải lời chúc trên trang công khai: thẳng hàng với nội dung trang (lề 2rem, điện thoại 1rem) */
+.hd-banner-public { width: calc(100% - 4rem); margin: 16px auto 0; }
+.hd-banner-public:empty { display: none; }
+@media (max-width: 768px) { .hd-banner-public { width: calc(100% - 2rem); } }

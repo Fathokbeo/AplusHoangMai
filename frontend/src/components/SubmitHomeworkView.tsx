@@ -240,8 +240,8 @@ export default function SubmitHomeworkView({
   );
 
   return (
-    <div ref={rootRef} style={{ position: 'fixed', inset: 0, background: 'white', zIndex: 1000, display: 'flex', flexDirection: 'column' }} className="fade-in">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: isMobile ? '0.7rem 0.85rem' : '0.85rem 1.5rem', borderBottom: '1px solid #EEE', flexShrink: 0 }}>
+    <div ref={rootRef} style={{ position: 'fixed', inset: 0, background: 'white', zIndex: 1000, display: 'flex', flexDirection: 'column' }} className="fade-in hd-submit">
+      <div className="hd-submit-bar" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: isMobile ? '0.7rem 0.85rem' : '0.85rem 1.5rem', borderBottom: '1px solid #EEE', flexShrink: 0 }}>
         <button className="btn btn-ghost btn-sm btn-icon" onClick={onClose} title="Đóng"><X size={18} /></button>
         <span style={{ fontWeight: 700, fontSize: isMobile ? '0.92rem' : '1.05rem', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
         {isMobile && pdfUrl && (
