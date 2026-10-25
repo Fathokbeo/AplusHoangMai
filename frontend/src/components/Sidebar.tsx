@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import {
   LayoutDashboard, Users, BookOpen, GraduationCap, Image, LogOut,
-  ChevronLeft, School, LayoutTemplate, UserCog, Sparkles
+  ChevronLeft, School, LayoutTemplate, UserCog, Sparkles, Home
 } from 'lucide-react';
 
 interface Props {
@@ -21,7 +21,11 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
     navigate('/login');
   };
 
+  // Mục đầu tiên của mọi vai trò: về trang chủ công khai của trung tâm
+  const homeItem = { to: '/', icon: Home, label: 'Trang chủ' };
+
   const adminNav = [
+    homeItem,
     { to: '/admin/overview', icon: LayoutDashboard, label: 'Tổng quan' },
     { to: '/admin/users', icon: Users, label: 'Quản lý tài khoản' },
     { to: '/admin/courses', icon: BookOpen, label: 'Khóa học' },
@@ -32,6 +36,7 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
   ];
 
   const teacherNav = [
+    homeItem,
     { to: '/teacher/overview', icon: Sparkles, label: 'Tổng quát' },
     { to: '/teacher', icon: LayoutDashboard, label: 'Khóa học của tôi' },
     { to: '/teacher/students', icon: GraduationCap, label: 'Học sinh' },
@@ -39,6 +44,7 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
   ];
 
   const studentNav = [
+    homeItem,
     { to: '/student/overview', icon: Sparkles, label: 'Tổng quát' },
     { to: '/student', icon: LayoutDashboard, label: 'Tổng quan' },
     { to: '/student/classes', icon: School, label: 'Lớp học của tôi' },
