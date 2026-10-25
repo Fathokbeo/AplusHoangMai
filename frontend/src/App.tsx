@@ -42,7 +42,7 @@ function ProtectedRoute({ children, role }: { children: React.ReactElement; role
   if (!user) return <Navigate to="/login" replace />;
   if (role) {
     const roles = Array.isArray(role) ? role : [role];
-    if (!roles.includes(user.role)) return <Navigate to={`/${user.role}`} replace />;
+    if (!roles.includes(user.role)) return <Navigate to={`/${user.role}/overview`} replace />;
   }
   return children;
 }
@@ -58,7 +58,7 @@ function AppRoutes() {
       <Route path="/khoa-hoc" element={<Navigate to="/#khoa-hoc" replace />} />
       <Route path="/kinh-nghiem" element={<Navigate to="/#kinh-nghiem" replace />} />
       <Route path="/courses/:id" element={<CourseDetail />} />
-      <Route path="/login" element={user ? <Navigate to={`/${user.role}`} replace /> : <Login />} />
+      <Route path="/login" element={user ? <Navigate to={`/${user.role}/overview`} replace /> : <Login />} />
 
       {/* Admin */}
       <Route path="/admin" element={<ProtectedRoute role="admin"><Layout /></ProtectedRoute>}>

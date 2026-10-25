@@ -29,7 +29,7 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
   useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
 
   const handleLogout = () => { logout(); setNavOpen(false); };
-  const dashLink = user ? `/${user.role}` : '/login';
+  const dashLink = user ? `/${user.role}/overview` : '/login';
   // Trang chủ trong suốt khi chưa cuộn; các trang con luôn nền trắng
   const solid = scrolled || pathname !== '/';
 

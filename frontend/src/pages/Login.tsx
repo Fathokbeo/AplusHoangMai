@@ -24,9 +24,9 @@ export default function Login() {
     try {
       await login(username, password);
       const user = JSON.parse(localStorage.getItem('user') || '{}');
-      if (user.role === 'admin') navigate('/admin');
-      else if (user.role === 'teacher') navigate('/teacher');
-      else navigate('/student');
+      if (user.role === 'admin') navigate('/admin/overview');
+      else if (user.role === 'teacher') navigate('/teacher/overview');
+      else navigate('/student/overview');
     } catch (err: any) {
       const field = err.response?.data?.field;
       const message = err.response?.data?.message || 'Đăng nhập thất bại';
