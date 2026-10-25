@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
 import { PAGE_MAX } from '../lib/layout';
+import HolidayBanner from './HolidayBanner';
 import { Phone, MapPin, Clock, Mail, ExternalLink, Menu, X, LogIn, LogOut, User } from 'lucide-react';
 
 const NAV = [
@@ -34,9 +35,9 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
   const solid = scrolled || pathname !== '/';
 
   return (
-    <div style={{ minHeight: '100vh', background: '#F5F5F5', display: 'flex', flexDirection: 'column' }}>
+    <div className="public-root" style={{ minHeight: '100vh', background: '#F5F5F5', display: 'flex', flexDirection: 'column' }}>
       {/* Navbar */}
-      <nav style={{
+      <nav className="public-nav" style={{
         position: 'sticky', top: 0, zIndex: 100,
         background: solid ? 'white' : 'linear-gradient(180deg, rgba(26,26,46,0.95) 0%, rgba(26,26,46,0.85) 100%)',
         backdropFilter: 'blur(12px)',
@@ -110,6 +111,7 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
           </div>
         )}
       </nav>
+      <div className="hd-banner-public"><HolidayBanner style={{ margin: 0 }} /></div>
 
       {/* Page content */}
       <div style={{ flex: 1 }}>{children}</div>
