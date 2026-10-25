@@ -5,7 +5,7 @@ import Modal from '../../components/Modal';
 import GradingDetails from '../../components/GradingDetails';
 import StructuredAnswerReview from '../../components/StructuredAnswerReview';
 import FileViewer from '../../components/FileViewer';
-import HomeworkReport from '../../components/HomeworkReport';
+import HomeworkReport, { ATTENDANCE_LABEL, type MarkUpdate } from '../../components/HomeworkReport';
 import { toast } from '../../components/Toast';
 import { parsePartsConfig, hasObjectiveParts } from '../../lib/homeworkParts';
 import { summarizeEssayFeedback, homeworkHasEssay } from '../../lib/feedbackSummary';
@@ -44,6 +44,22 @@ export default function HomeworkDetail() {
   const fetchHw = async () => {
     const { data } = await api.get(`/homework/${id}`);
     setHw(data);
+  };
+
+  // Điểm 10 phút / điểm danh: cập nhật ngay trên giao diện rồi lưu; lỗi → báo và tải lại số liệu thật
+  const saveMarks = async (marks: MarkUpdate[]) => {
+    const byId = new Map(marks.map((m) => [m.student_id, m]));
+    setHw((prev: any) => prev && ({
+      ...prev,
+      roster: prev.roster.map((s: any) => (byId.has(s.student_id) ? { ...s, ...byId.get(s.student_id) } : s)),
+    }));
+    try {
+      await api.put(`/homework/${id}/marks`, { marks });
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Không lưu được, vui lòng thử lại');
+      fetchHw();
+      throw err;
+    }
   };
 
   const openGrade = (sub: any) => {
@@ -87,7 +103,7 @@ export default function HomeworkDetail() {
     return { bg: '#FFEBEE', color: '#C62828' };
   };
 
-  // Xuất bảng điểm CẢ LỚP ra file Excel (.xlsx): STT, Họ và tên, Trạng thái, Điểm, Nhận xét
+  // Xuất bảng điểm CẢ LỚP ra file Excel (.xlsx): STT, Họ và tên, Trạng thái, Điểm, Điểm 10p, Điểm danh, Nhận xét
   // + (bài có tự luận) cột "Nhận xét tự luận" chuẩn form ngắn gọn: đầy đủ / thiếu câu nào / sai câu nào.
   // Thứ tự lấy nguyên từ server (đã khớp với thứ tự đã kéo thả trong danh sách học sinh của lớp)
   const exportExcel = async () => {
@@ -97,7 +113,7 @@ export default function HomeworkDetail() {
     const overdue = hw.due_date ? new Date() > new Date(hw.due_date) : false;
 
     const essay = homeworkHasEssay(hw);
-    const header = ['STT', 'Họ và tên', 'Trạng thái', 'Điểm', 'Nhận xét', ...(essay ? ['Nhận xét tự luận'] : [])];
+    const header = ['STT', 'Họ và tên', 'Trạng thái', 'Điểm', 'Điểm 10p', 'Điểm danh', 'Nhận xét', ...(essay ? ['Nhận xét tự luận'] : [])];
     const rows = rowsSrc.map((s: any, i: number) => [
       i + 1,
       s.full_name || '',
@@ -105,6 +121,8 @@ export default function HomeworkDetail() {
       s.submission_id
         ? (s.score ?? s.best_score ?? 'Chưa chấm') // lần mới đang chờ chấm → điểm cao nhất lần trước
         : (overdue ? 0 : ''),
+      s.quiz_score ?? '',
+      s.attendance ? ATTENDANCE_LABEL[s.attendance as keyof typeof ATTENDANCE_LABEL] || '' : '',
       s.feedback || '',
       ...(essay ? [summarizeEssayFeedback(s, hw)] : []),
     ]);
@@ -118,7 +136,7 @@ export default function HomeworkDetail() {
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const lastCol = header.length - 1;
-    ws['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 10 }, { wch: 8 }, { wch: 60 }, ...(essay ? [{ wch: 40 }] : [])];
+    ws['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 10 }, { wch: 8 }, { wch: 9 }, { wch: 10 }, { wch: 60 }, ...(essay ? [{ wch: 40 }] : [])];
     ws['!merges'] = [
       { s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } },
       { s: { r: 1, c: 0 }, e: { r: 1, c: lastCol } },
@@ -243,7 +261,7 @@ export default function HomeworkDetail() {
       </div>
       {/* Mục "Nhận xét": tổng quan điểm, phổ điểm, nhận xét ngắn từng học sinh — thay cho bảng danh sách */}
       {filter === 'review' ? (
-        <div style={{ marginTop: 12 }}><HomeworkReport hw={hw} roster={roster} /></div>
+        <div style={{ marginTop: 12 }}><HomeworkReport hw={hw} roster={roster} onSaveMarks={saveMarks} /></div>
       ) : (
       <div className="table-wrap" style={{ marginTop: 12 }}>
         <table>

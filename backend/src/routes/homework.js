@@ -301,6 +301,7 @@ router.delete('/homework/:id', requireRole('teacher', 'admin'), (req, res) => {
   });
   db.prepare('DELETE FROM submissions WHERE homework_id=?').run(req.params.id);
   db.prepare('DELETE FROM homework_attempts WHERE homework_id=?').run(req.params.id);
+  db.prepare('DELETE FROM homework_marks WHERE homework_id=?').run(req.params.id);
   db.prepare('DELETE FROM homework WHERE id=?').run(req.params.id);
   res.json({ message: 'Đã xóa' });
 });
@@ -357,11 +358,13 @@ router.get('/homework/:id', (req, res) => {
   const roster = db.prepare(`
     SELECT u.id student_id, u.username, u.full_name, cs.sort_order,
            s.id submission_id, s.file_path, s.files, s.structured_answers, s.submitted_at,
-           s.score, s.feedback, s.graded_at, s.graded_by_ai, s.grading_details, s.grading_status, s.submit_count, s.best_score
+           s.score, s.feedback, s.graded_at, s.graded_by_ai, s.grading_details, s.grading_status, s.submit_count, s.best_score,
+           m.quiz_score, m.attendance
     FROM class_students cs JOIN users u ON cs.student_id=u.id
     LEFT JOIN submissions s ON s.homework_id=? AND s.student_id=u.id
+    LEFT JOIN homework_marks m ON m.homework_id=? AND m.student_id=u.id
     WHERE cs.class_id=? AND u.active=1
-  `).all(req.params.id, hw.class_id);
+  `).all(req.params.id, req.params.id, hw.class_id);
   // Khớp thứ tự với danh sách học sinh đã kéo thả trong lớp (xem teacher.js GET /classes/:id)
   roster.sort((a, b) => (hw.custom_student_order ? (a.sort_order - b.sort_order) : 0) || compareVietnameseName(a.full_name, b.full_name));
   roster.forEach((s) => { delete s.sort_order; });
@@ -485,6 +488,53 @@ router.post(
     res.json({ message, submission: sub });
   }
 );
+
+// ── Điểm 10 phút + điểm danh (teacher/admin) ──────────────────────────
+// Body: { marks: [{ student_id, quiz_score?, attendance? }] } — chỉ ghi các trường có gửi lên
+// (quiz_score: số 0–10 hoặc null để xóa; attendance: present/absent/online/other_shift hoặc null).
+const ATTENDANCE = ['present', 'absent', 'online', 'other_shift'];
+router.put('/homework/:id/marks', requireRole('teacher', 'admin'), (req, res) => {
+  const db = getDb();
+  const hw = db.prepare('SELECT h.id,h.class_id,c.teacher_id FROM homework h JOIN classes c ON h.class_id=c.id WHERE h.id=?').get(req.params.id);
+  if (!hw) return res.status(404).json({ message: 'Không tìm thấy' });
+  if (req.user.role === 'teacher' && hw.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  const marks = Array.isArray(req.body?.marks) ? req.body.marks : [];
+  if (marks.length === 0) return res.status(400).json({ message: 'Không có dữ liệu' });
+
+  const inClass = db.prepare('SELECT 1 FROM class_students WHERE class_id=? AND student_id=?');
+  const rows = [];
+  for (const m of marks) {
+    const sid = Number(m?.student_id);
+    if (!inClass.get(hw.class_id, sid)) return res.status(400).json({ message: 'Học sinh không thuộc lớp' });
+    const row = { sid };
+    if ('quiz_score' in m) {
+      const v = m.quiz_score === null || m.quiz_score === '' ? null : Number(String(m.quiz_score).replace(',', '.'));
+      if (v !== null && !(Number.isFinite(v) && v >= 0 && v <= 10)) return res.status(400).json({ message: 'Điểm 10 phút phải từ 0 đến 10' });
+      row.quiz = v;
+    }
+    if ('attendance' in m) {
+      const a = m.attendance || null;
+      if (a !== null && !ATTENDANCE.includes(a)) return res.status(400).json({ message: 'Trạng thái điểm danh không hợp lệ' });
+      row.att = a;
+    }
+    rows.push(row);
+  }
+
+  const now = new Date().toISOString();
+  const ensure = db.prepare('INSERT OR IGNORE INTO homework_marks (homework_id,student_id) VALUES (?,?)');
+  const setQuiz = db.prepare('UPDATE homework_marks SET quiz_score=?,updated_at=?,updated_by=? WHERE homework_id=? AND student_id=?');
+  const setAtt = db.prepare('UPDATE homework_marks SET attendance=?,updated_at=?,updated_by=? WHERE homework_id=? AND student_id=?');
+  db.transaction(() => {
+    for (const r of rows) {
+      ensure.run(hw.id, r.sid);
+      if ('quiz' in r) setQuiz.run(r.quiz, now, req.user.id, hw.id, r.sid);
+      if ('att' in r) setAtt.run(r.att, now, req.user.id, hw.id, r.sid);
+    }
+  })();
+  const saved = db.prepare(`SELECT student_id,quiz_score,attendance FROM homework_marks WHERE homework_id=? AND student_id IN (${rows.map(() => '?').join(',')})`)
+    .all(hw.id, ...rows.map((r) => r.sid));
+  res.json({ marks: saved });
+});
 
 // ── Grade submission (teacher/admin) ──────────────────────────────────
 router.put('/submissions/:id/grade', requireRole('teacher', 'admin'), (req, res) => {

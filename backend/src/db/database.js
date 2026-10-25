@@ -135,6 +135,20 @@ function initSchema() {
       FOREIGN KEY (student_id) REFERENCES users(id)
     );
 
+    -- Điểm 10 phút + điểm danh của từng học sinh trong buổi học gắn với bài tập (giáo viên/trợ giảng nhập
+    -- trực tiếp ở mục "Nhận xét"). attendance: 'present' | 'absent' | 'online' | 'other_shift' (trái ca).
+    CREATE TABLE IF NOT EXISTS homework_marks (
+      homework_id INTEGER NOT NULL,
+      student_id INTEGER NOT NULL,
+      quiz_score REAL,
+      attendance TEXT,
+      updated_at DATETIME,
+      updated_by INTEGER,
+      PRIMARY KEY (homework_id, student_id),
+      FOREIGN KEY (homework_id) REFERENCES homework(id),
+      FOREIGN KEY (student_id) REFERENCES users(id)
+    );
+
     CREATE TABLE IF NOT EXISTS submissions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       homework_id INTEGER NOT NULL,

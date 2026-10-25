@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { MessageSquareText, Download, Loader2 } from 'lucide-react';
+import { MessageSquareText, Download, Loader2, Check, CheckCheck } from 'lucide-react';
 import { buildStudentReview, summarizeEssayFeedback, homeworkHasEssay, ERROR_TAGS, type ErrorTag } from '../lib/feedbackSummary';
 import useIsMobile from '../lib/useIsMobile';
 import { toast } from './Toast';
@@ -7,6 +7,100 @@ import { toast } from './Toast';
 // Mục "Nhận xét" trên thanh chọn ở trang chi tiết bài tập (giáo viên): tổng quan điểm cả lớp + phổ điểm
 // + nhận xét từng học sinh (đầy đủ như file Excel: nhận xét chi tiết + nhận xét tự luận ngắn gọn) kèm
 // nhãn lỗi. Mức điểm tính theo tỉ lệ trên thang của bài (quy về thang 10). Tải được ra file PDF.
+// Cột "Điểm 10p" và "Điểm danh" nhập trực tiếp trên bảng (giáo viên / trợ giảng), lưu ngay khi thay đổi.
+
+export type Attendance = 'present' | 'absent' | 'online' | 'other_shift';
+export type MarkUpdate = { student_id: number; quiz_score?: number | null; attendance?: Attendance | null };
+
+export const ATTENDANCE_LABEL: Record<Attendance, string> = { present: 'Đi học', absent: 'Nghỉ', online: 'Online', other_shift: 'Trái ca' };
+const ATTENDANCE_OPTS: { key: Attendance; label: string; color: string; bg: string }[] = [
+  { key: 'present', label: 'Đi học', color: '#2E7D32', bg: '#E8F5E9' },
+  { key: 'absent', label: 'Nghỉ', color: '#C62828', bg: '#FFEBEE' },
+  { key: 'online', label: 'Online', color: '#1565C0', bg: '#E3F2FD' },
+  { key: 'other_shift', label: 'Trái ca', color: '#E65100', bg: '#FFF3E0' },
+];
+
+// Ô nhập điểm 10 phút (0–10, nhận cả dấu phẩy); lưu khi rời ô hoặc nhấn Enter
+function QuizInput({ value, onSave }: { value: number | null | undefined; onSave: (v: number | null) => Promise<void> }) {
+  const shown = value === null || value === undefined ? '' : String(value).replace('.', ',');
+  const [text, setText] = useState(shown);
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  useEffect(() => { setText(shown); }, [shown]);
+
+  const commit = async () => {
+    const t = text.trim();
+    if (t === shown) return;
+    const v = t === '' ? null : Number(t.replace(',', '.'));
+    if (v !== null && !(Number.isFinite(v) && v >= 0 && v <= 10)) {
+      toast.error('Điểm 10 phút phải từ 0 đến 10');
+      setText(shown);
+      return;
+    }
+    setState('saving');
+    try {
+      await onSave(v);
+      setState('saved');
+      setTimeout(() => setState('idle'), 1200);
+    } catch {
+      setState('error');
+      setText(shown);
+    }
+  };
+
+  const border = state === 'saved' ? '#2E7D32' : state === 'error' ? '#C62828' : '#DDD';
+  return (
+    <input
+      value={text}
+      inputMode="decimal"
+      placeholder="—"
+      aria-label="Điểm 10 phút"
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        if (e.key === 'Escape') { setText(shown); (e.target as HTMLInputElement).blur(); }
+      }}
+      style={{ width: 56, padding: '4px 6px', border: `1.5px solid ${border}`, borderRadius: 7, textAlign: 'center', fontSize: '0.88rem', fontWeight: 700, color: '#1A1A2E', background: state === 'saving' ? '#FAFAFA' : 'white', outline: 'none', transition: 'border-color 0.2s' }}
+    />
+  );
+}
+
+// Điểm danh: ô tích = đi học; bên cạnh là Nghỉ / Online / Trái ca. Bấm lại lựa chọn đang chọn để bỏ.
+function AttendancePicker({ value, onChange }: { value: Attendance | null | undefined; onChange: (v: Attendance | null) => void }) {
+  return (
+    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+      {ATTENDANCE_OPTS.map((o) => {
+        const on = value === o.key;
+        const isTick = o.key === 'present';
+        return (
+          <button
+            key={o.key}
+            type="button"
+            title={o.label}
+            aria-pressed={on}
+            onClick={() => onChange(on ? null : o.key)}
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 3,
+              height: 26, minWidth: isTick ? 26 : undefined, padding: isTick ? 0 : '0 7px',
+              borderRadius: isTick ? 7 : 99, cursor: 'pointer', fontSize: '0.72rem', fontWeight: 700, fontFamily: 'inherit',
+              border: `1.5px solid ${on ? o.color : '#DDD'}`,
+              background: on ? (isTick ? o.color : o.bg) : 'white',
+              color: on ? (isTick ? 'white' : o.color) : '#999',
+            }}
+          >
+            {isTick ? <Check size={15} strokeWidth={3} /> : o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function AttendanceBadge({ value }: { value: Attendance | null | undefined }) {
+  const o = ATTENDANCE_OPTS.find((x) => x.key === value);
+  if (!o) return <span style={{ color: '#BBB', fontSize: '0.8rem' }}>—</span>;
+  return <span style={{ background: o.bg, color: o.color, borderRadius: 99, padding: '2px 9px', fontSize: '0.75rem', fontWeight: 700 }}>{o.label}</span>;
+}
 
 const BANDS = [
   { key: 'good', label: 'Tốt', min: 0.85, color: '#2E7D32', bg: '#E8F5E9' },
@@ -75,9 +169,18 @@ type CardProps = {
   forPdf?: boolean;
   downloading?: boolean;
   onDownload?: () => void;
+  onSaveMarks?: (marks: MarkUpdate[]) => Promise<void>;
 };
 
-function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false, onDownload }: CardProps) {
+function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false, onDownload, onSaveMarks }: CardProps) {
+  const editable = !forPdf && !!onSaveMarks;
+  const save = (m: MarkUpdate[]) => (onSaveMarks ? onSaveMarks(m) : Promise.resolve());
+  const attCount = (k: Attendance) => roster.filter((s) => s.attendance === k).length;
+  const unmarked = roster.filter((s) => !s.attendance);
+  const quizScores = roster.map((s) => s.quiz_score).filter((x) => x !== null && x !== undefined) as number[];
+  const quizAvg = quizScores.length ? quizScores.reduce((a, b) => a + b, 0) / quizScores.length : null;
+  const COLS = '40px minmax(120px, 1fr) 120px 70px 196px minmax(0, 3fr)';
+  const COLS_PDF = '36px minmax(120px, 1fr) 110px 60px 70px minmax(0, 3fr)';
   const max = hw.max_score > 0 ? hw.max_score : 10;
   const essayOn = homeworkHasEssay(hw);
 
@@ -187,12 +290,30 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
             <div style={{ fontSize: '0.75rem', color: '#777', marginBottom: 10 }}>
               <strong>Nhãn lỗi:</strong> {ERROR_TAGS.map((t) => `${t.short} – ${t.label}`).join(' · ')}
             </div>
+            {/* Tóm tắt điểm danh + điểm 10 phút */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 14px', fontSize: '0.8rem', color: '#555', marginBottom: 10 }}>
+              <strong style={{ color: '#1A1A2E' }}>Điểm danh:</strong>
+              {ATTENDANCE_OPTS.map((o) => (
+                <span key={o.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: o.color }} />{o.label} <strong style={{ color: '#1A1A2E' }}>{attCount(o.key)}</strong>
+                </span>
+              ))}
+              {unmarked.length > 0 && <span style={{ color: '#999' }}>Chưa điểm danh {unmarked.length}</span>}
+              <span>· Điểm 10p TB: <strong style={{ color: '#1A1A2E' }}>{quizAvg === null ? '—' : fmt(Math.round(quizAvg * 100) / 100)}</strong>{quizScores.length > 0 && ` (${quizScores.length} HS)`}</span>
+              {editable && unmarked.length > 0 && (
+                <button type="button" className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto', gap: 5 }}
+                  onClick={() => save(unmarked.map((s) => ({ student_id: s.student_id, attendance: 'present' as Attendance }))).catch(() => {})}
+                  title="Đánh dấu Đi học cho các bạn chưa điểm danh">
+                  <CheckCheck size={14} /> Tích đi học cho {unmarked.length} bạn còn lại
+                </button>
+              )}
+            </div>
           </div>
 
           <div style={{ border: '1px solid #EEE', borderRadius: 12, overflow: 'hidden' }}>
             {!isMobile && (
-              <div data-pdf-break style={{ display: 'grid', gridTemplateColumns: '44px minmax(130px, 1fr) 140px minmax(0, 3.2fr)', gap: 12, padding: '0.6rem 1rem', background: '#FAFAFA', fontSize: '0.72rem', fontWeight: 700, color: '#888', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                <span>STT</span><span>Họ và tên</span><span>Điểm</span><span>Nhận xét</span>
+              <div data-pdf-break style={{ display: 'grid', gridTemplateColumns: forPdf ? COLS_PDF : COLS, gap: 12, padding: '0.6rem 1rem', background: '#FAFAFA', fontSize: '0.72rem', fontWeight: 700, color: '#888', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                <span>STT</span><span>Họ và tên</span><span>Điểm</span><span>Điểm 10p</span><span>Điểm danh</span><span>Nhận xét</span>
               </div>
             )}
             {rows.map(({ s, review }, i) => {
@@ -231,6 +352,12 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
                 </div>
               );
               const rowBg = missing ? '#FFF5F5' : i % 2 ? '#FCFCFC' : 'white';
+              const quizCell = editable
+                ? <QuizInput value={s.quiz_score} onSave={(v) => save([{ student_id: s.student_id, quiz_score: v }])} />
+                : <strong style={{ fontSize: '0.88rem', color: s.quiz_score === null || s.quiz_score === undefined ? '#BBB' : '#1A1A2E' }}>{s.quiz_score === null || s.quiz_score === undefined ? '—' : fmt(s.quiz_score)}</strong>;
+              const attCell = editable
+                ? <AttendancePicker value={s.attendance} onChange={(v) => { save([{ student_id: s.student_id, attendance: v }]).catch(() => {}); }} />
+                : <AttendanceBadge value={s.attendance} />;
               return isMobile ? (
                 <div key={s.student_id} data-pdf-break style={{ padding: '0.75rem 0.9rem', borderTop: i ? '1px solid #F2F2F2' : 'none', background: rowBg }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -238,13 +365,19 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
                     <strong style={{ flex: 1, fontSize: '0.9rem' }}>{s.full_name}</strong>
                     <div style={{ width: 120 }}>{scoreCell}</div>
                   </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '0 0 8px 28px' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', color: '#888' }}>10p {quizCell}</span>
+                    {attCell}
+                  </div>
                   {comment}
                 </div>
               ) : (
-                <div key={s.student_id} data-pdf-break style={{ display: 'grid', gridTemplateColumns: '44px minmax(130px, 1fr) 140px minmax(0, 3.2fr)', gap: 12, alignItems: 'center', padding: '0.7rem 1rem', borderTop: '1px solid #F2F2F2', background: rowBg }}>
+                <div key={s.student_id} data-pdf-break style={{ display: 'grid', gridTemplateColumns: forPdf ? COLS_PDF : COLS, gap: 12, alignItems: 'center', padding: '0.7rem 1rem', borderTop: '1px solid #F2F2F2', background: rowBg }}>
                   <span style={{ fontSize: '0.85rem', color: '#999' }}>{i + 1}</span>
                   <strong style={{ fontSize: '0.9rem' }}>{s.full_name}</strong>
                   <div>{scoreCell}</div>
+                  <div>{quizCell}</div>
+                  <div>{attCell}</div>
                   {comment}
                 </div>
               );
@@ -257,7 +390,7 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
   );
 }
 
-export default function HomeworkReport({ hw, roster }: { hw: any; roster: any[] }) {
+export default function HomeworkReport({ hw, roster, onSaveMarks }: { hw: any; roster: any[]; onSaveMarks?: (marks: MarkUpdate[]) => Promise<void> }) {
   const isMobile = useIsMobile();
   const [exporting, setExporting] = useState(false);
   const pdfRef = useRef<HTMLDivElement>(null);
@@ -283,7 +416,7 @@ export default function HomeworkReport({ hw, roster }: { hw: any; roster: any[] 
 
   return (
     <>
-      <ReportCard hw={hw} roster={roster} isMobile={isMobile} downloading={exporting} onDownload={() => setExporting(true)} />
+      <ReportCard hw={hw} roster={roster} isMobile={isMobile} downloading={exporting} onDownload={() => setExporting(true)} onSaveMarks={onSaveMarks} />
       {exporting && (
         <div style={{ position: 'fixed', left: -100000, top: 0, width: PDF_WIDTH, pointerEvents: 'none' }} aria-hidden>
           <div ref={pdfRef} style={{ width: PDF_WIDTH, background: 'white' }}>
