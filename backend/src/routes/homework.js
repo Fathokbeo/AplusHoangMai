@@ -69,7 +69,7 @@ function sanitizePartsConfig(raw) {
   });
   if (obj.essay && obj.essay.enabled) {
     const ep = Number(obj.essay.points);
-    out.essay = { enabled: true, points: isFinite(ep) && ep >= 0 ? ep : 4 };
+    out.essay = { enabled: true, points: isFinite(ep) && ep >= 0 ? ep : 3 };
   }
   return Object.keys(out).length ? JSON.stringify(out) : null;
 }

@@ -38,7 +38,7 @@ export interface PartsConfig {
 
 // Điểm mặc định mỗi câu theo từng phần (yêu cầu: TN 0.25, ĐS 1.0/câu, TLN 0.5)
 export const DEFAULT_POINTS: Record<string, number> = { multiple_choice: 0.25, true_false: 1, short_answer: 0.5 };
-export const DEFAULT_ESSAY_POINTS = 4;
+export const DEFAULT_ESSAY_POINTS = 3;
 
 // Cách chia điểm phần Đúng/Sai theo số ý đúng (TỈ LỆ trên "điểm mỗi câu").
 //   'thpt' (chuẩn THPT): 1 ý 10%, 2 ý 25%, 3 ý 50%, 4 ý 100% → với câu 1đ: 0.1/0.25/0.5/1.0

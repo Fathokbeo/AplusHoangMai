@@ -13,7 +13,7 @@ function tfLadder(cfg) {
   return mode === 'even' ? TF_LADDER_EVEN : TF_LADDER;
 }
 const DEFAULT_POINTS = { multiple_choice: 0.25, true_false: 1, short_answer: 0.5 };
-const DEFAULT_ESSAY_POINTS = 4;
+const DEFAULT_ESSAY_POINTS = 3;
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
