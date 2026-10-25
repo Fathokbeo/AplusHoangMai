@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { MessageSquareText, Download, Loader2, Check, CheckCheck } from 'lucide-react';
+import { MessageSquareText, Download, Loader2, Check, CheckCheck, ChevronDown } from 'lucide-react';
 import { buildStudentReview, summarizeEssayFeedback, homeworkHasEssay, ERROR_TAGS, type ErrorTag } from '../lib/feedbackSummary';
 import useIsMobile from '../lib/useIsMobile';
 import { toast } from './Toast';
@@ -65,34 +65,91 @@ function QuizInput({ value, onSave }: { value: number | null | undefined; onSave
   );
 }
 
-// Điểm danh: ô tích = đi học; bên cạnh là Nghỉ / Online / Trái ca. Bấm lại lựa chọn đang chọn để bỏ.
+// Điểm danh: MỘT ô duy nhất; bấm vào hiện danh sách Đi học / Nghỉ / Online / Trái ca (+ Bỏ điểm danh).
+// Danh sách đặt "fixed" theo vị trí ô để không bị khung bảng (overflow: hidden) cắt mất ở các dòng cuối.
 function AttendancePicker({ value, onChange }: { value: Attendance | null | undefined; onChange: (v: Attendance | null) => void }) {
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [menu, setMenu] = useState<{ top: number; left: number; up: boolean } | null>(null);
+  const cur = ATTENDANCE_OPTS.find((o) => o.key === value);
+  const MENU_W = 150;
+  const MENU_H = 200;
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [menu]);
+
+  const toggle = () => {
+    if (menu) { setMenu(null); return; }
+    const r = btnRef.current!.getBoundingClientRect();
+    const up = r.bottom + MENU_H > window.innerHeight && r.top > MENU_H;
+    const left = Math.max(8, Math.min(r.right - MENU_W, window.innerWidth - MENU_W - 8));
+    setMenu({ top: up ? r.top - 4 : r.bottom + 4, left, up });
+  };
+  const pick = (v: Attendance | null) => { setMenu(null); if (v !== (value ?? null)) onChange(v); };
+
   return (
-    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-      {ATTENDANCE_OPTS.map((o) => {
-        const on = value === o.key;
-        const isTick = o.key === 'present';
-        return (
-          <button
-            key={o.key}
-            type="button"
-            title={o.label}
-            aria-pressed={on}
-            onClick={() => onChange(on ? null : o.key)}
-            style={{
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 3,
-              height: 26, minWidth: isTick ? 26 : undefined, padding: isTick ? 0 : '0 7px',
-              borderRadius: isTick ? 7 : 99, cursor: 'pointer', fontSize: '0.72rem', fontWeight: 700, fontFamily: 'inherit',
-              border: `1.5px solid ${on ? o.color : '#DDD'}`,
-              background: on ? (isTick ? o.color : o.bg) : 'white',
-              color: on ? (isTick ? 'white' : o.color) : '#999',
-            }}
-          >
-            {isTick ? <Check size={15} strokeWidth={3} /> : o.label}
-          </button>
-        );
-      })}
-    </div>
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        aria-label="Điểm danh"
+        aria-haspopup="menu"
+        aria-expanded={!!menu}
+        onClick={toggle}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5, height: 28, minWidth: 84, padding: '0 6px 0 5px',
+          borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.75rem', fontWeight: 700,
+          border: `1.5px solid ${cur ? cur.color : '#CFCFCF'}`, background: cur ? cur.bg : 'white', color: cur ? cur.color : '#999',
+        }}
+      >
+        <span style={{
+          width: 18, height: 18, borderRadius: 5, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          border: cur ? 'none' : '1.5px solid #CFCFCF', background: cur ? cur.color : 'white', color: 'white',
+        }}>
+          {cur && <Check size={13} strokeWidth={3.2} />}
+        </span>
+        <span style={{ flex: 1, textAlign: 'left', whiteSpace: 'nowrap' }}>{cur ? cur.label : 'Chọn'}</span>
+        <ChevronDown size={13} />
+      </button>
+      {menu && (
+        <>
+          <div onClick={() => setMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 999 }} />
+          <div role="menu" style={{
+            position: 'fixed', left: menu.left, top: menu.top, transform: menu.up ? 'translateY(-100%)' : undefined, width: MENU_W, zIndex: 1000,
+            background: 'white', borderRadius: 10, boxShadow: '0 8px 28px rgba(0,0,0,0.16)', border: '1px solid #EEE', padding: 4,
+          }}>
+            {ATTENDANCE_OPTS.map((o) => (
+              <button key={o.key} type="button" role="menuitemradio" aria-checked={value === o.key} onClick={() => pick(o.key)}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', border: 'none', borderRadius: 7,
+                  background: value === o.key ? o.bg : 'transparent', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.84rem',
+                  fontWeight: 600, color: value === o.key ? o.color : '#333', textAlign: 'left',
+                }}>
+                <span style={{ width: 10, height: 10, borderRadius: '50%', background: o.color, flexShrink: 0 }} />
+                <span style={{ flex: 1 }}>{o.label}</span>
+                {value === o.key && <Check size={14} strokeWidth={3} />}
+              </button>
+            ))}
+            {cur && (
+              <button type="button" role="menuitem" onClick={() => pick(null)}
+                style={{ width: '100%', padding: '7px 8px', marginTop: 2, border: 'none', borderTop: '1px solid #F0F0F0', borderRadius: 0, background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.8rem', color: '#888', textAlign: 'left' }}>
+                Bỏ điểm danh
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </>
   );
 }
 
@@ -179,8 +236,9 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
   const unmarked = roster.filter((s) => !s.attendance);
   const quizScores = roster.map((s) => s.quiz_score).filter((x) => x !== null && x !== undefined) as number[];
   const quizAvg = quizScores.length ? quizScores.reduce((a, b) => a + b, 0) / quizScores.length : null;
-  const COLS = '40px minmax(120px, 1fr) 120px 70px 196px minmax(0, 3fr)';
-  const COLS_PDF = '36px minmax(120px, 1fr) 110px 60px 70px minmax(0, 3fr)';
+  // Điểm danh ở cột ngoài cùng bên phải
+  const COLS = '40px minmax(120px, 1fr) 120px 70px minmax(0, 3fr) 104px';
+  const COLS_PDF = '36px minmax(120px, 1fr) 110px 60px minmax(0, 3fr) 70px';
   const max = hw.max_score > 0 ? hw.max_score : 10;
   const essayOn = homeworkHasEssay(hw);
 
@@ -313,7 +371,7 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
           <div style={{ border: '1px solid #EEE', borderRadius: 12, overflow: 'hidden' }}>
             {!isMobile && (
               <div data-pdf-break style={{ display: 'grid', gridTemplateColumns: forPdf ? COLS_PDF : COLS, gap: 12, padding: '0.6rem 1rem', background: '#FAFAFA', fontSize: '0.72rem', fontWeight: 700, color: '#888', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                <span>STT</span><span>Họ và tên</span><span>Điểm</span><span>Điểm 10p</span><span>Điểm danh</span><span>Nhận xét</span>
+                <span>STT</span><span>Họ và tên</span><span>Điểm</span><span>Điểm 10p</span><span>Nhận xét</span><span>Điểm danh</span>
               </div>
             )}
             {rows.map(({ s, review }, i) => {
@@ -367,7 +425,7 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '0 0 8px 28px' }}>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', color: '#888' }}>10p {quizCell}</span>
-                    {attCell}
+                    <span style={{ marginLeft: 'auto' }}>{attCell}</span>
                   </div>
                   {comment}
                 </div>
@@ -377,8 +435,8 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
                   <strong style={{ fontSize: '0.9rem' }}>{s.full_name}</strong>
                   <div>{scoreCell}</div>
                   <div>{quizCell}</div>
-                  <div>{attCell}</div>
                   {comment}
+                  <div>{attCell}</div>
                 </div>
               );
             })}

@@ -103,7 +103,7 @@ export default function HomeworkDetail() {
     return { bg: '#FFEBEE', color: '#C62828' };
   };
 
-  // Xuất bảng điểm CẢ LỚP ra file Excel (.xlsx): STT, Họ và tên, Trạng thái, Điểm, Điểm 10p, Điểm danh, Nhận xét
+  // Xuất bảng điểm CẢ LỚP ra file Excel (.xlsx): STT, Họ và tên, Trạng thái, Điểm, Điểm 10p, Nhận xét, Điểm danh
   // + (bài có tự luận) cột "Nhận xét tự luận" chuẩn form ngắn gọn: đầy đủ / thiếu câu nào / sai câu nào.
   // Thứ tự lấy nguyên từ server (đã khớp với thứ tự đã kéo thả trong danh sách học sinh của lớp)
   const exportExcel = async () => {
@@ -113,7 +113,7 @@ export default function HomeworkDetail() {
     const overdue = hw.due_date ? new Date() > new Date(hw.due_date) : false;
 
     const essay = homeworkHasEssay(hw);
-    const header = ['STT', 'Họ và tên', 'Trạng thái', 'Điểm', 'Điểm 10p', 'Điểm danh', 'Nhận xét', ...(essay ? ['Nhận xét tự luận'] : [])];
+    const header = ['STT', 'Họ và tên', 'Trạng thái', 'Điểm', 'Điểm 10p', 'Nhận xét', ...(essay ? ['Nhận xét tự luận'] : []), 'Điểm danh'];
     const rows = rowsSrc.map((s: any, i: number) => [
       i + 1,
       s.full_name || '',
@@ -122,9 +122,9 @@ export default function HomeworkDetail() {
         ? (s.score ?? s.best_score ?? 'Chưa chấm') // lần mới đang chờ chấm → điểm cao nhất lần trước
         : (overdue ? 0 : ''),
       s.quiz_score ?? '',
-      s.attendance ? ATTENDANCE_LABEL[s.attendance as keyof typeof ATTENDANCE_LABEL] || '' : '',
       s.feedback || '',
       ...(essay ? [summarizeEssayFeedback(s, hw)] : []),
+      s.attendance ? ATTENDANCE_LABEL[s.attendance as keyof typeof ATTENDANCE_LABEL] || '' : '',
     ]);
     const aoa = [
       [hw.title],
@@ -136,7 +136,7 @@ export default function HomeworkDetail() {
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const lastCol = header.length - 1;
-    ws['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 10 }, { wch: 8 }, { wch: 9 }, { wch: 10 }, { wch: 60 }, ...(essay ? [{ wch: 40 }] : [])];
+    ws['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 10 }, { wch: 8 }, { wch: 9 }, { wch: 60 }, ...(essay ? [{ wch: 40 }] : []), { wch: 10 }];
     ws['!merges'] = [
       { s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } },
       { s: { r: 1, c: 0 }, e: { r: 1, c: lastCol } },
