@@ -127,10 +127,17 @@ export const apple = () => `<path d="M0 -10 C-4 -14 -16 -14 -16 0 C-16 12 -6 18 
 
 // Noel: bông tuyết, cây thông, tuần lộc, hộp quà, quả châu, kẹo gậy
 export const snowflake = (c = '#90CAF9', s = 1) => `<g stroke="${c}" stroke-width="${2 / s}" stroke-linecap="round" transform="scale(${s})">${Array.from({ length: 6 }, (_, i) => `<g transform="rotate(${i * 60})"><line x1="0" y1="0" x2="0" y2="-16"/><line x1="0" y1="-9" x2="-5" y2="-13"/><line x1="0" y1="-9" x2="5" y2="-13"/></g>`).join('')}</g>`;
-export const pine = (lights = true) => `<rect x="-4" y="20" width="8" height="9" fill="#6D4C41"/>
-<polygon points="0,-30 -14,-6 14,-6" fill="#2E7D32"/><polygon points="0,-18 -19,8 19,8" fill="#388E3C"/><polygon points="0,-6 -24,22 24,22" fill="#43A047"/>
+export const pine = (lights = true, tiers = ['#2E7D32', '#388E3C', '#43A047']) => `<rect x="-4" y="20" width="8" height="9" fill="#6D4C41"/>
+<polygon points="0,-30 -14,-6 14,-6" fill="${tiers[0]}"/><polygon points="0,-18 -19,8 19,8" fill="${tiers[1]}"/><polygon points="0,-6 -24,22 24,22" fill="${tiers[2]}"/>
 <polygon points="${starPoints(6, 2.6, 0, -31)}" fill="#FFD54F"/>
 ${lights ? '<circle cx="-6" cy="-4" r="2.3" fill="#E53935"/><circle cx="7" cy="2" r="2.3" fill="#FFD54F"/><circle cx="-9" cy="12" r="2.3" fill="#42A5F5"/><circle cx="10" cy="16" r="2.3" fill="#E53935"/><circle cx="1" cy="10" r="2.3" fill="#FFD54F"/>' : ''}`;
+// Cây thông phủ tuyết: thêm lớp tuyết trắng trên từng tầng lá
+export const snowyPine = (tiers = ['#1E6B57', '#237A63', '#2A8A70']) => `${pine(true, tiers)}
+<path d="M-8 -16 C-4 -13 0 -16 4 -13 C6 -14 8 -14 9 -15 L0 -30Z" fill="#FFFFFF"/>
+<path d="M-12 -4 C-7 -1 -3 -5 2 -2 C6 -4 10 -2 13 -4 L7 -12 C3 -9 -3 -11 -7 -10Z" fill="#FFFFFF" opacity="0.95"/>
+<path d="M-17 10 C-11 13 -6 9 0 12 C6 9 11 13 17 10 L12 2 C6 5 -4 3 -12 4Z" fill="#FFFFFF" opacity="0.95"/>`;
+export const snowGround = (w = 200) => `<path d="M${-w / 2} 6 C${-w / 4} -6 ${-w / 8} 2 0 -2 C${w / 6} -8 ${w / 3} 2 ${w / 2} -4 V14 H${-w / 2}Z" fill="#FFFFFF"/>`;
+
 export const reindeer = () => `<path d="M-8 -14 C-12 -22 -18 -24 -22 -30 M-14 -21 C-20 -20 -24 -18 -26 -22 M8 -14 C12 -22 18 -24 22 -30 M14 -21 C20 -20 24 -18 26 -22" stroke="#6D4C41" stroke-width="2.6" fill="none" stroke-linecap="round"/>
 <ellipse cx="-12" cy="-10" rx="5" ry="2.6" fill="#A1887F" transform="rotate(-25 -12 -10)"/><ellipse cx="12" cy="-10" rx="5" ry="2.6" fill="#A1887F" transform="rotate(25 12 -10)"/>
 <path d="M-10 -12 C-12 0 -8 14 0 16 C8 14 12 0 10 -12 C6 -16 -6 -16 -10 -12Z" fill="#A1887F"/>
