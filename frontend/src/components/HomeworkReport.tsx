@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { MessageSquareText, Download, Loader2, Check, CheckCheck, ChevronDown } from 'lucide-react';
-import { buildStudentReview, summarizeEssayFeedback, homeworkHasEssay, ERROR_TAGS, type ErrorTag } from '../lib/feedbackSummary';
+import { buildStudentReview, summarizeEssayFeedback, homeworkHasEssay } from '../lib/feedbackSummary';
 import useIsMobile from '../lib/useIsMobile';
 import { toast } from './Toast';
 
 // Mục "Nhận xét" trên thanh chọn ở trang chi tiết bài tập (giáo viên): tổng quan điểm cả lớp + phổ điểm
-// + nhận xét từng học sinh (đầy đủ như file Excel: nhận xét chi tiết + nhận xét tự luận ngắn gọn) kèm
-// nhãn lỗi. Mức điểm tính theo tỉ lệ trên thang của bài (quy về thang 10). Tải được ra file PDF.
+// + nhận xét từng học sinh (đầy đủ như file Excel: nhận xét chi tiết + nhận xét tự luận ngắn gọn).
+// Mức điểm tính theo tỉ lệ trên thang của bài (quy về thang 10). Tải được ra file PDF.
 // Cột "Điểm 10p" và "Điểm danh" nhập trực tiếp trên bảng (giáo viên / trợ giảng), lưu ngay khi thay đổi.
 // "Bài học hôm nay" (chữ to, đậm) và "Ngày" do giáo viên tự điền ngay trên dải tiêu đề, lưu khi rời ô.
 
@@ -24,6 +24,19 @@ const ATTENDANCE_OPTS: { key: Attendance; label: string; color: string; bg: stri
   { key: 'online', label: 'Online', color: '#1565C0', bg: '#E3F2FD' },
   { key: 'other_shift', label: 'Trái ca', color: '#E65100', bg: '#FFF3E0' },
 ];
+
+// Điểm 10 phút hiển thị màu xanh dương, căn giữa cột, để không lẫn với cột Điểm bên cạnh
+const QUIZ_COLOR = '#1565C0';
+
+// Bề rộng (px) đủ cho họ tên dài nhất nằm trên MỘT dòng — đo bằng canvas theo đúng phông chữ của trang
+function nameColumnWidth(names: string[]) {
+  const ctx = document.createElement('canvas').getContext('2d');
+  if (!ctx) return 200;
+  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  ctx.font = `700 ${0.9 * rem}px ${getComputedStyle(document.body).fontFamily}`;
+  const w = Math.max(0, ...names.map((n) => ctx.measureText(String(n || '')).width));
+  return Math.min(280, Math.max(120, Math.ceil(w) + 6));
+}
 
 // Ô nhập điểm 10 phút (0–10, nhận cả dấu phẩy); lưu khi rời ô hoặc nhấn Enter
 function QuizInput({ value, onSave }: { value: number | null | undefined; onSave: (v: number | null) => Promise<void> }) {
@@ -65,7 +78,7 @@ function QuizInput({ value, onSave }: { value: number | null | undefined; onSave
         if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
         if (e.key === 'Escape') { setText(shown); (e.target as HTMLInputElement).blur(); }
       }}
-      style={{ width: 56, padding: '4px 6px', border: `1.5px solid ${border}`, borderRadius: 7, textAlign: 'center', fontSize: '0.88rem', fontWeight: 700, color: '#1A1A2E', background: state === 'saving' ? '#FAFAFA' : 'white', outline: 'none', transition: 'border-color 0.2s' }}
+      style={{ width: 56, padding: '4px 6px', border: `1.5px solid ${border}`, borderRadius: 7, textAlign: 'center', fontSize: '0.88rem', fontWeight: 700, color: QUIZ_COLOR, background: state === 'saving' ? '#FAFAFA' : 'white', outline: 'none', transition: 'border-color 0.2s' }}
     />
   );
 }
@@ -226,7 +239,6 @@ const fmt = (n: number) => n.toLocaleString('vi-VN', { maximumFractionDigits: 2 
 // Ngưỡng hiển thị theo thang của bài, làm tròn 0,25 cho dễ đọc
 const at = (ratio: number, max: number) => Math.round(ratio * max * 4) / 4;
 
-const TAG_SHORT: Record<ErrorTag, string> = Object.fromEntries(ERROR_TAGS.map((t) => [t.key, t.short])) as Record<ErrorTag, string>;
 
 // Bản PDF luôn dựng ở bố cục máy tính với bề rộng cố định (không phụ thuộc màn hình đang dùng)
 const PDF_WIDTH = 900;
@@ -298,8 +310,10 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
   const quizScores = roster.map((s) => s.quiz_score).filter((x) => x !== null && x !== undefined) as number[];
   const quizAvg = quizScores.length ? quizScores.reduce((a, b) => a + b, 0) / quizScores.length : null;
   // Điểm danh ở cột ngoài cùng bên phải
-  const COLS = '40px minmax(120px, 1fr) 120px 70px minmax(0, 3fr) 104px';
-  const COLS_PDF = '36px minmax(120px, 1fr) 110px 60px minmax(0, 3fr) 70px';
+  // Cột họ tên vừa khít tên dài nhất (không xuống dòng); cột Điểm thu gọn; cột Điểm 10p căn giữa
+  const nameW = useMemo(() => nameColumnWidth(roster.map((s) => s.full_name)), [roster]);
+  const COLS = `40px ${nameW}px 104px 72px minmax(0, 1fr) 104px`;
+  const COLS_PDF = `36px ${nameW}px 100px 64px minmax(0, 1fr) 70px`;
   const max = hw.max_score > 0 ? hw.max_score : 10;
   const essayOn = homeworkHasEssay(hw);
 
@@ -425,15 +439,12 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
         <div>
           <div data-pdf-break>
             <div style={{ fontWeight: 800, fontSize: '1rem', marginBottom: 6 }}>Nhận xét từng học sinh</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: '0.75rem', color: '#777', marginBottom: 4 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: '0.75rem', color: '#777', marginBottom: 10 }}>
               {BANDS.map((b, i) => (
                 <span key={b.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                   <span style={{ width: 14, height: 5, borderRadius: 99, background: b.color }} />{b.label} ({bandRange(i)})
                 </span>
               ))}
-            </div>
-            <div style={{ fontSize: '0.75rem', color: '#777', marginBottom: 10 }}>
-              <strong>Nhãn lỗi:</strong> {ERROR_TAGS.map((t) => `${t.short} – ${t.label}`).join(' · ')}
             </div>
             {/* Tóm tắt điểm danh + điểm 10 phút */}
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 14px', fontSize: '0.8rem', color: '#555', marginBottom: 10 }}>
@@ -458,23 +469,23 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
           <div style={{ border: '1px solid #EEE', borderRadius: 12, overflow: 'hidden' }}>
             {!isMobile && (
               <div data-pdf-break style={{ display: 'grid', gridTemplateColumns: forPdf ? COLS_PDF : COLS, gap: 12, padding: '0.6rem 1rem', background: '#FAFAFA', fontSize: '0.72rem', fontWeight: 700, color: '#888', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                <span>STT</span><span>Họ và tên</span><span>Điểm</span><span>Điểm 10p</span><span>Nhận xét</span><span>Điểm danh</span>
+                <span>STT</span><span>Họ và tên</span><span>Điểm</span><span style={{ textAlign: 'center' }}>Điểm 10p</span><span>Nhận xét</span><span>Điểm danh</span>
               </div>
             )}
             {rows.map(({ s, review }, i) => {
               const missing = review.kind === 'missing';
               const band = review.kind === 'graded' ? bandOf(review.score / max) : null;
               const scoreCell = review.kind === 'graded' ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ flex: 1, height: 6, background: '#F0F0F0', borderRadius: 99, overflow: 'hidden', maxWidth: 80 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ flex: 1, height: 6, background: '#F0F0F0', borderRadius: 99, overflow: 'hidden', maxWidth: 52 }}>
                     <div style={{ width: `${Math.min(100, (review.score / max) * 100)}%`, height: '100%', background: band!.color, borderRadius: 99 }} />
                   </div>
                   <strong style={{ fontSize: '0.88rem', minWidth: 34, textAlign: 'right' }}>{fmt(review.score)}</strong>
                 </div>
               ) : missing ? (
-                <span style={{ background: '#C62828', color: 'white', borderRadius: 99, padding: '2px 10px', fontSize: '0.75rem', fontWeight: 700 }}>Chưa nộp bài</span>
+                <span style={{ background: '#C62828', color: 'white', borderRadius: 99, padding: '2px 9px', fontSize: '0.72rem', fontWeight: 700, whiteSpace: 'nowrap' }}>Chưa nộp bài</span>
               ) : (
-                <span className="badge badge-gray">{review.kind === 'pending' ? 'Chưa có điểm' : 'Chưa nộp'}</span>
+                <span className="badge badge-gray" style={{ whiteSpace: 'nowrap' }}>{review.kind === 'pending' ? 'Chưa có điểm' : 'Chưa nộp'}</span>
               );
               // Nội dung như file Excel: cột "Nhận xét" (chi tiết) + cột "Nhận xét tự luận" (ngắn gọn)
               const detailed = review.kind === 'graded' ? (String(s.feedback || '').trim() || review.text) : review.text;
@@ -487,19 +498,12 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
                       <strong style={{ color: '#C62828' }}>Tự luận:</strong> {essayLine}
                     </div>
                   )}
-                  {review.tags.length > 0 && (
-                    <div style={{ display: 'flex', gap: 4, marginTop: 5, flexWrap: 'wrap' }}>
-                      {review.tags.map((t) => (
-                        <span key={t} style={{ fontSize: '0.68rem', fontWeight: 700, color: '#555', border: '1px solid #DDD', borderRadius: 5, padding: '0 6px', background: 'white' }}>{TAG_SHORT[t]}</span>
-                      ))}
-                    </div>
-                  )}
                 </div>
               );
               const rowBg = missing ? '#FFF5F5' : i % 2 ? '#FCFCFC' : 'white';
               const quizCell = editable
                 ? <QuizInput value={s.quiz_score} onSave={(v) => save([{ student_id: s.student_id, quiz_score: v }])} />
-                : <strong style={{ fontSize: '0.88rem', color: s.quiz_score === null || s.quiz_score === undefined ? '#BBB' : '#1A1A2E' }}>{s.quiz_score === null || s.quiz_score === undefined ? '—' : fmt(s.quiz_score)}</strong>;
+                : <strong style={{ fontSize: '0.88rem', color: s.quiz_score === null || s.quiz_score === undefined ? '#BBB' : QUIZ_COLOR }}>{s.quiz_score === null || s.quiz_score === undefined ? '—' : fmt(s.quiz_score)}</strong>;
               const attCell = editable
                 ? <AttendancePicker value={s.attendance} onChange={(v) => { save([{ student_id: s.student_id, attendance: v }]).catch(() => {}); }} />
                 : <AttendanceBadge value={s.attendance} />;
@@ -519,9 +523,9 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
               ) : (
                 <div key={s.student_id} data-pdf-break style={{ display: 'grid', gridTemplateColumns: forPdf ? COLS_PDF : COLS, gap: 12, alignItems: 'center', padding: '0.7rem 1rem', borderTop: '1px solid #F2F2F2', background: rowBg }}>
                   <span style={{ fontSize: '0.85rem', color: '#999' }}>{i + 1}</span>
-                  <strong style={{ fontSize: '0.9rem' }}>{s.full_name}</strong>
+                  <strong title={s.full_name} style={{ fontSize: '0.9rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.full_name}</strong>
                   <div>{scoreCell}</div>
-                  <div>{quizCell}</div>
+                  <div style={{ textAlign: 'center' }}>{quizCell}</div>
                   {comment}
                   <div>{attCell}</div>
                 </div>
