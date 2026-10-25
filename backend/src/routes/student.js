@@ -3,7 +3,7 @@ const router = express.Router();
 const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { stripAnswers, stripHsaAnswers } = require('../services/homeworkParts');
-const { classRanking, classRankingReport, studentOverallAverage } = require('../services/classRanking');
+const { classRanking, classRankingReport, studentOverallAverage, prevYm, ymOf } = require('../services/classRanking');
 const { parseBest } = require('../services/bestAttempt');
 
 router.use(authMiddleware, requireRole('student'));
@@ -147,18 +147,33 @@ router.get('/my-courses/:courseId', (req, res) => {
 
 // Tổng quan "thông minh" cho trang chủ học sinh: việc cần làm ở TẤT CẢ các lớp (bài còn hạn, chưa nộp,
 // hạn gần nhất trước), điểm vừa chấm gần đây, và tình hình từng lớp (điểm TB + hạng tháng này).
+// Mỗi lớp kèm bảng xếp hạng rút gọn tháng này (top 5 + chính mình, chỉ họ tên) và hạng tháng trước để so sánh.
+const BOARD_TOP = 5;
 router.get('/overview', (req, res) => {
   const db = getDb();
   const uid = req.user.id;
   const now = new Date().toISOString();
+  const month = ymOf(now);
+  const lastMonth = prevYm(month);
   const classes = db.prepare(`
     SELECT cl.id, cl.title, co.title course_title, u.full_name teacher_name
     FROM class_students cs JOIN classes cl ON cs.class_id=cl.id
     LEFT JOIN courses co ON cl.course_id=co.id LEFT JOIN users u ON cl.teacher_id=u.id
     WHERE cs.student_id=? AND cl.active=1 ORDER BY cl.created_at DESC
   `).all(uid).map((c) => {
-    const mine = classRanking(db, c.id).get(uid) || {};
-    return { ...c, my_avg: mine.avg ?? null, my_rank: mine.rank ?? null, rank_total: mine.total ?? 0 };
+    const report = classRankingReport(db, c.id, month);
+    const ranked = report.students.filter((s) => s.rank !== null);
+    const mine = report.students.find((s) => s.id === uid) || {};
+    const board = ranked
+      .filter((s, i) => i < BOARD_TOP || s.id === uid)
+      .map((s) => ({ rank: s.rank, full_name: s.full_name, avg: s.avg, is_me: s.id === uid }));
+    const prev = classRanking(db, c.id, now, lastMonth).get(uid) || {};
+    return {
+      ...c,
+      my_avg: mine.avg ?? null, my_rank: mine.rank ?? null, rank_total: ranked.length,
+      prev_avg: prev.avg ?? null, prev_rank: prev.rank ?? null, prev_total: prev.total ?? 0,
+      board,
+    };
   });
   const todo = db.prepare(`
     SELECT h.id, h.title, h.due_date, h.exam_type, h.time_limit_minutes, h.max_score, cl.id class_id, cl.title class_title
@@ -176,7 +191,7 @@ router.get('/overview', (req, res) => {
     WHERE s.student_id=? AND cl.active=1 AND COALESCE(s.score, s.best_score) IS NOT NULL
     ORDER BY at DESC LIMIT 5
   `).all(uid);
-  res.json({ classes, todo, recent });
+  res.json({ month, last_month: lastMonth, classes, todo, recent });
 });
 
 // Student's profile/stats

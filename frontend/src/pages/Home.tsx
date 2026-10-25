@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import AdCarousel from '../components/AdCarousel';
 import PublicLayout from '../components/PublicLayout';
 import FacebookIcon from '../components/FacebookIcon';
+import MonthlyHonorBoard from '../components/MonthlyHonorBoard';
 import api from '../lib/api';
 import { PAGE_MAX } from '../lib/layout';
 import { BookOpen, ChevronRight, ChevronDown, Trophy, Users, GraduationCap, Award, Calendar, UserCircle, Phone } from 'lucide-react';
@@ -91,6 +92,7 @@ export default function Home() {
   const [ads, setAds] = useState([]);
   const [courses, setCourses] = useState<any[]>([]);
   const [students, setStudents] = useState<any[]>([]);
+  const [topMonthly, setTopMonthly] = useState<any[]>([]);
   const [staff, setStaff] = useState<any[]>([]);
   const [achievements, setAchievements] = useState<any[]>([]);
   const [settings, setSettings] = useState<any>({});
@@ -102,6 +104,7 @@ export default function Home() {
     Promise.all([
       api.get('/public/courses').then((r) => setCourses(r.data)).catch(() => {}),
       api.get('/public/featured-students').then((r) => setStudents(r.data)).catch(() => {}),
+      api.get('/public/top-students').then((r) => setTopMonthly(r.data)).catch(() => {}),
       api.get('/public/staff').then((r) => setStaff(r.data)).catch(() => {}),
       api.get('/public/achievements').then((r) => setAchievements(r.data)).catch(() => {}),
     ]).finally(() => setReady(true));
@@ -172,8 +175,9 @@ export default function Home() {
       </section>
 
       {/* 1. Học sinh tiêu biểu */}
-      <Section id="hoc-sinh" title="Học sinh tiêu biểu" subtitle="Những gương mặt xuất sắc đạt điểm cao trong các kỳ thi" icon={Trophy} color="#C62828">
-        {students.length === 0 ? <Empty text="Chưa có thông tin học sinh tiêu biểu" /> : (
+      <Section id="hoc-sinh" title="Học sinh tiêu biểu" subtitle="Bảng vàng điểm trung bình theo tháng và những gương mặt xuất sắc đạt điểm cao trong các kỳ thi" icon={Trophy} color="#C62828">
+        <MonthlyHonorBoard data={topMonthly} />
+        {students.length === 0 ? (topMonthly.length === 0 && <Empty text="Chưa có thông tin học sinh tiêu biểu" />) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 20 }}>
             {students.map((s) => (
               <div key={s.id} style={{ background: 'white', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>

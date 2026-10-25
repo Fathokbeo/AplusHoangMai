@@ -151,4 +151,65 @@ function classRankingReport(db, classId, month) {
   return { month: ym, months, current_month: currentYm, students: rows };
 }
 
-module.exports = { classAverages, classRanking, classRankingReport, classMonths, studentOverallAverage, isOverdue, ymOf };
+// Tháng liền trước của 'YYYY-MM'
+function prevYm(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+}
+
+// "Bảng vàng" toàn trung tâm theo tháng (trang chủ): điểm TB tháng của mỗi học sinh trên TẤT CẢ các lớp
+// đang học (cùng quy tắc: quá hạn chưa có điểm = 0, chưa tới hạn thì bỏ qua). Lấy `months` tháng gần nhất có
+// bài tập, mỗi tháng `limit` bạn cao nhất (đồng điểm → ai làm nhiều bài hơn đứng trước).
+// Trả về [{ month, students: [{ id, full_name, classes, avg, counted, rank }] }] — tháng mới nhất trước.
+function monthlyTopStudents(db, { months = 6, limit = 5, nowIso } = {}) {
+  const now = nowIso || new Date().toISOString();
+  const homeworks = db.prepare(`
+    SELECT h.id,h.class_id,h.due_date,h.created_at,h.max_score FROM homework h JOIN classes cl ON h.class_id=cl.id WHERE cl.active=1
+  `).all().map((hw) => ({ ...hw, ym: ymOf(monthAnchor(hw)) })).filter((hw) => hw.ym);
+  const ymList = [...new Set(homeworks.map((hw) => hw.ym))].sort().reverse().slice(0, months);
+  if (ymList.length === 0) return [];
+
+  const enroll = db.prepare(`
+    SELECT cs.class_id, u.id student_id, u.full_name, cl.title class_title
+    FROM class_students cs JOIN users u ON cs.student_id=u.id JOIN classes cl ON cs.class_id=cl.id
+    WHERE u.active=1 AND u.role='student' AND cl.active=1
+  `).all();
+  const scoreOf = new Map();
+  db.prepare('SELECT homework_id,student_id,COALESCE(score,best_score) score FROM submissions').all()
+    .forEach((r) => scoreOf.set(`${r.homework_id}-${r.student_id}`, r.score));
+  const hwByClass = new Map();
+  homeworks.forEach((hw) => { if (!hwByClass.has(hw.class_id)) hwByClass.set(hw.class_id, []); hwByClass.get(hw.class_id).push(hw); });
+
+  // studentId -> { full_name, classes:Set, per: Map(ym -> {sum,counted}) }
+  const acc = new Map();
+  for (const e of enroll) {
+    if (!acc.has(e.student_id)) acc.set(e.student_id, { full_name: e.full_name, classes: new Set(), per: new Map() });
+    const a = acc.get(e.student_id);
+    a.classes.add(e.class_title);
+    for (const hw of hwByClass.get(e.class_id) || []) {
+      if (!ymList.includes(hw.ym)) continue;
+      const max = hw.max_score > 0 ? hw.max_score : 10;
+      const score = scoreOf.get(`${hw.id}-${e.student_id}`);
+      const p = a.per.get(hw.ym) || { sum: 0, counted: 0 };
+      if (score !== null && score !== undefined) { p.sum += Math.max(0, Math.min(1, score / max)); p.counted++; }
+      else if (isOverdue(hw.due_date, now)) { p.counted++; }
+      else continue;
+      a.per.set(hw.ym, p);
+    }
+  }
+
+  return ymList.map((ym) => {
+    const list = [];
+    for (const [id, a] of acc) {
+      const p = a.per.get(ym);
+      if (!p || p.counted === 0) continue;
+      list.push({ id, full_name: a.full_name, classes: [...a.classes].join(', '), avg: round1((p.sum / p.counted) * 10), counted: p.counted });
+    }
+    list.sort((x, y) => y.avg - x.avg || y.counted - x.counted || x.full_name.localeCompare(y.full_name, 'vi'));
+    let lastAvg = null, lastRank = 0;
+    list.forEach((s, i) => { if (s.avg !== lastAvg) { lastRank = i + 1; lastAvg = s.avg; } s.rank = lastRank; });
+    return { month: ym, students: list.slice(0, limit) };
+  }).filter((m) => m.students.length > 0);
+}
+
+module.exports = { classAverages, classRanking, classRankingReport, classMonths, studentOverallAverage, monthlyTopStudents, prevYm, isOverdue, ymOf };

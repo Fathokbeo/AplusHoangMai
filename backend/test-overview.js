@@ -62,6 +62,14 @@ const login = async (u, p) => (await req('POST', '/auth/login', { json: { userna
   }
   ok('Nộp xong → bài rời khỏi Việc cần làm', !r.data.todo.some((x) => x.id === hwTN));
   ok('Kết quả mới có điểm vừa chấm (7,5)', r.data.recent.some((x) => x.homework_id === hwTN && x.score === 7.5), JSON.stringify(r.data.recent));
+  const c0 = r.data.classes[0];
+  ok('Có tháng này / tháng trước', /^\d{4}-\d{2}$/.test(r.data.month) && /^\d{4}-\d{2}$/.test(r.data.last_month) && r.data.month !== r.data.last_month);
+  ok('Bảng xếp hạng rút gọn của lớp, có đánh dấu chính mình', Array.isArray(c0.board) && c0.board.some((s) => s.is_me && s.rank === c0.my_rank) && 'prev_rank' in c0, JSON.stringify(c0.board));
+  ok('Bảng rút gọn không lộ tên đăng nhập / id', c0.board.every((s) => !('username' in s) && !('id' in s)));
+  r = await req('GET', '/public/top-students');
+  const thisMonth = (r.data || []).find((m) => m.month === new Date().toISOString().slice(0, 7));
+  ok('Bảng vàng trang chủ (không cần đăng nhập) có HS vừa có điểm', r.status === 200 && thisMonth && thisMonth.students.length > 0, JSON.stringify(thisMonth));
+  ok('Bảng vàng chỉ có họ tên, lớp, điểm, hạng', r.data.every((m) => m.students.every((s) => Object.keys(s).sort().join() === 'avg,classes,full_name,rank')));
   r = await req('GET', '/student/overview', { token: out });
   ok('HS ngoài lớp không thấy bài của lớp', r.status === 200 && !r.data.todo.some((x) => x.class_id === cls));
 

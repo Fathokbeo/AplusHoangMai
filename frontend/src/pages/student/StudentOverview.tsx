@@ -6,9 +6,10 @@ import { ChevronRight, Timer, Trophy, PartyPopper, School, Play, CheckCircle } f
 import { formatDeadlineRemaining } from '../../lib/homeworkParts';
 import { SectionHeader, greeting, givenName, todayLabel, urgencyColor, scoreTone, EmptyState } from '../../components/overviewUi';
 import useIsMobile from '../../lib/useIsMobile';
+import ClassRankCard, { monthLabel } from '../../components/ClassRankCard';
 
-// Trang "Tổng quát" của học sinh: việc cần làm ở mọi lớp (hạn gần nhất trước, đếm ngược),
-// điểm vừa có, tình hình từng lớp; bấm là tới đúng chỗ.
+// Trang "Tổng quát" của học sinh: bảng xếp hạng tháng của các lớp (so với tháng trước), việc cần làm ở mọi
+// lớp (hạn gần nhất trước, đếm ngược), điểm vừa có, tình hình từng lớp; bấm là tới đúng chỗ.
 export default function StudentOverview() {
   const { user } = useAuth();
   const isMobile = useIsMobile();
@@ -36,6 +37,16 @@ export default function StudentOverview() {
         <h1 className="page-title" style={{ margin: '2px 0 0' }}>{greeting()}, {givenName(user?.full_name)}!</h1>
         <p style={{ color: '#888', margin: '4px 0 0', fontSize: '0.9rem' }}>{subtitle}</p>
       </div>
+
+      {/* Bảng xếp hạng tháng này của các lớp đang học */}
+      {classes.length > 0 && (
+        <section style={{ marginBottom: '2rem' }}>
+          <SectionHeader title={<>Bảng xếp hạng {monthLabel(ov?.month)}</>} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(340px, 100%), 1fr))', gap: 14, alignItems: 'start' }}>
+            {classes.map((c) => <ClassRankCard key={c.id} c={c} month={ov.month} lastMonth={ov.last_month} />)}
+          </div>
+        </section>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1.35fr) minmax(0, 1fr)', gap: 24, alignItems: 'start' }}>
         {/* Việc cần làm */}
