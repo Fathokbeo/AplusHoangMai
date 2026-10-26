@@ -1,6 +1,5 @@
-import { Menu, Home } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
+import { Menu } from 'lucide-react';
+import UserMenu from './UserMenu';
 
 interface Props {
   onMenuClick: () => void;
@@ -8,8 +7,6 @@ interface Props {
 }
 
 export default function Topbar({ onMenuClick, title }: Props) {
-  const { user } = useAuth();
-
   return (
     <header className="topbar">
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -25,32 +22,8 @@ export default function Topbar({ onMenuClick, title }: Props) {
         )}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <Link to="/" className="btn btn-ghost btn-sm" title="Trang chủ">
-          <Home size={16} />
-        </Link>
-        <div style={{
-          background: '#F5F5F5',
-          border: '1px solid #E0E0E0',
-          borderRadius: 99,
-          padding: '4px 12px',
-          fontSize: '0.82rem',
-          color: '#555',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-        }}>
-          <div style={{
-            width: 22, height: 22, borderRadius: '50%',
-            background: user?.role === 'admin' ? '#C62828' : user?.role === 'teacher' ? '#1565C0' : '#2E7D32',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: 'white', fontSize: '0.72rem', fontWeight: 700
-          }}>
-            {user?.full_name?.[0] || 'U'}
-          </div>
-          <span className="hide-mobile">{user?.full_name}</span>
-        </div>
-      </div>
+      {/* Tài khoản: bấm vào để xem thông tin, về trang chủ hoặc đăng xuất */}
+      <UserMenu place="app" />
     </header>
   );
 }

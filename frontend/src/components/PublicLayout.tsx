@@ -4,14 +4,15 @@ import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
 import { PAGE_MAX } from '../lib/layout';
 import HolidayBanner from './HolidayBanner';
-import { Phone, MapPin, Clock, Mail, ExternalLink, Menu, X, LogIn, LogOut, User } from 'lucide-react';
+import UserMenu from './UserMenu';
+import { Phone, MapPin, Clock, Mail, ExternalLink, Menu, X, LogIn } from 'lucide-react';
 
 const NAV = [
   { to: '/', label: 'Trang chủ' },
 ];
 
 export default function PublicLayout({ children }: { children: ReactNode }) {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { pathname } = useLocation();
   const [navOpen, setNavOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -29,8 +30,6 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
 
   useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
 
-  const handleLogout = () => { logout(); setNavOpen(false); };
-  const dashLink = user ? `/${user.role}/overview` : '/login';
   // Trang chủ trong suốt khi chưa cuộn; các trang con luôn nền trắng
   const solid = scrolled || pathname !== '/';
 
@@ -53,6 +52,7 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
             </div>
           </Link>
 
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {/* Desktop nav */}
           <div className="desktop-nav">
             {NAV.map((n) => {
@@ -73,24 +73,19 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
               onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
             >Liên hệ</a>
 
-            {user ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 8 }}>
-                <Link to={dashLink} className="btn btn-primary btn-sm" style={{ gap: 6 }}>
-                  <User size={14} />{user.role === 'admin' ? 'Quản trị' : user.role === 'teacher' ? 'Giáo viên' : 'Vào học'}
-                </Link>
-                <button className="btn btn-ghost btn-sm" style={{ color: solid ? '#555' : 'white', borderColor: solid ? '#DDD' : 'rgba(255,255,255,0.3)' }} onClick={handleLogout}>
-                  <LogOut size={14} /> Đăng xuất
-                </button>
-              </div>
-            ) : (
+            {!user && (
               <Link to="/login" className="btn btn-primary btn-sm" style={{ marginLeft: 8 }}><LogIn size={14} /> Đăng nhập</Link>
             )}
           </div>
+
+          {/* Đã đăng nhập: nút tài khoản (cả máy tính lẫn điện thoại) — bấm để vào học / đăng xuất */}
+          {user && <UserMenu place="public" tone={solid ? 'light' : 'dark'} />}
 
           {/* Mobile hamburger */}
           <button onClick={() => setNavOpen(!navOpen)} style={{ color: solid ? '#333' : 'white' }} className="mobile-menu-btn">
             {navOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
+          </div>
         </div>
 
         {/* Mobile menu */}
@@ -100,12 +95,7 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
               <Link key={n.to} to={n.to} onClick={() => setNavOpen(false)} style={{ display: 'block', padding: '0.6rem 0', color: n.to === pathname ? '#C62828' : '#333', textDecoration: 'none', fontWeight: 600 }}>{n.label}</Link>
             ))}
             <a href="#contact" onClick={() => setNavOpen(false)} style={{ display: 'block', padding: '0.6rem 0', color: '#333', textDecoration: 'none', fontWeight: 500 }}>Liên hệ</a>
-            {user ? (
-              <>
-                <Link to={dashLink} onClick={() => setNavOpen(false)} style={{ display: 'block', padding: '0.6rem 0', color: '#C62828', fontWeight: 600 }}>Vào hệ thống</Link>
-                <button onClick={handleLogout} style={{ background: 'none', border: 'none', padding: '0.6rem 0', color: '#666', fontWeight: 500, cursor: 'pointer', width: '100%', textAlign: 'left' }}>Đăng xuất</button>
-              </>
-            ) : (
+            {!user && (
               <Link to="/login" onClick={() => setNavOpen(false)} style={{ display: 'block', padding: '0.6rem 0', color: '#C62828', fontWeight: 600 }}>Đăng nhập</Link>
             )}
           </div>
