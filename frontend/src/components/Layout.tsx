@@ -7,7 +7,8 @@ import useIsMobile from '../lib/useIsMobile';
 import useEdgeSwipe from '../lib/useEdgeSwipe';
 
 export default function Layout() {
-  const [collapsed, setCollapsed] = useState(false);
+  // Máy tính: thanh bên mặc định ẨN, chỉ hiện khi bấm nút ☰ trên thanh trên cùng
+  const [collapsed, setCollapsed] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   // 768px: đúng ngưỡng thanh bên chuyển sang kiểu điện thoại trong index.css
   const isMobile = useIsMobile(768);
