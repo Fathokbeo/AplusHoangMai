@@ -254,6 +254,7 @@ a.list-row:hover { background: #FFF8F8; }
 /* ── Public navbar (trang công khai) ──────────────────────── */
 .desktop-nav { display: flex; align-items: center; gap: 4px; }
 .mobile-menu-btn { display: none; background: none; border: none; cursor: pointer; padding: 4px; }
+.mobile-only { display: none; }
 
 /* ── Responsive ───────────────────────────────────────────── */
 @media (max-width: 768px) {
@@ -265,6 +266,7 @@ a.list-row:hover { background: #FFF8F8; }
   /* Trang công khai: ẩn menu ngang, hiện nút hamburger */
   .desktop-nav { display: none; }
   .mobile-menu-btn { display: flex; }
+  .mobile-only { display: inline-flex; }
 
   /* Thanh trên cùng gọn hơn */
   .topbar { padding: 0.7rem 1rem; }

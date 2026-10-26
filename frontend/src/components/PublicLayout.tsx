@@ -4,15 +4,15 @@ import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
 import { PAGE_MAX } from '../lib/layout';
 import HolidayBanner from './HolidayBanner';
-import UserMenu from './UserMenu';
-import { Phone, MapPin, Clock, Mail, ExternalLink, Menu, X, LogIn } from 'lucide-react';
+import UserMenu, { Avatar, ROLE_LABEL, ENTER_LABEL } from './UserMenu';
+import { Phone, MapPin, Clock, Mail, ExternalLink, Menu, X, LogIn, LogOut, LayoutDashboard } from 'lucide-react';
 
 const NAV = [
   { to: '/', label: 'Trang chủ' },
 ];
 
 export default function PublicLayout({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { pathname } = useLocation();
   const [navOpen, setNavOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -78,8 +78,12 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
             )}
           </div>
 
-          {/* Đã đăng nhập: nút tài khoản (cả máy tính lẫn điện thoại) — bấm để vào học / đăng xuất */}
-          {user && <UserMenu place="public" tone={solid ? 'light' : 'dark'} />}
+          {/* Đã đăng nhập (máy tính): nút tài khoản — bấm để vào học / đăng xuất.
+              Trên điện thoại các lựa chọn này nằm trong menu ☰ */}
+          {user && <div className="desktop-nav"><UserMenu place="public" tone={solid ? 'light' : 'dark'} /></div>}
+
+          {/* Điện thoại: "Liên hệ" để ngoài, cạnh nút ☰ */}
+          <a href="#contact" className="mobile-only" onClick={() => setNavOpen(false)} style={{ color: solid ? '#444' : 'rgba(255,255,255,0.9)', textDecoration: 'none', fontWeight: 600, fontSize: '0.88rem', padding: '6px 8px' }}>Liên hệ</a>
 
           {/* Mobile hamburger */}
           <button onClick={() => setNavOpen(!navOpen)} style={{ color: solid ? '#333' : 'white' }} className="mobile-menu-btn">
@@ -94,8 +98,23 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
             {NAV.map((n) => (
               <Link key={n.to} to={n.to} onClick={() => setNavOpen(false)} style={{ display: 'block', padding: '0.6rem 0', color: n.to === pathname ? '#C62828' : '#333', textDecoration: 'none', fontWeight: 600 }}>{n.label}</Link>
             ))}
-            <a href="#contact" onClick={() => setNavOpen(false)} style={{ display: 'block', padding: '0.6rem 0', color: '#333', textDecoration: 'none', fontWeight: 500 }}>Liên hệ</a>
-            {!user && (
+            {user ? (
+              <div style={{ borderTop: '1px solid #EEE', marginTop: 6, paddingTop: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0.25rem 0 0.5rem' }}>
+                  <Avatar name={user.full_name} role={user.role} size={34} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, color: '#1A1A2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.full_name}</div>
+                    <div style={{ fontSize: '0.78rem', color: '#888' }}>{ROLE_LABEL[user.role]} · {user.username}</div>
+                  </div>
+                </div>
+                <Link to={`/${user.role}/overview`} onClick={() => setNavOpen(false)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0.6rem 0', color: '#C62828', textDecoration: 'none', fontWeight: 700 }}>
+                  <LayoutDashboard size={17} /> {ENTER_LABEL[user.role]}
+                </Link>
+                <button onClick={() => { logout(); setNavOpen(false); }} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', padding: '0.6rem 0', color: '#666', fontWeight: 500, fontFamily: 'inherit', fontSize: 'inherit', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
+                  <LogOut size={17} /> Đăng xuất
+                </button>
+              </div>
+            ) : (
               <Link to="/login" onClick={() => setNavOpen(false)} style={{ display: 'block', padding: '0.6rem 0', color: '#C62828', fontWeight: 600 }}>Đăng nhập</Link>
             )}
           </div>
