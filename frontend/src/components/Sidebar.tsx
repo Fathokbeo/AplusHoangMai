@@ -1,20 +1,18 @@
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import {
-  LayoutDashboard, Users, BookOpen, GraduationCap, Image, LogOut,
-  ChevronLeft, School, LayoutTemplate, UserCog, Sparkles, Home
-} from 'lucide-react';
+import { LogOut, ChevronLeft } from 'lucide-react';
+import { HOME_ITEM, navItemsFor, isNavActive } from '../lib/navItems';
 
 interface Props {
   collapsed: boolean;
   onToggle: () => void;
-  mobileOpen: boolean;
-  onMobileClose: () => void;
 }
 
-export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: Props) {
+// Thanh bên trái — chỉ dùng trên máy tính (điện thoại dùng thanh tab dưới đáy: MobileNav)
+export default function Sidebar({ collapsed, onToggle }: Props) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
 
   const handleLogout = () => {
     logout();
@@ -22,47 +20,15 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
   };
 
   // Mục đầu tiên của mọi vai trò: về trang chủ công khai của trung tâm
-  const homeItem = { to: '/', icon: Home, label: 'Trang chủ' };
-
-  const adminNav = [
-    homeItem,
-    { to: '/admin/overview', icon: LayoutDashboard, label: 'Tổng quan' },
-    { to: '/admin/users', icon: Users, label: 'Quản lý tài khoản' },
-    { to: '/admin/courses', icon: BookOpen, label: 'Khóa học' },
-    { to: '/admin/classes', icon: School, label: 'Lớp học' },
-    { to: '/teacher/assistants', icon: UserCog, label: 'Trợ giảng' },
-    { to: '/admin/content', icon: LayoutTemplate, label: 'Nội dung trang' },
-    { to: '/admin/ads', icon: Image, label: 'Quảng cáo' },
-  ];
-
-  const teacherNav = [
-    homeItem,
-    { to: '/teacher/overview', icon: Sparkles, label: 'Tổng quát' },
-    { to: '/teacher', icon: LayoutDashboard, label: 'Khóa học của tôi' },
-    { to: '/teacher/students', icon: GraduationCap, label: 'Học sinh' },
-    { to: '/teacher/assistants', icon: UserCog, label: 'Trợ giảng' },
-  ];
-
-  const studentNav = [
-    homeItem,
-    { to: '/student/overview', icon: Sparkles, label: 'Tổng quát' },
-    { to: '/student', icon: BookOpen, label: 'Khóa học của tôi' },
-  ];
-
-  const navItems = user?.role === 'admin' ? adminNav : user?.role === 'teacher' ? teacherNav : studentNav;
+  const navItems = [HOME_ITEM, ...navItemsFor(user?.role)];
 
   const roleLabel = user?.role === 'admin' ? 'Quản trị viên' : user?.role === 'teacher' ? 'Giáo viên' : 'Học sinh';
   const roleBadgeColor = user?.role === 'admin' ? '#C62828' : user?.role === 'teacher' ? '#1565C0' : '#2E7D32';
 
   return (
     <>
-      {/* Mobile overlay */}
-      {mobileOpen && (
-        <div className="fixed inset-0 bg-black/50 z-90 md:hidden" onClick={onMobileClose} />
-      )}
-
       <aside
-        className={`sidebar ${collapsed ? 'collapsed' : ''} ${mobileOpen ? 'mobile-open' : ''}`}
+        className={`sidebar ${collapsed ? 'collapsed' : ''}`}
         style={{ zIndex: 100 }}
       >
         {/* Logo */}
@@ -104,18 +70,19 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
         {/* Nav */}
         <nav className="sidebar-nav">
           <div className="nav-section">Menu</div>
-          {navItems.map(({ to, icon: Icon, label }) => (
+          {navItems.map((item) => {
+            const { to, icon: Icon, label } = item;
+            return (
             <NavLink
               key={to}
               to={to}
-              end={to.split('/').length <= 2}
-              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-              onClick={onMobileClose}
+              className={`nav-item ${isNavActive(item, pathname) ? 'active' : ''}`}
             >
               <Icon size={18} />
               <span>{label}</span>
             </NavLink>
-          ))}
+            );
+          })}
         </nav>
 
         {/* Bottom */}
