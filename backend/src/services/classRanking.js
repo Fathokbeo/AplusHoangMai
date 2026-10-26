@@ -159,14 +159,16 @@ function prevYm(ym) {
 
 // "Bảng vàng" toàn trung tâm theo tháng (trang chủ): điểm TB tháng của mỗi học sinh trên TẤT CẢ các lớp
 // đang học (cùng quy tắc: quá hạn chưa có điểm = 0, chưa tới hạn thì bỏ qua). Lấy `months` tháng gần nhất có
-// bài tập, mỗi tháng `limit` bạn cao nhất (đồng điểm → ai làm nhiều bài hơn đứng trước).
+// bài tập — KHÔNG tính các tháng sau tháng hiện tại (bài đặt hạn nộp ở tương lai xa không được tạo ra tháng
+// "tương lai" trên bảng) — mỗi tháng `limit` bạn cao nhất (đồng điểm → ai làm nhiều bài hơn đứng trước).
 // Trả về [{ month, students: [{ id, full_name, classes, avg, counted, rank }] }] — tháng mới nhất trước.
 function monthlyTopStudents(db, { months = 6, limit = 5, nowIso } = {}) {
   const now = nowIso || new Date().toISOString();
   const homeworks = db.prepare(`
     SELECT h.id,h.class_id,h.due_date,h.created_at,h.max_score FROM homework h JOIN classes cl ON h.class_id=cl.id WHERE cl.active=1
   `).all().map((hw) => ({ ...hw, ym: ymOf(monthAnchor(hw)) })).filter((hw) => hw.ym);
-  const ymList = [...new Set(homeworks.map((hw) => hw.ym))].sort().reverse().slice(0, months);
+  const nowYm = ymOf(now);
+  const ymList = [...new Set(homeworks.map((hw) => hw.ym))].filter((ym) => ym <= nowYm).sort().reverse().slice(0, months);
   if (ymList.length === 0) return [];
 
   const enroll = db.prepare(`
