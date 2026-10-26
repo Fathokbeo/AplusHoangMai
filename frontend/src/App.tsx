@@ -26,7 +26,6 @@ import AssistantManagement from './pages/teacher/AssistantManagement';
 
 import StudentDashboard from './pages/student/StudentDashboard';
 import StudentOverview from './pages/student/StudentOverview';
-import StudentClasses from './pages/student/StudentClasses';
 import StudentCourseDetail from './pages/student/StudentCourseDetail';
 import StudentClassDetail from './pages/student/StudentClassDetail';
 
@@ -87,7 +86,8 @@ function AppRoutes() {
         <Route index element={<StudentDashboard />} />
         <Route path="overview" element={<StudentOverview />} />
         <Route path="courses/:courseId" element={<StudentCourseDetail />} />
-        <Route path="classes" element={<StudentClasses />} />
+        {/* Trang "Lớp học của tôi" đã gộp vào "Khóa học của tôi" */}
+        <Route path="classes" element={<Navigate to="/student" replace />} />
         <Route path="classes/:id" element={<StudentClassDetail />} />
       </Route>
 

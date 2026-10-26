@@ -1,49 +1,19 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../lib/api';
-import { useAuth } from '../../contexts/AuthContext';
-import { School, ClipboardList, CheckCircle, Star, BookOpen, ChevronRight } from 'lucide-react';
+import { School, BookOpen, ChevronRight } from 'lucide-react';
 
+// Trang "Khóa học của tôi" của học sinh: các khóa học có lớp mình đang học, bấm để vào khóa.
 export default function StudentDashboard() {
-  const { user } = useAuth();
   const [courses, setCourses] = useState<any[]>([]);
-  const [stats, setStats] = useState<any>(null);
 
   useEffect(() => {
     api.get('/student/my-courses').then((r) => setCourses(r.data));
-    api.get('/student/stats').then((r) => setStats(r.data));
   }, []);
 
   return (
     <div className="fade-in">
-      <div style={{ marginBottom: '1.5rem' }}>
-        <h1 className="page-title" style={{ margin: 0 }}>Xin chào, {user?.full_name}!</h1>
-        <p style={{ color: '#888', margin: '4px 0 0', fontSize: '0.88rem' }}>Chào mừng bạn đến với hệ thống học tập APLUS Hoàng Mai</p>
-      </div>
-
-      {/* Stats */}
-      {stats && (
-        <div className="stat-grid" style={{ marginBottom: '2rem' }}>
-          {[
-            { label: 'Lớp học', value: stats.classCount, icon: School, color: '#C62828', bg: '#FFEBEE' },
-            { label: 'Bài đã nộp', value: stats.submittedCount, icon: ClipboardList, color: '#1565C0', bg: '#E3F2FD' },
-            { label: 'Bài đã chấm', value: stats.gradedCount, icon: CheckCircle, color: '#2E7D32', bg: '#E8F5E9' },
-            { label: 'Điểm TB tháng', value: stats.avgScore ?? '—', icon: Star, color: '#E65100', bg: '#FFF3E0' },
-          ].map(({ label, value, icon: Icon, color, bg }) => (
-            <div key={label} className="stat-card">
-              <div className="stat-icon" style={{ background: bg }}>
-                <Icon size={20} style={{ color }} />
-              </div>
-              <div>
-                <div className="stat-value" style={{ color }}>{value}</div>
-                <div className="stat-label">{label}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <h2 className="section-title">Khóa học của tôi</h2>
+      <h1 className="page-title">Khóa học của tôi</h1>
       {courses.length === 0 ? (
         <div style={{ background: 'white', borderRadius: 12, padding: '3rem', textAlign: 'center', color: '#999' }}>
           <BookOpen size={40} style={{ margin: '0 auto 12px', opacity: 0.3 }} />

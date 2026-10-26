@@ -42,7 +42,8 @@ export default function StudentOverview() {
       {classes.length > 0 && (
         <section style={{ marginBottom: '2rem' }}>
           <SectionHeader title={<>Bảng xếp hạng {monthLabel(ov?.month)}</>} />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(340px, 100%), 1fr))', gap: 14, alignItems: 'start' }}>
+          {/* Mỗi lớp một thẻ dàn ngang hết bề rộng */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 14 }}>
             {classes.map((c) => <ClassRankCard key={c.id} c={c} month={ov.month} lastMonth={ov.last_month} />)}
           </div>
         </section>
@@ -109,7 +110,7 @@ export default function StudentOverview() {
       {/* Lớp của tôi */}
       <section style={{ marginTop: '2rem' }}>
         <SectionHeader title="Lớp của tôi" count={classes.length}
-          action={<Link to="/student/classes" style={{ color: '#C62828', fontSize: '0.85rem', fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>Tất cả <ChevronRight size={15} /></Link>} />
+          action={<Link to="/student" style={{ color: '#C62828', fontSize: '0.85rem', fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>Tất cả <ChevronRight size={15} /></Link>} />
         {ov && classes.length === 0 ? (
           <EmptyState icon={<School size={32} />} title="Bạn chưa được thêm vào lớp nào" text="Hãy liên hệ thầy cô để được thêm vào lớp." />
         ) : (

@@ -46,8 +46,7 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose
   const studentNav = [
     homeItem,
     { to: '/student/overview', icon: Sparkles, label: 'Tổng quát' },
-    { to: '/student', icon: LayoutDashboard, label: 'Tổng quan' },
-    { to: '/student/classes', icon: School, label: 'Lớp học của tôi' },
+    { to: '/student', icon: BookOpen, label: 'Khóa học của tôi' },
   ];
 
   const navItems = user?.role === 'admin' ? adminNav : user?.role === 'teacher' ? teacherNav : studentNav;
