@@ -36,8 +36,13 @@ export default function StudentClassDetail() {
   const [cls, setCls] = useState<any>(null);
   const [searchParams] = useSearchParams();
   type Tab = 'content' | 'todo' | 'assistants' | 'ranking';
+  // Mở thẳng một bài tập qua ?hw=<id> (vd bấm vào "Kết quả mới" ở trang Tổng quát): mở chương chứa bài,
+  // mở sẵn phần "Chi tiết" điểm rồi cuộn tới bài đó
+  const focusHwId = Number(searchParams.get('hw')) || null;
+  const [flashHwId, setFlashHwId] = useState<number | null>(null);
   // Mở thẳng một tab qua ?tab=… (vd từ "Việc cần làm" ở trang Tổng quát)
   const [activeTab, setActiveTab] = useState<Tab>(() => {
+    if (focusHwId) return 'content';
     const t = searchParams.get('tab');
     return t === 'todo' || t === 'assistants' || t === 'ranking' ? t : 'content';
   });
@@ -94,6 +99,24 @@ export default function StudentClassDetail() {
     if (cls) setExpandedChapters(new Set((cls.chapters?.length || 0) === 0 ? ['orphan'] : []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cls?.id]);
+
+  // ?hw=<id>: chạy SAU hiệu ứng trên (để không bị đặt lại) — bung chương + mục bài tập, mở "Chi tiết", cuộn tới bài
+  useEffect(() => {
+    if (!cls || !focusHwId) return;
+    const hw = (cls.homework || []).find((h: any) => h.id === focusHwId);
+    if (!hw) return;
+    const inChapter = (cls.chapters || []).some((ch: any) => ch.id === hw.chapter_id);
+    const key = inChapter ? String(hw.chapter_id) : 'orphan';
+    setActiveTab('content');
+    setExpandedChapters((prev) => new Set(prev).add(key));
+    setExpandedSections((prev) => new Set(prev).add(`${key}-homework`));
+    setOpenGradeDetails((prev) => new Set(prev).add(hw.id));
+    setFlashHwId(hw.id);
+    const t1 = setTimeout(() => document.getElementById(`hw-${hw.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150);
+    const t2 = setTimeout(() => setFlashHwId(null), 2600);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cls?.id, focusHwId]);
 
   const fetchClass = async () => {
     const { data } = await api.get(`/student/my-classes/${id}`);
@@ -221,7 +244,7 @@ export default function StudentClassDetail() {
     const docCount = atts.filter((a) => a.kind !== 'answer').length;
     const ansCount = atts.filter((a) => a.kind === 'answer').length;
     return (
-      <div key={l.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '1rem 1.25rem' }}>
+      <div key={l.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: isMobile ? '0.75rem 0.85rem' : '1rem 1.25rem', ...nestedCard }}>
         <div style={{ width: 36, height: 36, background: '#E3F2FD', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <span style={{ fontWeight: 700, color: '#1565C0', fontSize: '0.9rem' }}>{i + 1}</span>
         </div>
@@ -245,6 +268,15 @@ export default function StudentClassDetail() {
     );
   };
 
+  // Điện thoại: thẻ bài giảng / bài tập nằm lồng trong khung chương nên bớt lề, bỏ bóng, chỉ viền mảnh —
+  // dành chỗ cho nội dung chính (điểm, nút thao tác) thay vì lề lồng nhau.
+  const nestedCard = isMobile ? { boxShadow: 'none', border: '1px solid #EEEEEE', borderRadius: 12 } : {};
+
+  // Mục thông tin phụ (thang điểm, hạn nộp, lượt nộp): biểu tượng + chữ luôn cùng một dòng
+  const metaItem = { display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' } as const;
+  // Điện thoại: các phần của đề gói trong 1 dòng chữ nhỏ màu tím
+  const partsLine = { marginTop: 6, fontSize: '0.76rem', fontWeight: 600, color: '#6A1B9A', lineHeight: 1.5 } as const;
+
   const renderHomeworkCard = (hw: any, i: number) => {
     const isSubmitted = !!hw.submission_id;
     const hasGrade = hw.score !== null;
@@ -255,32 +287,42 @@ export default function StudentClassDetail() {
     const attemptsExhausted = hasAttemptLimit && hw.attempts_left <= 0;
 
     return (
-      <div key={hw.id} className="card" style={{ padding: '1.25rem' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flexDirection: isMobile ? 'column' : 'row' }}>
+      <div key={hw.id} id={`hw-${hw.id}`} className="card" style={{
+        padding: isMobile ? '0.85rem' : '1.25rem', transition: 'box-shadow 0.4s', ...nestedCard,
+        ...(flashHwId === hw.id ? { boxShadow: '0 0 0 3px #C62828, 0 4px 16px rgba(198,40,40,0.18)' } : {}),
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: isMobile ? 14 : 12, flexDirection: isMobile ? 'column' : 'row' }}>
           <div style={{ display: 'flex', gap: 12, flex: 1, minWidth: 0, width: isMobile ? '100%' : 'auto' }}>
+          {!isMobile && (
           <div style={{ width: 36, height: 36, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, background: isSubmitted ? '#E8F5E9' : '#F3E5F5' }}>
             {isSubmitted ? <CheckCircle size={18} color="#2E7D32" /> : <ClipboardList size={18} color="#6A1B9A" />}
           </div>
+          )}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 6 }}>
               <span style={{ fontWeight: 700, fontSize: '0.72rem', color: '#6A1B9A', background: '#F3E5F5', borderRadius: 6, padding: '2px 7px', flexShrink: 0 }}>{i + 1}</span>
-              <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>{hw.title}</span>
+              <span style={{ fontWeight: 700, fontSize: '0.95rem', minWidth: 0 }}>{hw.title}</span>
               {isSubmitted && <span className="badge badge-green">Đã nộp</span>}
               {!canSubmit && !isSubmitted && <span className="badge badge-gray">Hết hạn</span>}
               {!canSubmit && isSubmitted && !isOverdue && attemptsExhausted && <span className="badge badge-gray">Hết lượt nộp</span>}
             </div>
             {hw.description && <p style={{ margin: '0 0 8px', fontSize: '0.82rem', color: '#888', lineHeight: 1.5 }}>{hw.description}</p>}
 
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: '0.78rem', color: '#888' }}>
-              <span>Thang điểm: {hw.max_score}</span>
-              {hw.due_date && <span><Clock size={11} style={{ verticalAlign: 'middle' }} /> HH: {new Date(hw.due_date).toLocaleString('vi-VN')}</span>}
-              {hasAttemptLimit && <span><Upload size={11} style={{ verticalAlign: 'middle' }} /> Lượt nộp: {hw.max_attempts - hw.attempts_left}/{hw.max_attempts}</span>}
+            <div style={{ display: 'flex', gap: '4px 14px', flexWrap: 'wrap', fontSize: '0.78rem', color: '#888' }}>
+              <span style={metaItem}>Thang điểm: {hw.max_score}</span>
+              {hw.due_date && <span style={metaItem}><Clock size={12} /> HH: {new Date(hw.due_date).toLocaleString('vi-VN')}</span>}
+              {hasAttemptLimit && <span style={metaItem}><Upload size={12} /> Lượt nộp: {hw.max_attempts - hw.attempts_left}/{hw.max_attempts}</span>}
             </div>
             {hw.exam_type === 'hsa' ? (() => {
               const cfg = parseHsaConfig(hw.hsa_config);
               if (!cfg) return null;
               const mcCount = cfg.questions.filter((q) => q.kind === 'multiple_choice').length;
               const saCount = cfg.questions.length - mcCount;
+              if (isMobile) return (
+                <div style={partsLine}>
+                  {['HSA', mcCount > 0 && `Trắc nghiệm ${mcCount}`, saCount > 0 && `Trả lời ngắn ${saCount}`].filter(Boolean).join(' · ')}
+                </div>
+              );
               return (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
                   <span className="badge badge-purple">HSA</span>
@@ -293,6 +335,14 @@ export default function StudentClassDetail() {
               if (!cfg) return null;
               const active = PART_ORDER.filter((k: PartKey) => (k === 'essay' ? cfg.essay.enabled : (cfg as any)[k].enabled));
               if (active.length === 0) return null;
+              if (isMobile) return (
+                <div style={partsLine}>
+                  {active.map((k) => {
+                    const count = k === 'essay' ? null : (cfg as any)[k].count;
+                    return `${PART_LABELS[k]}${count ? ` ${count}` : ''}`;
+                  }).join(' · ')}
+                </div>
+              );
               return (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
                   {active.map((k) => {
@@ -305,21 +355,23 @@ export default function StudentClassDetail() {
 
             {/* Grade display */}
             {hasGrade && (
-              <div style={{ marginTop: 12, background: '#F9F9F9', borderRadius: 10, padding: '0.75rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <div style={{ width: 48, height: 48, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.1rem', background: hw.score / hw.max_score >= 0.8 ? '#E8F5E9' : hw.score / hw.max_score >= 0.5 ? '#FFF3E0' : '#FFEBEE', color: hw.score / hw.max_score >= 0.8 ? '#2E7D32' : hw.score / hw.max_score >= 0.5 ? '#E65100' : '#C62828' }}>
+              <div style={{ marginTop: 12, background: '#F9F9F9', borderRadius: 10, padding: isMobile ? '0.6rem 0.65rem' : '0.75rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 48, height: 48, flexShrink: 0, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.1rem', background: hw.score / hw.max_score >= 0.8 ? '#E8F5E9' : hw.score / hw.max_score >= 0.5 ? '#FFF3E0' : '#FFEBEE', color: hw.score / hw.max_score >= 0.8 ? '#2E7D32' : hw.score / hw.max_score >= 0.5 ? '#E65100' : '#C62828' }}>
                     {hw.score}
                   </div>
-                  <div>
-                    <div style={{ fontSize: '0.78rem', color: '#888' }}>Điểm đạt được</div>
-                    <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{hw.score}/{hw.max_score}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '0.78rem', color: '#888', whiteSpace: 'nowrap' }}>Điểm đạt được</div>
+                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '2px 8px' }}>
+                      <span style={{ fontWeight: 700, fontSize: '0.92rem', whiteSpace: 'nowrap' }}>{hw.score}/{hw.max_score}</span>
+                      {/* !! ép cờ 0/1 từ CSDL về true/false — không thì số 0 bị in ra màn hình */}
+                      {!!hw.graded_by_ai && <span className="badge badge-purple" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}><Bot size={11} />AI chấm</span>}
+                    </div>
                   </div>
-                  {/* Góc trên bên phải: nhãn AI chấm + nút Chi tiết (mở/đóng nhận xét & từng câu) */}
-                  <div style={{ marginLeft: 'auto', alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {/* !! ép cờ 0/1 từ CSDL về true/false — không thì số 0 bị in ra màn hình */}
-                    {!!hw.graded_by_ai && <span className="badge badge-purple"><Bot size={10} style={{ marginRight: 4 }} />AI chấm</span>}
+                  {/* Bên phải: nút Chi tiết (mở/đóng nhận xét & từng câu) */}
+                  <div style={{ flexShrink: 0 }}>
                     {!!hw.can_see_answer && !!(hw.feedback || hw.grading_details) && (
-                      <button className="btn btn-ghost btn-sm" onClick={() => setOpenGradeDetails((prev) => {
+                      <button className="btn btn-ghost btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={() => setOpenGradeDetails((prev) => {
                         const next = new Set(prev);
                         if (next.has(hw.id)) next.delete(hw.id); else next.add(hw.id);
                         return next;
@@ -380,7 +432,9 @@ export default function StudentClassDetail() {
           </div>
 
           {/* Actions */}
-          <div style={{ display: 'flex', flexDirection: isMobile ? 'row' : 'column', flexWrap: 'wrap', gap: 6, alignItems: 'center', justifyContent: isMobile ? 'flex-start' : 'flex-end', flexShrink: 0, width: isMobile ? '100%' : 'auto' }}>
+          <div className={isMobile ? 'hw-actions-mobile' : undefined} style={isMobile
+            ? { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, width: '100%' }
+            : { display: 'flex', flexDirection: 'column', flexWrap: 'wrap', gap: 6, alignItems: 'center', justifyContent: 'flex-end', flexShrink: 0 }}>
             {hw.pdf_file && (
               <button className="btn btn-ghost btn-sm" onClick={() => setViewFiles([`/uploads/homework/${hw.pdf_file}`])}>
                 <FileText size={13} /> Xem đề
@@ -402,12 +456,12 @@ export default function StudentClassDetail() {
               </button>
             )}
             {!hw.can_see_answer && hw.answer_visible_date && (
-              <span style={{ fontSize: '0.72rem', color: '#999', display: 'flex', alignItems: 'center', gap: 3 }}>
+              <span style={{ fontSize: '0.72rem', color: '#999', display: 'flex', alignItems: 'center', gap: 3, gridColumn: '1 / -1' }}>
                 <Lock size={11} /> Đáp án mở lúc {new Date(hw.answer_visible_date).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
               </span>
             )}
             {canSubmit ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, gridColumn: '1 / -1' }}>
                 {hw.exam_type === 'hsa' ? (
                   <button className="btn btn-primary btn-sm" onClick={() => startExam(hw)}>
                     <Timer size={13} /> {hw.attempt_started_at ? 'Tiếp tục làm bài' : isSubmitted ? 'Làm lại' : 'Làm bài'}
@@ -444,9 +498,9 @@ export default function StudentClassDetail() {
                 )}
               </div>
             ) : !isSubmitted ? (
-              <span style={{ fontSize: '0.78rem', color: '#C62828' }}>Hết hạn</span>
+              <span style={{ fontSize: '0.78rem', color: '#C62828', gridColumn: '1 / -1' }}>Hết hạn</span>
             ) : !isOverdue && attemptsExhausted && (
-              <span style={{ fontSize: '0.78rem', color: '#C62828' }}>Đã hết lượt nộp lại (tối đa {hw.max_attempts} lần)</span>
+              <span style={{ fontSize: '0.78rem', color: '#C62828', gridColumn: '1 / -1' }}>Đã hết lượt nộp lại (tối đa {hw.max_attempts} lần)</span>
             )}
           </div>
         </div>
@@ -462,7 +516,7 @@ export default function StudentClassDetail() {
     const lessonsKey = `${group.key}-lessons`, hwKey = `${group.key}-homework`;
     const lessonsOpen = expandedSections.has(lessonsKey), hwOpen = expandedSections.has(hwKey);
     return (
-      <div style={{ padding: standalone ? '1.25rem' : '0 1.25rem 1.25rem', display: 'flex', flexDirection: 'column', gap: 16, borderTop: standalone ? 'none' : '1px solid #F0F0F0' }}>
+      <div style={{ padding: isMobile ? (standalone ? '0.75rem 0.6rem' : '0 0.6rem 0.75rem') : (standalone ? '1.25rem' : '0 1.25rem 1.25rem'), display: 'flex', flexDirection: 'column', gap: 16, borderTop: standalone ? 'none' : '1px solid #F0F0F0' }}>
         <div style={{ marginTop: standalone ? 0 : 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, cursor: lc > 0 ? 'pointer' : 'default' }} onClick={() => lc > 0 && toggleSection(lessonsKey)}>
             {lc > 0 && (lessonsOpen ? <ChevronDown size={14} color="#aaa" /> : <ChevronRight size={14} color="#aaa" />)}
@@ -490,7 +544,7 @@ export default function StudentClassDetail() {
     const lc = group.lessons.length, hc = group.homework.length;
     return (
       <div key={group.key} className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div onClick={() => toggleChapter(group.key)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '1rem 1.25rem', cursor: 'pointer' }}>
+        <div onClick={() => toggleChapter(group.key)} style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 12, padding: isMobile ? '0.85rem 0.9rem' : '1rem 1.25rem', cursor: 'pointer' }}>
           {open ? <ChevronDown size={18} color="#888" /> : <ChevronRight size={18} color="#888" />}
           <div style={{ width: 36, height: 36, background: '#E3F2FD', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <span style={{ fontWeight: 700, color: '#1565C0', fontSize: '0.9rem' }}>{idx + 1}</span>

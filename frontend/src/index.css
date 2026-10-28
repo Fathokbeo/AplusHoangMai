@@ -255,6 +255,8 @@ a.list-row:hover { background: #FFF8F8; }
 .desktop-nav { display: flex; align-items: center; gap: 4px; }
 .mobile-menu-btn { display: none; background: none; border: none; cursor: pointer; padding: 4px; }
 .mobile-only { display: none; }
+/* Nút thao tác của thẻ bài tập (học sinh) trên điện thoại: lưới 2 cột, nút rộng đều */
+.hw-actions-mobile > .btn, .hw-actions-mobile > div > .btn { width: 100%; justify-content: center; }
 
 /* ── Responsive ───────────────────────────────────────────── */
 @media (max-width: 768px) {

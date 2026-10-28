@@ -91,7 +91,7 @@ export default function StudentOverview() {
               {recent.map((r) => {
                 const tone = scoreTone(r.score, r.max_score);
                 return (
-                  <Link key={r.homework_id} to={`/student/classes/${r.class_id}`} className="list-row">
+                  <Link key={r.homework_id} to={`/student/classes/${r.class_id}?hw=${r.homework_id}`} className="list-row">
                     <div className="list-row-main">
                       <div className="list-row-title">{r.title}</div>
                       <div className="list-row-sub">{r.class_title}</div>
