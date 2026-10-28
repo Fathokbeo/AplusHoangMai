@@ -4,17 +4,16 @@ import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
 import { PAGE_MAX } from '../lib/layout';
 import HolidayBanner from './HolidayBanner';
-import UserMenu, { Avatar, ROLE_LABEL, ENTER_LABEL } from './UserMenu';
-import { Phone, MapPin, Clock, Mail, ExternalLink, Menu, X, LogIn, LogOut, LayoutDashboard } from 'lucide-react';
+import UserMenu from './UserMenu';
+import { Phone, MapPin, Clock, Mail, ExternalLink, LogIn } from 'lucide-react';
 
 const NAV = [
   { to: '/', label: 'Trang chủ' },
 ];
 
 export default function PublicLayout({ children }: { children: ReactNode }) {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { pathname } = useLocation();
-  const [navOpen, setNavOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [settings, setSettings] = useState<any>({});
 
@@ -41,14 +40,14 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
         background: solid ? 'white' : 'linear-gradient(180deg, rgba(26,26,46,0.95) 0%, rgba(26,26,46,0.85) 100%)',
         backdropFilter: 'blur(12px)',
         boxShadow: solid ? '0 2px 12px rgba(0,0,0,0.1)' : 'none',
-        transition: 'all 0.3s', padding: '0 2rem',
+        transition: 'all 0.3s', padding: '0 clamp(0.9rem, 4vw, 2rem)',
       }}>
         <div style={{ maxWidth: PAGE_MAX, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 70 }}>
-          <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
-            <img src="/logo.jpg" alt="Logo" style={{ height: 44, borderRadius: 8 }} />
-            <div>
-              <div style={{ color: solid ? '#C62828' : 'white', fontWeight: 800, fontSize: '1rem', lineHeight: 1.1 }}>APLUS HOÀNG MAI</div>
-              <div style={{ color: solid ? '#888' : 'rgba(255,255,255,0.6)', fontSize: '0.7rem' }}>Trung Tâm Giáo Dục</div>
+          <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none', minWidth: 0 }}>
+            <img src="/logo.jpg" alt="Logo" style={{ height: 44, borderRadius: 8, flexShrink: 0 }} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: solid ? '#C62828' : 'white', fontWeight: 800, fontSize: '1rem', lineHeight: 1.1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>APLUS HOÀNG MAI</div>
+              <div className="hide-mobile" style={{ color: solid ? '#888' : 'rgba(255,255,255,0.6)', fontSize: '0.7rem' }}>Trung Tâm Giáo Dục</div>
             </div>
           </Link>
 
@@ -78,47 +77,16 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
             )}
           </div>
 
-          {/* Đã đăng nhập (máy tính): nút tài khoản — bấm để vào học / đăng xuất.
-              Trên điện thoại các lựa chọn này nằm trong menu ☰ */}
-          {user && <div className="desktop-nav"><UserMenu place="public" tone={solid ? 'light' : 'dark'} /></div>}
+          {/* Điện thoại: "Liên hệ" + Đăng nhập để ngoài (máy tính đã có ở thanh trên) */}
+          <a href="#contact" className="mobile-only" style={{ color: solid ? '#444' : 'rgba(255,255,255,0.9)', textDecoration: 'none', fontWeight: 600, fontSize: '0.88rem', padding: '6px 6px', whiteSpace: 'nowrap' }}>Liên hệ</a>
+          {!user && (
+            <Link to="/login" className="btn btn-primary btn-sm mobile-only" style={{ whiteSpace: 'nowrap' }}><LogIn size={14} /> Đăng nhập</Link>
+          )}
 
-          {/* Điện thoại: "Liên hệ" để ngoài, cạnh nút ☰ */}
-          <a href="#contact" className="mobile-only" onClick={() => setNavOpen(false)} style={{ color: solid ? '#444' : 'rgba(255,255,255,0.9)', textDecoration: 'none', fontWeight: 600, fontSize: '0.88rem', padding: '6px 8px' }}>Liên hệ</a>
-
-          {/* Mobile hamburger */}
-          <button onClick={() => setNavOpen(!navOpen)} style={{ color: solid ? '#333' : 'white' }} className="mobile-menu-btn">
-            {navOpen ? <X size={24} /> : <Menu size={24} />}
-          </button>
+          {/* Đã đăng nhập: nút tài khoản giống trong trang học (cả máy tính lẫn điện thoại) — bấm để vào học / đăng xuất */}
+          {user && <UserMenu place="public" tone={solid ? 'light' : 'dark'} />}
           </div>
         </div>
-
-        {/* Mobile menu */}
-        {navOpen && (
-          <div style={{ background: 'white', borderTop: '1px solid #EEE', padding: '1rem 2rem' }}>
-            {NAV.map((n) => (
-              <Link key={n.to} to={n.to} onClick={() => setNavOpen(false)} style={{ display: 'block', padding: '0.6rem 0', color: n.to === pathname ? '#C62828' : '#333', textDecoration: 'none', fontWeight: 600 }}>{n.label}</Link>
-            ))}
-            {user ? (
-              <div style={{ borderTop: '1px solid #EEE', marginTop: 6, paddingTop: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0.25rem 0 0.5rem' }}>
-                  <Avatar name={user.full_name} role={user.role} size={34} />
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, color: '#1A1A2E', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.full_name}</div>
-                    <div style={{ fontSize: '0.78rem', color: '#888' }}>{ROLE_LABEL[user.role]} · {user.username}</div>
-                  </div>
-                </div>
-                <Link to={`/${user.role}/overview`} onClick={() => setNavOpen(false)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0.6rem 0', color: '#C62828', textDecoration: 'none', fontWeight: 700 }}>
-                  <LayoutDashboard size={17} /> {ENTER_LABEL[user.role]}
-                </Link>
-                <button onClick={() => { logout(); setNavOpen(false); }} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', padding: '0.6rem 0', color: '#666', fontWeight: 500, fontFamily: 'inherit', fontSize: 'inherit', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
-                  <LogOut size={17} /> Đăng xuất
-                </button>
-              </div>
-            ) : (
-              <Link to="/login" onClick={() => setNavOpen(false)} style={{ display: 'block', padding: '0.6rem 0', color: '#C62828', fontWeight: 600 }}>Đăng nhập</Link>
-            )}
-          </div>
-        )}
       </nav>
       <div className="hd-banner-public"><HolidayBanner style={{ margin: 0 }} /></div>
 
