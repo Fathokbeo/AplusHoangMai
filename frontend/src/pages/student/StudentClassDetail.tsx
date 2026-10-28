@@ -274,6 +274,8 @@ export default function StudentClassDetail() {
 
   // Mục thông tin phụ (thang điểm, hạn nộp, lượt nộp): biểu tượng + chữ luôn cùng một dòng
   const metaItem = { display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' } as const;
+  // Nhãn trạng thái (Đã nộp / Hết hạn…) nằm ngay sau tên bài, cùng dòng chữ
+  const titleBadge = { marginLeft: 7, verticalAlign: 'middle', whiteSpace: 'nowrap' } as const;
   // Điện thoại: các phần của đề gói trong 1 dòng chữ nhỏ màu tím
   const partsLine = { marginTop: 6, fontSize: '0.76rem', fontWeight: 600, color: '#6A1B9A', lineHeight: 1.5 } as const;
 
@@ -299,12 +301,14 @@ export default function StudentClassDetail() {
           </div>
           )}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 6 }}>
-              <span style={{ fontWeight: 700, fontSize: '0.72rem', color: '#6A1B9A', background: '#F3E5F5', borderRadius: 6, padding: '2px 7px', flexShrink: 0 }}>{i + 1}</span>
-              <span style={{ fontWeight: 700, fontSize: '0.95rem', minWidth: 0 }}>{hw.title}</span>
-              {isSubmitted && <span className="badge badge-green">Đã nộp</span>}
-              {!canSubmit && !isSubmitted && <span className="badge badge-gray">Hết hạn</span>}
-              {!canSubmit && isSubmitted && !isOverdue && attemptsExhausted && <span className="badge badge-gray">Hết lượt nộp</span>}
+            {/* Số thứ tự + tên bài + nhãn trạng thái chảy liền như một đoạn chữ: tên dài thì xuống dòng
+                tự nhiên, không đẩy số / nhãn thành từng dòng riêng */}
+            <div style={{ fontWeight: 700, fontSize: '0.95rem', lineHeight: 1.5, marginBottom: 6 }}>
+              <span style={{ display: 'inline-block', verticalAlign: 'middle', marginRight: 7, fontWeight: 700, fontSize: '0.72rem', lineHeight: 1.4, color: '#6A1B9A', background: '#F3E5F5', borderRadius: 6, padding: '1px 7px' }}>{i + 1}</span>
+              {hw.title}
+              {isSubmitted && <span className="badge badge-green" style={titleBadge}>Đã nộp</span>}
+              {!canSubmit && !isSubmitted && <span className="badge badge-gray" style={titleBadge}>Hết hạn</span>}
+              {!canSubmit && isSubmitted && !isOverdue && attemptsExhausted && <span className="badge badge-gray" style={titleBadge}>Hết lượt nộp</span>}
             </div>
             {hw.description && <p style={{ margin: '0 0 8px', fontSize: '0.82rem', color: '#888', lineHeight: 1.5 }}>{hw.description}</p>}
 
@@ -362,10 +366,15 @@ export default function StudentClassDetail() {
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: '0.78rem', color: '#888', whiteSpace: 'nowrap' }}>Điểm đạt được</div>
-                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '2px 8px' }}>
-                      <span style={{ fontWeight: 700, fontSize: '0.92rem', whiteSpace: 'nowrap' }}>{hw.score}/{hw.max_score}</span>
+                    {/* Điểm + "AI chấm" (chữ nhỏ) trên CÙNG một dòng, không bẻ xuống */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                      <span style={{ fontWeight: 700, fontSize: '0.92rem' }}>{hw.score}/{hw.max_score}</span>
                       {/* !! ép cờ 0/1 từ CSDL về true/false — không thì số 0 bị in ra màn hình */}
-                      {!!hw.graded_by_ai && <span className="badge badge-purple" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}><Bot size={11} />AI chấm</span>}
+                      {!!hw.graded_by_ai && (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: '0.72rem', fontWeight: 600, color: '#6A1B9A', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          <Bot size={12} style={{ flexShrink: 0 }} />AI chấm
+                        </span>
+                      )}
                     </div>
                   </div>
                   {/* Bên phải: nút Chi tiết (mở/đóng nhận xét & từng câu) */}
