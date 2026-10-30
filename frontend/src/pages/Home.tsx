@@ -29,7 +29,7 @@ function scrollToSection(id: string) {
 
 function Section({ id, title, subtitle, icon: Icon, color, alt, children }: any) {
   return (
-    <section id={id} style={{ background: alt ? 'white' : 'transparent', scrollMarginTop: SCROLL_OFFSET, padding: '2.25rem 2rem' }}>
+    <section id={id} className={alt ? 'home-section-alt' : undefined} style={{ background: alt ? 'white' : 'transparent', scrollMarginTop: SCROLL_OFFSET, padding: '2.25rem 2rem' }}>
       <div style={{ maxWidth: PAGE_MAX, margin: '0 auto' }}>
         <div style={{ marginBottom: '1.5rem' }}>
           <h2 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 800, color: '#1A1A2E', display: 'flex', alignItems: 'center', gap: 10 }}>

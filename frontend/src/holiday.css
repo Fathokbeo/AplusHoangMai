@@ -111,6 +111,21 @@ html[data-holiday] .public-nav::after {
   background: var(--hd-garland) repeat-x left top; pointer-events: none;
 }
 
+/* Trang chủ: các mục xen kẽ nền trắng + mục Liên hệ → trong suốt để thấy nền chủ đề */
+html[data-holiday] .home-section-alt,
+html[data-holiday] .public-contact { background: transparent !important; }
+
+/* Trang học sinh: nền sáng có họa tiết giống trang chủ (thay cho nền tối + tấm trắng lớn ở chủ đề tối) */
+html[data-holiday] .main-content.app-student {
+  background-color: color-mix(in srgb, var(--hd-soft) 45%, #FFFFFF);
+  background-image: var(--hd-pattern-light);
+  background-size: 340px 340px;
+  background-attachment: fixed;
+}
+html[data-holiday-dark] .app-student .content-area {
+  background: transparent; box-shadow: none; border-radius: 0; margin: 0; min-height: 0;
+}
+
 /* Trang đăng nhập: nền chủ đề + tranh minh họa ở hai góc (nằm dưới khung đăng nhập) */
 html[data-holiday] .login-page {
   background: var(--hd-pattern), var(--hd-login-bg) !important;

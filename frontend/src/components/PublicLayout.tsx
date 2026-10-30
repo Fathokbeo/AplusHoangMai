@@ -94,7 +94,7 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
       <div style={{ flex: 1 }}>{children}</div>
 
       {/* Contact */}
-      <section id="contact" style={{ background: '#F0F0F3', padding: '2.5rem 2rem' }}>
+      <section id="contact" className="public-contact" style={{ background: '#F0F0F3', padding: '2.5rem 2rem' }}>
         <div style={{ maxWidth: PAGE_MAX, margin: '0 auto' }}>
           <h2 style={{ fontSize: '1.4rem', fontWeight: 800, marginBottom: '1.25rem', color: '#1A1A2E' }}>
             <Phone size={20} style={{ verticalAlign: 'middle', marginRight: 8, color: '#C62828' }} />
