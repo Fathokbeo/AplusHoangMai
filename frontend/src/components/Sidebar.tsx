@@ -76,7 +76,9 @@ export default function Sidebar({ collapsed, onToggle }: Props) {
             <NavLink
               key={to}
               to={to}
-              className={`nav-item ${isNavActive(item, pathname) ? 'active' : ''}`}
+              end
+              /* Dùng dạng hàm: NavLink KHÔNG tự gắn class "active" (nếu không, "/teacher" sẽ sáng ở mọi trang /teacher/...) */
+              className={() => `nav-item ${isNavActive(item, pathname) ? 'active' : ''}`}
             >
               <Icon size={18} />
               <span>{label}</span>
