@@ -93,17 +93,19 @@ function StaffGrid({ list }: { list: any[] }) {
   );
 }
 
-// Chia đội ngũ theo loại (giáo viên / trợ giảng) × cấp (THPT / THCS); người chưa chọn cấp vào nhóm chung
+// Chia đội ngũ theo loại (giáo viên / trợ giảng) × cấp (THPT / THCS). Giáo viên chưa chọn cấp (nhóm "Giáo viên"
+// chung, vd giáo viên chính của trung tâm) luôn đứng ĐẦU mục; trợ giảng chưa chọn cấp xếp sau các nhóm trợ giảng.
 function staffGroups(staff: any[]) {
   const groups: { key: string; title: string; list: any[] }[] = [];
   for (const [type, typeLabel] of [['teacher', 'Giáo viên'], ['assistant', 'Trợ giảng']] as const) {
     const ofType = staff.filter((s) => (type === 'assistant' ? s.staff_type === 'assistant' : s.staff_type !== 'assistant'));
+    const rest = ofType.filter((s) => !LEVEL_LABEL[s.level]);
+    if (type === 'teacher' && rest.length) groups.push({ key: 'teacher-other', title: typeLabel, list: rest });
     for (const lv of ['thpt', 'thcs']) {
       const list = ofType.filter((s) => s.level === lv);
       if (list.length) groups.push({ key: `${type}-${lv}`, title: `${typeLabel} ${LEVEL_LABEL[lv]}`, list });
     }
-    const rest = ofType.filter((s) => !LEVEL_LABEL[s.level]);
-    if (rest.length) groups.push({ key: `${type}-other`, title: typeLabel, list: rest });
+    if (type === 'assistant' && rest.length) groups.push({ key: 'assistant-other', title: typeLabel, list: rest });
   }
   return groups;
 }
@@ -322,15 +324,15 @@ export default function Home() {
 
   return (
     <PublicLayout>
-      {/* Banner quảng cáo — tỉ lệ 12:5 (khuyên dùng ảnh 1920 × 800) */}
-      <section style={{ maxWidth: PAGE_MAX, margin: '0 auto', padding: '2rem 2rem 0' }}>
+      {/* Banner quảng cáo — tỉ lệ 12:5 (khuyên dùng ảnh 1920 × 800), rộng tối đa 1100px để không quá to trên màn lớn */}
+      <section style={{ maxWidth: 1100, margin: '0 auto', padding: '2rem 2rem 0', boxSizing: 'content-box' }}>
         {ads.length > 0 ? (
           <AdCarousel ads={ads} />
         ) : (
           <div style={{
             borderRadius: 16, overflow: 'hidden',
             background: 'linear-gradient(135deg, #1A1A2E, #0F3460)',
-            aspectRatio: '12 / 5', minHeight: 260, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column',
+            width: '100%', boxSizing: 'border-box', aspectRatio: '12 / 5', minHeight: 260, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column',
             color: 'white', textAlign: 'center', padding: '2rem'
           }}>
             <img src="/logo.jpg" alt="Logo" style={{ height: 80, borderRadius: 12, marginBottom: 20 }} />

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../../lib/api';
 import Modal from '../../components/Modal';
 import FileViewer from '../../components/FileViewer';
@@ -12,7 +13,7 @@ import {
   emptyPartsConfig, normalizePartsConfig, computeMaxScore, anyPartEnabled, emptyHsaConfig, parseHsaConfig, hsaMaxScore,
   PART_LABELS, PART_ORDER, type PartsConfig, type HsaConfig, type ExamType,
 } from '../../lib/homeworkParts';
-import { Plus, Edit, Trash2, Eye, EyeOff, FileText, Upload, RefreshCw, Download, Bot, ClipboardCheck, Search, X } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, EyeOff, FileText, Upload, RefreshCw, Download, Bot, ClipboardCheck, Search, X, ChevronLeft } from 'lucide-react';
 
 // Trang "Thi thử" của admin:
 //  - Bài làm: danh sách khách vãng lai đã thi (thông tin học sinh + điểm), xem bài, chấm lại, xuất Excel.
@@ -417,6 +418,9 @@ export default function MockExamManagement() {
 
   return (
     <div className="fade-in">
+      <Link to="/admin/overview" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#888', textDecoration: 'none', fontSize: '0.85rem', marginBottom: 6 }}>
+        <ChevronLeft size={15} /> Tổng quan
+      </Link>
       <h1 className="page-title">Thi thử</h1>
       <p style={{ color: '#888', margin: '-0.5rem 0 1.25rem', fontSize: '0.9rem' }}>
         Khách vãng lai làm đề ở trang chủ (mục “Thi thử”), điền thông tin học sinh trước khi làm; kết quả gửi về đây.

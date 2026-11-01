@@ -255,6 +255,8 @@ a.list-row:hover { background: #FFF8F8; }
 .desktop-nav { display: flex; align-items: center; gap: 4px; }
 .mobile-menu-btn { display: none; background: none; border: none; cursor: pointer; padding: 4px; }
 .mobile-only { display: none; }
+.topbar-brand { display: flex; align-items: center; gap: 9px; text-decoration: none; color: #1A1A2E; font-weight: 800; font-size: 0.98rem; white-space: nowrap; padding: 4px 8px; border-radius: 10px; }
+.topbar-brand:hover { background: rgba(0,0,0,0.05); }
 /* Nút thao tác của thẻ bài tập (học sinh) trên điện thoại: lưới 2 cột, nút rộng đều */
 .hw-actions-mobile > .btn, .hw-actions-mobile > div > .btn { width: 100%; justify-content: center; }
 

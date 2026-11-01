@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import api from '../../lib/api';
 import Modal from '../../components/Modal';
 import { toast } from '../../components/Toast';
 import AdManagement from './AdManagement';
 import AssistantManagement from '../teacher/AssistantManagement';
-import { Plus, Edit, Trash2, Eye, EyeOff, ImageIcon, X, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, EyeOff, ImageIcon, X, ArrowLeft, ArrowRight, ChevronLeft } from 'lucide-react';
 
 // Nội dung trang giới thiệu (trang chủ): các hoạt động, học sinh tiêu biểu, giáo viên & trợ giảng (kèm trợ giảng
 // các lớp), quảng cáo, liên hệ & mạng xã hội. Mở thẳng 1 tab qua ?tab=<mã> (vd /admin/content?tab=ads).
@@ -366,6 +366,9 @@ export default function SiteContent() {
   const setTab = (k: string) => setParams({ tab: k }, { replace: true });
   return (
     <div className="fade-in">
+      <Link to="/admin/overview" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#888', textDecoration: 'none', fontSize: '0.85rem', marginBottom: 6 }}>
+        <ChevronLeft size={15} /> Tổng quan
+      </Link>
       <h1 className="page-title" style={{ marginBottom: '0.5rem' }}>Nội dung trang giới thiệu</h1>
       <p style={{ margin: '0 0 1.25rem', color: '#888', fontSize: '0.86rem' }}>
         Mục <b>Khóa học</b> trên trang chủ lấy thẳng từ <b>Quản lý khóa học</b> (chia hàng theo danh mục của khóa).

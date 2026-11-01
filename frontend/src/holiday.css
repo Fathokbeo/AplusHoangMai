@@ -48,6 +48,8 @@ html[data-holiday] .topbar::after {
 html[data-holiday-topbar-dark] .topbar { box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35); }
 html[data-holiday-topbar-dark] .topbar .btn-ghost { color: #E8EAF6; border-color: rgba(255, 255, 255, 0.28); background: rgba(255, 255, 255, 0.06); }
 html[data-holiday-topbar-dark] .topbar .btn-ghost:hover { background: rgba(255, 255, 255, 0.14); }
+html[data-holiday-topbar-dark] .topbar .topbar-brand { color: #FFFFFF; }
+html[data-holiday-topbar-dark] .topbar .topbar-brand:hover { background: rgba(255, 255, 255, 0.1); }
 
 /* Màu khung, nút chính, tiêu đề theo chủ đề */
 html[data-holiday] .btn-primary { background: var(--hd-primary); }

@@ -114,9 +114,10 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
                 <div style={{ width: 40, height: 40, background: '#FFF5F5', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <Icon size={20} color="#C62828" />
                 </div>
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: '0.78rem', color: '#999', marginBottom: 4 }}>{label}</div>
-                  <div style={{ fontWeight: 600, color: '#1A1A2E', fontSize: '0.9rem' }}>{value}</div>
+                  {/* overflowWrap: email / địa chỉ dài tự xuống dòng thay vì tràn khỏi ô */}
+                  <div style={{ fontWeight: 600, color: '#1A1A2E', fontSize: '0.9rem', overflowWrap: 'anywhere' }}>{value}</div>
                 </div>
               </div>
             ))}
