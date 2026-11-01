@@ -32,7 +32,8 @@ export default function AdCarousel({ ads }: Props) {
       <img
         src={`/uploads/ads/${ad.image_path}`}
         alt={ad.title || 'Quảng cáo'}
-        style={{ width: '100%', height: 380, objectFit: 'cover', display: 'block' }}
+        /* Tỉ lệ cố định 12:5 (khuyên dùng ảnh 1920 × 800) — mọi ảnh quảng cáo hiển thị cùng khung */
+        style={{ width: '100%', aspectRatio: '12 / 5', objectFit: 'cover', display: 'block' }}
       />
       {ad.title && (
         <div style={{

@@ -11,11 +11,51 @@ const MAX_ATTEMPTS = 5;            // số lần thử chấm tối đa trước
 const RETRY_DELAY_MS = 30_000;     // chờ trước khi thử lại một bài bị lỗi
 const SWEEP_INTERVAL_MS = 60_000;  // quét định kỳ để gom các bài còn "pending"
 
-const queue = [];          // FIFO các submission id chờ chấm
+const queue = [];          // FIFO các mục chờ chấm, dạng "<loại>:<id>" (vd "hw:12", "mock:5")
 const inQueue = new Set();
+
+// Hai loại bài được chấm bằng cùng một logic:
+//  - hw:   bài nộp của học sinh (submissions + homework)
+//  - mock: bài làm thi thử của khách vãng lai (mock_attempts + mock_exams)
+// Cả hai bảng bài làm có cùng tên cột kết quả (score, feedback, grading_details, graded_at, graded_by_ai,
+// grading_status, grading_attempts, files, structured_answers) nên chỉ khác câu truy vấn + thư mục file.
+const KINDS = {
+  hw: {
+    table: 'submissions',
+    answerDir: 'homework',
+    filesDir: 'submissions',
+    settle: settleBest, // nộp nhiều lần → giữ lần có điểm cao nhất
+    load: (db, id) => db.prepare(`
+      SELECT s.*, h.id hw_id, h.answer_file, h.max_score, h.grading_note, h.parts_config, h.feedback_rubric, h.exam_type, h.hsa_config
+      FROM submissions s JOIN homework h ON s.homework_id = h.id
+      WHERE s.id = ?
+    `).get(id),
+    pending: (db) => db.prepare(`
+      SELECT s.id, h.answer_file, h.parts_config, h.hsa_config FROM submissions s JOIN homework h ON s.homework_id = h.id
+      WHERE s.grading_status='pending' AND COALESCE(s.grading_attempts,0) < ?
+        AND (h.answer_file IS NOT NULL OR h.parts_config IS NOT NULL OR h.hsa_config IS NOT NULL)
+    `).all(MAX_ATTEMPTS),
+  },
+  mock: {
+    table: 'mock_attempts',
+    answerDir: 'mock',
+    filesDir: 'mock_submissions',
+    settle: null,
+    load: (db, id) => db.prepare(`
+      SELECT a.*, e.id hw_id, e.answer_file, e.max_score, e.grading_note, e.parts_config, e.feedback_rubric, e.exam_type, e.hsa_config
+      FROM mock_attempts a JOIN mock_exams e ON a.exam_id = e.id
+      WHERE a.id = ?
+    `).get(id),
+    pending: (db) => db.prepare(`
+      SELECT a.id, e.answer_file, e.parts_config, e.hsa_config FROM mock_attempts a JOIN mock_exams e ON a.exam_id = e.id
+      WHERE a.grading_status='pending' AND COALESCE(a.grading_attempts,0) < ?
+        AND (e.answer_file IS NOT NULL OR e.parts_config IS NOT NULL OR e.hsa_config IS NOT NULL)
+    `).all(MAX_ATTEMPTS),
+  },
+};
 let running = false;
 
-// Cache đáp án AI đọc được từ file đáp án, theo (homework_id : tên file đáp án).
+// Cache đáp án AI đọc được từ file đáp án, theo (loại : id đề : tên file đáp án).
 // Nhờ đó nhiều học sinh cùng bài chỉ tốn 1 lần đọc file; file đổi (tên mới) → tự đọc lại.
 const answerKeyCache = new Map();
 
@@ -45,11 +85,14 @@ function mergeAiObjectiveStats(partStats, aiDetails) {
   return out;
 }
 
-function enqueue(submissionId) {
+// kind: 'hw' (bài nộp học sinh, mặc định) | 'mock' (bài làm thi thử)
+function enqueue(submissionId, kind = 'hw') {
   const id = Number(submissionId);
-  if (!id || inQueue.has(id)) return;
-  inQueue.add(id);
-  queue.push(id);
+  if (!id || !KINDS[kind]) return;
+  const key = `${kind}:${id}`;
+  if (inQueue.has(key)) return;
+  inQueue.add(key);
+  queue.push(key);
   if (!running) processQueue();
 }
 
@@ -57,12 +100,13 @@ async function processQueue() {
   if (running) return;
   running = true;
   while (queue.length) {
-    const id = queue.shift();
-    inQueue.delete(id);
+    const key = queue.shift();
+    inQueue.delete(key);
+    const [kind, id] = key.split(':');
     try {
-      await gradeOne(id);
+      await gradeRecord(kind, Number(id));
     } catch (err) {
-      console.error(`[grading-queue] Bài nộp #${id} chấm lỗi: ${err.message}`);
+      console.error(`[grading-queue] Bài ${key} chấm lỗi: ${err.message}`);
     }
   }
   running = false;
@@ -70,9 +114,9 @@ async function processQueue() {
 
 // Chấm 1 bài nộp kiểu HSA: hoàn toàn tự động theo đáp án giáo viên nhập, KHÔNG dùng AI,
 // mỗi câu 1 điểm, điểm cuối = tổng điểm thô (không quy đổi thang 10).
-function gradeHsaSubmission(db, sub, submissionId) {
+function gradeHsaSubmission(db, K, sub, submissionId) {
   const cfg = parseHsaConfig(sub.hsa_config);
-  if (!cfg) { db.prepare('UPDATE submissions SET grading_status=NULL WHERE id=?').run(submissionId); return null; }
+  if (!cfg) { db.prepare(`UPDATE ${K.table} SET grading_status=NULL WHERE id=?`).run(submissionId); return null; }
   const det = scoreHsa(cfg, sub.structured_answers);
   const total = Math.max(0, Math.min(cfg.questions.length, det.score));
   const correct = det.details.filter((d) => d.status === 'correct').length;
@@ -80,9 +124,9 @@ function gradeHsaSubmission(db, sub, submissionId) {
   const feedback = graded < cfg.questions.length
     ? `Đúng ${correct}/${graded} câu đã có đáp án — tổng điểm ${total}/${cfg.questions.length}. Còn ${cfg.questions.length - graded} câu chưa có đáp án, cần giáo viên kiểm tra.`
     : `Đúng ${correct}/${cfg.questions.length} câu — tổng điểm ${total}/${cfg.questions.length}.`;
-  db.prepare("UPDATE submissions SET score=?,feedback=?,grading_details=?,graded_at=?,graded_by_ai=0,grading_status='done' WHERE id=?")
+  db.prepare(`UPDATE ${K.table} SET score=?,feedback=?,grading_details=?,graded_at=?,graded_by_ai=0,grading_status='done' WHERE id=?`)
     .run(total, feedback, JSON.stringify(det.details), new Date().toISOString(), submissionId);
-  settleBest(db, submissionId); // nộp nhiều lần → giữ lần có điểm cao nhất
+  if (K.settle) K.settle(db, submissionId); // nộp nhiều lần → giữ lần có điểm cao nhất
   console.log(`[grading-queue] ✅ Đã chấm bài nộp #${submissionId} (HSA): ${total}/${cfg.questions.length}`);
   return { score: total, feedback, details: det.details };
 }
@@ -90,45 +134,43 @@ function gradeHsaSubmission(db, sub, submissionId) {
 // Chấm 1 bài nộp rồi lưu kết quả.
 // force=true (giáo viên chấm lại): bỏ qua giới hạn số lần thử.
 // Trả về kết quả chấm; ném lỗi nếu chấm thất bại (để nơi gọi xử lý/thử lại).
-async function gradeOne(submissionId, { force = false } = {}) {
+async function gradeRecord(kind, submissionId, { force = false } = {}) {
+  const K = KINDS[kind];
+  if (!K) return null;
   const db = getDb();
-  const sub = db.prepare(`
-    SELECT s.*, h.id hw_id, h.answer_file, h.max_score, h.grading_note, h.parts_config, h.feedback_rubric, h.exam_type, h.hsa_config
-    FROM submissions s JOIN homework h ON s.homework_id = h.id
-    WHERE s.id = ?
-  `).get(submissionId);
+  const sub = K.load(db, submissionId);
 
   if (!sub) return null;
 
   // Không có đáp án nào (file tự luận lẫn key objective/HSA) → không chấm tự động được, để giáo viên chấm tay
   if (!needsAiGrading(sub)) {
-    db.prepare('UPDATE submissions SET grading_status=NULL WHERE id=?').run(submissionId);
+    db.prepare(`UPDATE ${K.table} SET grading_status=NULL WHERE id=?`).run(submissionId);
     return null;
   }
 
   // HSA: chấm hoàn toàn tự động (không AI, không quy đổi thang điểm) — tách riêng khỏi luồng THPT bên dưới.
   if (sub.exam_type === 'hsa') {
-    return gradeHsaSubmission(db, sub, submissionId);
+    return gradeHsaSubmission(db, K, sub, submissionId);
   }
 
   const subFiles = submissionFilenames(sub);
   // Phải có ít nhất bài làm: file ảnh/PDF HOẶC đáp án có cấu trúc đã điền
   if (subFiles.length === 0 && !sub.structured_answers) {
-    db.prepare('UPDATE submissions SET grading_status=NULL WHERE id=?').run(submissionId);
+    db.prepare(`UPDATE ${K.table} SET grading_status=NULL WHERE id=?`).run(submissionId);
     return null;
   }
 
   if (!force && (sub.grading_attempts || 0) >= MAX_ATTEMPTS) {
-    db.prepare("UPDATE submissions SET grading_status='failed' WHERE id=?").run(submissionId);
+    db.prepare(`UPDATE ${K.table} SET grading_status='failed' WHERE id=?`).run(submissionId);
     return null;
   }
 
   // Đánh dấu đang chấm + tăng số lần thử
-  db.prepare("UPDATE submissions SET grading_status='grading', grading_attempts=COALESCE(grading_attempts,0)+1 WHERE id=?")
+  db.prepare(`UPDATE ${K.table} SET grading_status='grading', grading_attempts=COALESCE(grading_attempts,0)+1 WHERE id=?`)
     .run(submissionId);
 
-  const answerPath = sub.answer_file ? path.join(__dirname, '../../uploads/homework', sub.answer_file) : null;
-  const subPaths = subFiles.map(name => path.join(__dirname, '../../uploads/submissions', name));
+  const answerPath = sub.answer_file ? path.join(__dirname, '../../uploads', K.answerDir, sub.answer_file) : null;
+  const subPaths = subFiles.map(name => path.join(__dirname, '../../uploads', K.filesDir, name));
   const hasImages = subPaths.length > 0;
 
   try {
@@ -143,7 +185,7 @@ async function gradeOne(submissionId, { force = false } = {}) {
         short_answer: missingKeyIndices(cfg, 'short_answer'),
       };
       if (missing.multiple_choice.length || missing.true_false.length || missing.short_answer.length) {
-        const cacheKey = `${sub.hw_id}:${sub.answer_file}`;
+        const cacheKey = `${kind}:${sub.hw_id}:${sub.answer_file}`;
         let extracted = answerKeyCache.get(cacheKey);
         if (extracted === undefined) {
           try {
@@ -247,20 +289,20 @@ async function gradeOne(submissionId, { force = false } = {}) {
       feedback = [detFeedback, aiFeedback].filter(Boolean).join(' ') || `Tổng điểm: ${total}/${sub.max_score}.`;
     }
 
-    db.prepare("UPDATE submissions SET score=?,feedback=?,grading_details=?,graded_at=?,graded_by_ai=?,grading_status='done' WHERE id=?")
+    db.prepare(`UPDATE ${K.table} SET score=?,feedback=?,grading_details=?,graded_at=?,graded_by_ai=?,grading_status='done' WHERE id=?`)
       .run(total, feedback, JSON.stringify(details), new Date().toISOString(), needAi ? 1 : 0, submissionId);
-    settleBest(db, submissionId); // nộp nhiều lần → giữ lần có điểm cao nhất
-    console.log(`[grading-queue] ✅ Đã chấm bài nộp #${submissionId}: ${total}/${sub.max_score}${needAi ? ' (auto+AI)' : ' (auto)'}`);
+    if (K.settle) K.settle(db, submissionId); // nộp nhiều lần → giữ lần có điểm cao nhất
+    console.log(`[grading-queue] ✅ Đã chấm ${kind} #${submissionId}: ${total}/${sub.max_score}${needAi ? ' (auto+AI)' : ' (auto)'}`);
     return { score: total, feedback, details };
   } catch (err) {
     const attempts = (sub.grading_attempts || 0) + 1;
     const status = attempts >= MAX_ATTEMPTS ? 'failed' : 'pending';
-    db.prepare('UPDATE submissions SET grading_status=? WHERE id=?').run(status, submissionId);
+    db.prepare(`UPDATE ${K.table} SET grading_status=? WHERE id=?`).run(status, submissionId);
     if (status === 'pending') {
       // Lên lịch thử lại sau một lúc (không chặn hàng đợi)
-      setTimeout(() => enqueue(submissionId), RETRY_DELAY_MS);
+      setTimeout(() => enqueue(submissionId, kind), RETRY_DELAY_MS);
     } else {
-      console.error(`[grading-queue] ❌ Bài nộp #${submissionId} thất bại sau ${attempts} lần thử.`);
+      console.error(`[grading-queue] ❌ Bài ${kind} #${submissionId} thất bại sau ${attempts} lần thử.`);
     }
     throw err;
   }
@@ -270,13 +312,10 @@ async function gradeOne(submissionId, { force = false } = {}) {
 function sweepPending() {
   try {
     const db = getDb();
-    const rows = db.prepare(`
-      SELECT s.id, h.answer_file, h.parts_config, h.hsa_config FROM submissions s JOIN homework h ON s.homework_id = h.id
-      WHERE s.grading_status='pending' AND COALESCE(s.grading_attempts,0) < ?
-        AND (h.answer_file IS NOT NULL OR h.parts_config IS NOT NULL OR h.hsa_config IS NOT NULL)
-    `).all(MAX_ATTEMPTS);
-    // Lọc thêm: chỉ chấm bài thực sự có đáp án (file tự luận, key objective, hoặc key HSA)
-    rows.filter(r => r.answer_file || hasAnswerKey(r.parts_config) || hasHsaAnswerKey(r.hsa_config)).forEach(r => enqueue(r.id));
+    for (const [kind, K] of Object.entries(KINDS)) {
+      // Lọc thêm: chỉ chấm bài thực sự có đáp án (file tự luận, key objective, hoặc key HSA)
+      K.pending(db).filter(r => r.answer_file || hasAnswerKey(r.parts_config) || hasHsaAnswerKey(r.hsa_config)).forEach(r => enqueue(r.id, kind));
+    }
   } catch (err) {
     console.error('[grading-queue] sweep lỗi:', err.message);
   }
@@ -287,7 +326,7 @@ function startGradingWorker() {
   try {
     const db = getDb();
     // Các bài bị treo ở trạng thái 'grading' từ lần chạy trước → đưa lại 'pending'
-    db.prepare("UPDATE submissions SET grading_status='pending' WHERE grading_status='grading'").run();
+    Object.values(KINDS).forEach((K) => db.prepare(`UPDATE ${K.table} SET grading_status='pending' WHERE grading_status='grading'`).run());
     sweepPending();
     setInterval(sweepPending, SWEEP_INTERVAL_MS);
     console.log('🤖 Hàng đợi chấm bài AI đã sẵn sàng');
@@ -296,4 +335,9 @@ function startGradingWorker() {
   }
 }
 
-module.exports = { enqueue, gradeOne, startGradingWorker };
+// Chấm 1 bài nộp của học sinh (giữ tên cũ cho các nơi đang gọi)
+const gradeOne = (submissionId, opts) => gradeRecord('hw', submissionId, opts);
+// Chấm 1 bài làm thi thử
+const gradeMock = (attemptId, opts) => gradeRecord('mock', attemptId, opts);
+
+module.exports = { enqueue, gradeOne, gradeMock, startGradingWorker };

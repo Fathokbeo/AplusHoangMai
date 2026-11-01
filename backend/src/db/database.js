@@ -401,6 +401,115 @@ function initSchema() {
     db.exec('ALTER TABLE homework ADD COLUMN report_date TEXT');
   }
 
+  // Nộp hộ: giáo viên/admin chụp bài và nộp thay học sinh → ghi lại ai đã nộp (NULL = học sinh tự nộp)
+  if (!subCols.some(c => c.name === 'submitted_by')) {
+    db.exec('ALTER TABLE submissions ADD COLUMN submitted_by INTEGER');
+  }
+
+  // Thi thử cho khách vãng lai (trang chủ): đề do admin soạn (cùng các trường như bài tập) + bài làm của khách
+  // (thông tin học sinh + kết quả chấm — cùng tên cột kết quả với submissions để dùng chung hàng đợi chấm AI).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS mock_exams (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      description TEXT,
+      pdf_file TEXT,
+      pdf_name TEXT,
+      answer_file TEXT,
+      answer_name TEXT,
+      max_score REAL DEFAULT 10,
+      grading_note TEXT,
+      parts_config TEXT,
+      exam_type TEXT DEFAULT 'thpt',
+      hsa_config TEXT,
+      time_limit_minutes INTEGER,
+      feedback_rubric TEXT,
+      display_order INTEGER DEFAULT 0,
+      active INTEGER DEFAULT 1,
+      created_by INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS mock_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      exam_id INTEGER NOT NULL,
+      full_name TEXT NOT NULL,
+      class_name TEXT,
+      school TEXT,
+      gpa REAL,
+      parent_phone TEXT NOT NULL,
+      files TEXT,
+      structured_answers TEXT,
+      access_token TEXT NOT NULL,
+      ip TEXT,
+      submitted_at DATETIME,
+      score REAL,
+      feedback TEXT,
+      grading_details TEXT,
+      graded_at DATETIME,
+      graded_by_ai INTEGER DEFAULT 0,
+      grading_status TEXT,
+      grading_attempts INTEGER DEFAULT 0,
+      FOREIGN KEY (exam_id) REFERENCES mock_exams(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_mock_attempts_exam ON mock_attempts(exam_id);
+
+    -- Mục "Các hoạt động" trên trang chủ (admin quản lý ở Nội dung trang)
+    CREATE TABLE IF NOT EXISTS activities (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      event_date TEXT,
+      image TEXT,
+      description TEXT,
+      display_order INTEGER DEFAULT 0,
+      active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  // ── Bổ sung (11/2026) ─────────────────────────────────────────────────
+  const addCol = (table, col, type) => {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+    if (!cols.some((c) => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+  };
+  // Thi thử: đề dành cho khối lớp nào (NULL = mọi khối); khối lớp khách chọn khi điền thông tin
+  addCol('mock_exams', 'grade', 'INTEGER');
+  addCol('mock_attempts', 'grade', 'INTEGER');
+  // Hoạt động: nhiều ảnh cho 1 hoạt động (JSON mảng tên file trong uploads/activities)
+  addCol('activities', 'images', 'TEXT');
+  // Giáo viên & trợ giảng: cấp dạy (thcs | thpt), môn, mạng xã hội
+  addCol('staff', 'level', 'TEXT');
+  addCol('staff', 'subject', 'TEXT');
+  addCol('staff', 'instagram_url', 'TEXT');
+  addCol('staff', 'tiktok_url', 'TEXT');
+  addCol('staff', 'threads_url', 'TEXT');
+  // Khóa học: danh mục do người tạo đặt (THCS, THPT, HSA, TSA…); lớp học: lịch học hiển thị ở trang khóa học
+  addCol('courses', 'category', 'TEXT');
+  addCol('classes', 'schedule', 'TEXT');
+
+  // Gộp "Kinh nghiệm & Thành tích" vào "Các hoạt động" (chạy 1 lần): chép từng mục sang bảng activities,
+  // ảnh được CHÉP (không di chuyển) sang uploads/activities. Bảng achievements giữ nguyên làm bản lưu.
+  const migrated = db.prepare("SELECT value FROM site_settings WHERE key='migrated_achievements_to_activities'").get();
+  if (!migrated) {
+    const fs = require('fs');
+    const up = path.join(__dirname, '../../uploads');
+    fs.mkdirSync(path.join(up, 'activities'), { recursive: true });
+    const rows = db.prepare('SELECT * FROM achievements').all();
+    const ins = db.prepare('INSERT INTO activities (title,event_date,description,images,display_order,active,created_at) VALUES (?,?,?,?,?,?,?)');
+    db.transaction(() => {
+      for (const a of rows) {
+        const images = [];
+        if (a.image) {
+          const src = path.join(up, 'achievements', a.image);
+          const dst = path.join(up, 'activities', a.image);
+          try { if (fs.existsSync(src) && !fs.existsSync(dst)) fs.copyFileSync(src, dst); if (fs.existsSync(dst)) images.push(a.image); } catch { /* bỏ qua ảnh lỗi */ }
+        }
+        ins.run(a.title, a.year || null, a.description || null, images.length ? JSON.stringify(images) : null, a.display_order || 0, a.active ?? 1, a.created_at);
+      }
+      db.prepare("INSERT OR REPLACE INTO site_settings (key,value) VALUES ('migrated_achievements_to_activities', ?)").run(new Date().toISOString());
+    })();
+    if (rows.length) console.log(`📦 Đã gộp ${rows.length} mục Kinh nghiệm vào Các hoạt động`);
+  }
+
   // Migration: trước đây mỗi lớp giữ 1 BẢN SAO riêng của trợ giảng (class_assistants chứa luôn họ tên,
   // ảnh, SĐT, lịch làm việc) nên sửa ở lớp này không ảnh hưởng lớp khác. Nay tách thành bảng assistants
   // dùng chung + class_assistants chỉ còn là bảng liên kết, để mọi thay đổi tự đồng bộ giữa các lớp.

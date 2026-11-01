@@ -45,6 +45,27 @@ const uploadSubmission = multer({
   limits: { fileSize: 20 * 1024 * 1024 },
 });
 
+// Thi thử: file đề + đáp án (PDF) do admin tải lên
+const uploadMockExam = multer({
+  storage: createStorage('mock'),
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf') cb(null, true);
+    else cb(new Error('Chỉ chấp nhận file PDF'));
+  },
+  limits: { fileSize: 50 * 1024 * 1024 },
+});
+
+// Thi thử: bài làm của khách vãng lai (ảnh / PDF) — giới hạn chặt hơn vì ai cũng gửi được
+const uploadMockSubmission = multer({
+  storage: createStorage('mock_submissions'),
+  fileFilter: (req, file, cb) => {
+    const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Chỉ chấp nhận file PDF hoặc ảnh'));
+  },
+  limits: { fileSize: 15 * 1024 * 1024, files: 12 },
+});
+
 const uploadVideo = multer({
   storage: createStorage('videos'),
   fileFilter: (req, file, cb) => {
@@ -109,6 +130,7 @@ const uploadContent = {
   'staff': makeImageUpload('staff'),
   'featured-courses': makeImageUpload('featured_courses'),
   'achievements': makeImageUpload('achievements'),
+  'activities': makeImageUpload('activities'),
 };
 
-module.exports = { uploadAd, uploadHomework, uploadSubmission, uploadVideo, uploadCourseThumbnail, uploadContent, uploadLessonFile, uploadAssistantPhoto };
+module.exports = { uploadAd, uploadHomework, uploadSubmission, uploadVideo, uploadCourseThumbnail, uploadContent, uploadLessonFile, uploadAssistantPhoto, uploadMockExam, uploadMockSubmission };

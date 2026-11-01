@@ -11,9 +11,10 @@ router.use(authMiddleware, requireRole('admin'));
 // Cấu hình từng bộ nội dung: bảng + các trường text cho phép
 const COLLECTIONS = {
   'featured-students': { table: 'featured_students', dir: 'featured_students', fields: ['name', 'exam', 'achievement', 'description', 'display_order', 'active'] },
-  'staff':             { table: 'staff',              dir: 'staff',              fields: ['name', 'role_title', 'staff_type', 'description', 'facebook_url', 'phone', 'display_order', 'active'] },
+  'staff':             { table: 'staff',              dir: 'staff',              fields: ['name', 'role_title', 'staff_type', 'level', 'subject', 'description', 'facebook_url', 'instagram_url', 'tiktok_url', 'threads_url', 'phone', 'display_order', 'active'] },
   'featured-courses':  { table: 'featured_courses',   dir: 'featured_courses',   fields: ['title', 'student_count', 'description', 'display_order', 'active'] },
   'achievements':      { table: 'achievements',       dir: 'achievements',       fields: ['year', 'title', 'description', 'display_order', 'active'] },
+  'activities':        { table: 'activities',         dir: 'activities',         fields: ['title', 'event_date', 'description', 'display_order', 'active'] },
 };
 
 function rmImage(dir, name) {
@@ -40,12 +41,15 @@ router.put('/settings', (req, res) => {
   res.json({ message: 'Đã lưu thông tin' });
 });
 
-// Middleware chọn multer theo loại nội dung
+// Middleware chọn multer theo loại nội dung. "Các hoạt động" nhận NHIỀU ảnh (field 'images'), còn lại 1 ảnh ('image').
+const MULTI_IMAGE = new Set(['activities']);
 function imageUploadFor(req, res, next) {
   const up = uploadContent[req.params.collection];
   if (!up) return res.status(404).json({ message: 'Loại nội dung không hợp lệ' });
-  up.single('image')(req, res, next);
+  if (MULTI_IMAGE.has(req.params.collection)) up.array('images', 30)(req, res, next);
+  else up.single('image')(req, res, next);
 }
+const parseImages = (json) => { try { const a = JSON.parse(json || '[]'); return Array.isArray(a) ? a.filter((x) => typeof x === 'string') : []; } catch { return []; } };
 
 // ── List (admin: tất cả, kể cả ẩn) ─────────────────────────────────────
 router.get('/:collection', (req, res) => {
@@ -71,6 +75,7 @@ router.post('/:collection', imageUploadFor, (req, res) => {
     }
   });
   if (req.file) { cols.push('image'); vals.push(req.file.filename); }
+  if (MULTI_IMAGE.has(req.params.collection) && req.files?.length) { cols.push('images'); vals.push(JSON.stringify(req.files.map((f) => f.filename))); }
   if (cols.length === 0) return res.status(400).json({ message: 'Thiếu dữ liệu' });
 
   const placeholders = cols.map(() => '?').join(',');
@@ -96,6 +101,14 @@ router.put('/:collection/:id', imageUploadFor, (req, res) => {
     }
   });
   if (req.file) { sets.push('image=?'); vals.push(req.file.filename); rmImage(cfg.dir, existing.image); }
+  // Nhiều ảnh: keep_images = danh sách ảnh cũ giữ lại (đúng thứ tự), ảnh mới tải lên nối vào sau; ảnh bị bỏ thì xóa file
+  if (MULTI_IMAGE.has(req.params.collection) && (req.body.keep_images !== undefined || req.files?.length)) {
+    const old = parseImages(existing.images);
+    const keep = req.body.keep_images !== undefined ? parseImages(req.body.keep_images).filter((f) => old.includes(f)) : old;
+    old.filter((f) => !keep.includes(f)).forEach((f) => rmImage(cfg.dir, f));
+    const next = [...keep, ...(req.files || []).map((f) => f.filename)];
+    sets.push('images=?'); vals.push(next.length ? JSON.stringify(next) : null);
+  }
   if (sets.length === 0) return res.json({ message: 'Không có gì thay đổi' });
 
   vals.push(req.params.id);
@@ -111,6 +124,7 @@ router.delete('/:collection/:id', (req, res) => {
   const existing = db.prepare(`SELECT * FROM ${cfg.table} WHERE id=?`).get(req.params.id);
   if (existing) {
     rmImage(cfg.dir, existing.image);
+    if (existing.images) parseImages(existing.images).forEach((f) => rmImage(cfg.dir, f));
     db.prepare(`DELETE FROM ${cfg.table} WHERE id=?`).run(req.params.id);
   }
   res.json({ message: 'Đã xóa' });

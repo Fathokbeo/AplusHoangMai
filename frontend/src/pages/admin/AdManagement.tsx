@@ -158,6 +158,9 @@ export default function AdManagement() {
       >
         <div className="form-group">
           <label className="label">Ảnh quảng cáo {!editing && '*'}</label>
+          <div style={{ fontSize: '0.75rem', color: '#888', marginBottom: 8 }}>
+            Mọi ảnh quảng cáo hiển thị cùng khung tỉ lệ <strong>12:5</strong> — làm ảnh kích thước <strong>1920 × 800</strong> px (nội dung quan trọng để giữa, tránh sát mép).
+          </div>
           <div
             className="dropzone"
             onClick={() => fileRef.current?.click()}

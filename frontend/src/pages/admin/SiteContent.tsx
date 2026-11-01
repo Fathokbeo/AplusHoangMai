@@ -1,14 +1,31 @@
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../../lib/api';
 import Modal from '../../components/Modal';
 import { toast } from '../../components/Toast';
-import { Plus, Edit, Trash2, Eye, EyeOff, ImageIcon } from 'lucide-react';
+import AdManagement from './AdManagement';
+import AssistantManagement from '../teacher/AssistantManagement';
+import { Plus, Edit, Trash2, Eye, EyeOff, ImageIcon, X, ArrowLeft, ArrowRight } from 'lucide-react';
+
+// Nội dung trang giới thiệu (trang chủ): các hoạt động, học sinh tiêu biểu, giáo viên & trợ giảng (kèm trợ giảng
+// các lớp), quảng cáo, liên hệ & mạng xã hội. Mở thẳng 1 tab qua ?tab=<mã> (vd /admin/content?tab=ads).
 
 type Field = { key: string; label: string; type: 'text' | 'textarea' | 'select'; required?: boolean; options?: { value: string; label: string }[]; placeholder?: string };
+type Cfg = { label: string; dir: string; titleKey: string; fields: Field[]; multi?: boolean; imageHint: string };
 
-const COLLECTIONS: Record<string, { label: string; dir: string; titleKey: string; fields: Field[] }> = {
+const COLLECTIONS: Record<string, Cfg> = {
+  'activities': {
+    label: 'Hoạt động', dir: 'activities', titleKey: 'title', multi: true,
+    imageHint: 'Chọn được nhiều ảnh cho 1 hoạt động. Ảnh đầu tiên là ảnh lớn. Khuyên dùng ảnh ngang 4:3 (1200 × 900).',
+    fields: [
+      { key: 'title', label: 'Tên hoạt động', type: 'text', required: true, placeholder: 'vd: Lễ tri ân 20/11, Khóa 2k8, Dã ngoại cuối kỳ…' },
+      { key: 'event_date', label: 'Thời gian', type: 'text', placeholder: 'vd: 20/11/2026 hoặc 2025' },
+      { key: 'description', label: 'Mô tả', type: 'textarea' },
+    ],
+  },
   'featured-students': {
     label: 'Học sinh tiêu biểu', dir: 'featured_students', titleKey: 'name',
+    imageHint: 'Khuyên dùng ảnh dọc 3:4 (600 × 800).',
     fields: [
       { key: 'name', label: 'Họ tên', type: 'text', required: true },
       { key: 'exam', label: 'Kỳ thi', type: 'text', placeholder: 'vd: Thi vào 10, HSG Toán...' },
@@ -18,45 +35,53 @@ const COLLECTIONS: Record<string, { label: string; dir: string; titleKey: string
   },
   'staff': {
     label: 'Giáo viên & Trợ giảng', dir: 'staff', titleKey: 'name',
+    imageHint: 'Mọi ảnh giáo viên / trợ giảng hiển thị cùng khung vuông 1:1 — khuyên dùng ảnh 600 × 600 (mặt ở giữa ảnh).',
     fields: [
       { key: 'name', label: 'Họ tên', type: 'text', required: true },
-      { key: 'role_title', label: 'Chức danh', type: 'text', placeholder: 'vd: Giáo viên Toán' },
       { key: 'staff_type', label: 'Loại', type: 'select', options: [{ value: 'teacher', label: 'Giáo viên' }, { value: 'assistant', label: 'Trợ giảng' }] },
+      { key: 'level', label: 'Cấp dạy', type: 'select', options: [{ value: '', label: '— Chưa chọn —' }, { value: 'thcs', label: 'THCS (cấp 2)' }, { value: 'thpt', label: 'THPT (cấp 3)' }] },
+      { key: 'subject', label: 'Môn', type: 'text', placeholder: 'vd: Toán, Tiếng Anh' },
+      { key: 'role_title', label: 'Chức danh', type: 'text', placeholder: 'vd: Giáo viên Toán' },
       { key: 'phone', label: 'Số điện thoại', type: 'text', placeholder: 'vd: 0912 345 678' },
-      { key: 'facebook_url', label: 'Link Facebook', type: 'text', placeholder: 'vd: https://facebook.com/ten.giao.vien' },
+      { key: 'facebook_url', label: 'Link Facebook', type: 'text', placeholder: 'https://facebook.com/…' },
+      { key: 'instagram_url', label: 'Link Instagram', type: 'text', placeholder: 'https://instagram.com/…' },
+      { key: 'tiktok_url', label: 'Link TikTok', type: 'text', placeholder: 'https://tiktok.com/@…' },
+      { key: 'threads_url', label: 'Link Threads', type: 'text', placeholder: 'https://threads.net/@…' },
       { key: 'description', label: 'Giới thiệu', type: 'textarea' },
-    ],
-  },
-  'achievements': {
-    label: 'Kinh nghiệm & Thành tích', dir: 'achievements', titleKey: 'title',
-    fields: [
-      { key: 'year', label: 'Năm', type: 'text', placeholder: 'vd: 2024' },
-      { key: 'title', label: 'Tiêu đề', type: 'text', required: true },
-      { key: 'description', label: 'Mô tả', type: 'textarea' },
     ],
   },
 };
 
+const LEVEL_LABEL: Record<string, string> = { thcs: 'THCS', thpt: 'THPT' };
+
+// Ảnh của 1 mục khi soạn: ảnh cũ (tên file trên server) hoặc ảnh mới chọn (File + link xem trước)
+type Pic = { old: string } | { file: File; url: string };
+
 function CollectionManager({ collection }: { collection: string }) {
   const cfg = COLLECTIONS[collection];
   const [items, setItems] = useState<any[]>([]);
+  const [filter, setFilter] = useState('all');
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState<any>({});
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState('');
+  const [pics, setPics] = useState<Pic[]>([]);
   const [loading, setLoading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const fetchItems = () => api.get(`/admin/content/${collection}`).then((r) => setItems(r.data));
-  useEffect(() => { fetchItems(); }, [collection]);
+  useEffect(() => { fetchItems(); }, [collection]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const itemImages = (it: any): string[] => {
+    try { const a = JSON.parse(it.images || '[]'); if (Array.isArray(a) && a.length) return a; } catch { /* bỏ qua */ }
+    return it.image ? [it.image] : [];
+  };
 
   const openCreate = () => {
     setEditing(null);
     const init: any = { display_order: '0' };
-    if (collection === 'staff') init.staff_type = 'teacher';
+    if (collection === 'staff') { init.staff_type = 'teacher'; init.level = ''; }
     setForm(init);
-    setFile(null); setPreview('');
+    setPics([]);
     setModal(true);
   };
 
@@ -65,10 +90,21 @@ function CollectionManager({ collection }: { collection: string }) {
     const f: any = { display_order: String(it.display_order ?? 0) };
     cfg.fields.forEach((fl) => { f[fl.key] = it[fl.key] ?? ''; });
     setForm(f);
-    setFile(null);
-    setPreview(it.image ? `/uploads/${cfg.dir}/${it.image}` : '');
+    setPics(itemImages(it).map((name) => ({ old: name })));
     setModal(true);
   };
+
+  const addFiles = (list: FileList | null) => {
+    const picked = Array.from(list || []).filter((f) => f.type.startsWith('image/'));
+    if (!picked.length) return;
+    const next = picked.map((file) => ({ file, url: URL.createObjectURL(file) }));
+    setPics((prev) => (cfg.multi ? [...prev, ...next].slice(0, 30) : next.slice(0, 1)));
+  };
+  const movePic = (i: number, d: -1 | 1) => setPics((prev) => {
+    const j = i + d;
+    if (j < 0 || j >= prev.length) return prev;
+    const n = [...prev]; [n[i], n[j]] = [n[j], n[i]]; return n;
+  });
 
   const save = async () => {
     const titleField = cfg.fields.find((f) => f.required);
@@ -78,7 +114,14 @@ function CollectionManager({ collection }: { collection: string }) {
       const fd = new FormData();
       cfg.fields.forEach((f) => fd.append(f.key, form[f.key] ?? ''));
       fd.append('display_order', form.display_order || '0');
-      if (file) fd.append('image', file);
+      if (cfg.multi) {
+        // Server giữ ảnh cũ theo đúng thứ tự keep_images rồi nối ảnh mới vào sau
+        fd.append('keep_images', JSON.stringify(pics.filter((p): p is { old: string } => 'old' in p).map((p) => p.old)));
+        pics.forEach((p) => { if ('file' in p) fd.append('images', p.file); });
+      } else {
+        const p = pics[0];
+        if (p && 'file' in p) fd.append('image', p.file);
+      }
       if (editing) {
         await api.put(`/admin/content/${collection}/${editing.id}`, fd);
         toast.success('Đã cập nhật');
@@ -109,57 +152,114 @@ function CollectionManager({ collection }: { collection: string }) {
     fetchItems();
   };
 
+  // Giáo viên & trợ giảng: lọc theo nhóm (loại × cấp)
+  const STAFF_FILTERS = [
+    ['all', 'Tất cả'], ['teacher-thpt', 'Giáo viên THPT'], ['teacher-thcs', 'Giáo viên THCS'],
+    ['assistant-thpt', 'Trợ giảng THPT'], ['assistant-thcs', 'Trợ giảng THCS'], ['none', 'Chưa chọn cấp'],
+  ] as const;
+  const visible = collection !== 'staff' || filter === 'all' ? items : items.filter((it) => {
+    if (filter === 'none') return !LEVEL_LABEL[it.level];
+    const [type, lv] = filter.split('-');
+    return (type === 'assistant' ? it.staff_type === 'assistant' : it.staff_type !== 'assistant') && it.level === lv;
+  });
+
+  const picSrc = (p: Pic) => ('old' in p ? `/uploads/${cfg.dir}/${p.old}` : p.url);
+
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
-        <button className="btn btn-primary" onClick={openCreate}><Plus size={16} /> Thêm {cfg.label.toLowerCase()}</button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+        {collection === 'staff' && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {STAFF_FILTERS.map(([k, l]) => (
+              <button key={k} className="btn btn-sm" onClick={() => setFilter(k)}
+                style={{ background: filter === k ? '#FFEBEE' : 'white', color: filter === k ? '#C62828' : '#666', border: `1px solid ${filter === k ? '#FFCDD2' : '#E0E0E0'}` }}>{l}</button>
+            ))}
+          </div>
+        )}
+        <button className="btn btn-primary" style={{ marginLeft: 'auto' }} onClick={openCreate}><Plus size={16} /> Thêm {cfg.label.toLowerCase()}</button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
-        {items.map((it) => (
-          <div key={it.id} style={{ background: 'white', borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.07)', opacity: it.active ? 1 : 0.55 }}>
-            {it.image ? (
-              <img src={`/uploads/${cfg.dir}/${it.image}`} alt="" style={{ width: '100%', height: 140, objectFit: 'cover' }} />
-            ) : (
-              <div style={{ height: 140, background: '#F0F0F3', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <ImageIcon size={32} color="#bbb" />
-              </div>
-            )}
-            <div style={{ padding: '0.85rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#1A1A2E', flex: 1 }}>{it[cfg.titleKey]}</h4>
-                {!it.active && <span className="badge badge-gray" style={{ fontSize: '0.68rem' }}>Ẩn</span>}
-              </div>
-              {it.exam && <span className="badge badge-red" style={{ fontSize: '0.7rem' }}>{it.exam}</span>}
-              {it.role_title && <div style={{ fontSize: '0.8rem', color: '#1565C0', fontWeight: 600 }}>{it.role_title}{it.staff_type === 'assistant' ? ' · Trợ giảng' : ''}</div>}
-              {it.phone && <div style={{ fontSize: '0.78rem', color: '#2E7D32', fontWeight: 600 }}>SĐT: {it.phone}</div>}
-              {it.facebook_url && <div style={{ fontSize: '0.75rem', color: '#888', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>FB: {it.facebook_url}</div>}
-              {it.student_count && <div style={{ fontSize: '0.8rem', color: '#2E7D32', fontWeight: 600 }}>{it.student_count}</div>}
-              {it.year && <div style={{ fontSize: '0.8rem', color: '#E65100', fontWeight: 700 }}>{it.year}</div>}
-              {it.achievement && <div style={{ fontSize: '0.82rem', color: '#C62828', fontWeight: 600, marginTop: 2 }}>{it.achievement}</div>}
-              <div style={{ display: 'flex', gap: 4, marginTop: 10 }}>
-                <button className="btn btn-ghost btn-sm" style={{ flex: 1 }} onClick={() => openEdit(it)}><Edit size={13} /> Sửa</button>
-                <button className="btn btn-ghost btn-sm btn-icon" title={it.active ? 'Ẩn' : 'Hiện'} onClick={() => toggleActive(it)}>
-                  {it.active ? <EyeOff size={14} /> : <Eye size={14} />}
-                </button>
-                <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} onClick={() => remove(it)}><Trash2 size={14} /></button>
+        {visible.map((it) => {
+          const imgs = itemImages(it);
+          return (
+            <div key={it.id} style={{ background: 'white', borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.07)', opacity: it.active ? 1 : 0.55 }}>
+              {imgs.length ? (
+                <div style={{ position: 'relative' }}>
+                  <img src={`/uploads/${cfg.dir}/${imgs[0]}`} alt="" style={{ width: '100%', height: 140, objectFit: 'cover', display: 'block' }} />
+                  {imgs.length > 1 && <span className="badge badge-gray" style={{ position: 'absolute', right: 8, bottom: 8 }}>{imgs.length} ảnh</span>}
+                </div>
+              ) : (
+                <div style={{ height: 140, background: '#F0F0F3', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <ImageIcon size={32} color="#bbb" />
+                </div>
+              )}
+              <div style={{ padding: '0.85rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#1A1A2E', flex: 1 }}>{it[cfg.titleKey]}</h4>
+                  {!it.active && <span className="badge badge-gray" style={{ fontSize: '0.68rem' }}>Ẩn</span>}
+                </div>
+                {it.exam && <span className="badge badge-red" style={{ fontSize: '0.7rem' }}>{it.exam}</span>}
+                {collection === 'staff' && (
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', margin: '2px 0 4px' }}>
+                    <span className="badge badge-blue" style={{ fontSize: '0.7rem' }}>{it.staff_type === 'assistant' ? 'Trợ giảng' : 'Giáo viên'}{LEVEL_LABEL[it.level] ? ` ${LEVEL_LABEL[it.level]}` : ''}</span>
+                    {it.subject && <span className="badge badge-gray" style={{ fontSize: '0.7rem' }}>{it.subject}</span>}
+                  </div>
+                )}
+                {it.role_title && <div style={{ fontSize: '0.8rem', color: '#1565C0', fontWeight: 600 }}>{it.role_title}</div>}
+                {it.phone && <div style={{ fontSize: '0.78rem', color: '#2E7D32', fontWeight: 600 }}>SĐT: {it.phone}</div>}
+                {it.event_date && <div style={{ fontSize: '0.8rem', color: '#6A1B9A', fontWeight: 700 }}>{it.event_date}</div>}
+                {it.achievement && <div style={{ fontSize: '0.82rem', color: '#C62828', fontWeight: 600, marginTop: 2 }}>{it.achievement}</div>}
+                <div style={{ display: 'flex', gap: 4, marginTop: 10 }}>
+                  <button className="btn btn-ghost btn-sm" style={{ flex: 1 }} onClick={() => openEdit(it)}><Edit size={13} /> Sửa</button>
+                  <button className="btn btn-ghost btn-sm btn-icon" title={it.active ? 'Ẩn' : 'Hiện'} onClick={() => toggleActive(it)}>
+                    {it.active ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                  <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} onClick={() => remove(it)}><Trash2 size={14} /></button>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
-        {items.length === 0 && (
+          );
+        })}
+        {visible.length === 0 && (
           <div style={{ gridColumn: '1/-1', textAlign: 'center', color: '#999', padding: '2.5rem', background: 'white', borderRadius: 12 }}>Chưa có mục nào</div>
         )}
       </div>
 
-      <Modal open={modal} onClose={() => setModal(false)} title={editing ? `Sửa ${cfg.label.toLowerCase()}` : `Thêm ${cfg.label.toLowerCase()}`}
+      <Modal open={modal} onClose={() => setModal(false)} title={editing ? `Sửa ${cfg.label.toLowerCase()}` : `Thêm ${cfg.label.toLowerCase()}`} size={cfg.multi ? 'lg' : 'default'}
         footer={<><button className="btn btn-ghost" onClick={() => setModal(false)}>Hủy</button><button className="btn btn-primary" onClick={save} disabled={loading}>{loading ? 'Đang lưu...' : 'Lưu'}</button></>}>
         <div className="form-group">
-          <label className="label">Ảnh</label>
-          <div className="dropzone" onClick={() => fileRef.current?.click()}>
-            {preview ? <img src={preview} alt="preview" style={{ maxHeight: 140, borderRadius: 6, objectFit: 'contain' }} /> : <div style={{ fontSize: '0.85rem' }}>Click để chọn ảnh</div>}
-          </div>
-          <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) { setFile(f); setPreview(URL.createObjectURL(f)); } }} />
+          <label className="label">{cfg.multi ? `Ảnh (${pics.length})` : 'Ảnh'}</label>
+          <div style={{ fontSize: '0.75rem', color: '#888', marginBottom: 8 }}>{cfg.imageHint}</div>
+          {pics.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: cfg.multi ? 'repeat(auto-fill, minmax(110px, 1fr))' : '160px', gap: 10, marginBottom: 10 }}>
+              {pics.map((p, i) => (
+                <div key={i}>
+                  <div style={{ position: 'relative', aspectRatio: collection === 'activities' ? '4 / 3' : collection === 'staff' ? '1 / 1' : '3 / 4', borderRadius: 8, overflow: 'hidden', border: i === 0 && cfg.multi ? '2px solid #6A1B9A' : '1px solid #E0E0E0', background: '#F5F5F5' }}>
+                    <img src={picSrc(p)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                    {i === 0 && cfg.multi && <span className="badge badge-purple" style={{ position: 'absolute', left: 4, top: 4, fontSize: '0.65rem' }}>Ảnh lớn</span>}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginTop: 3 }}>
+                    {cfg.multi && <>
+                      <button type="button" className="btn btn-ghost btn-sm btn-icon" onClick={() => movePic(i, -1)} disabled={i === 0} title="Lên trước"><ArrowLeft size={12} /></button>
+                      <button type="button" className="btn btn-ghost btn-sm btn-icon" onClick={() => movePic(i, 1)} disabled={i === pics.length - 1} title="Ra sau"><ArrowRight size={12} /></button>
+                    </>}
+                    <span style={{ flex: 1 }} />
+                    <button type="button" className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} onClick={() => setPics((prev) => prev.filter((_, j) => j !== i))} title="Bỏ ảnh"><X size={12} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {(cfg.multi || pics.length === 0) && (
+            <div className="dropzone" onClick={() => fileRef.current?.click()}>
+              <div style={{ fontSize: '0.85rem' }}>{cfg.multi ? 'Click để thêm ảnh (chọn được nhiều ảnh)' : 'Click để chọn ảnh'}</div>
+            </div>
+          )}
+          {!cfg.multi && pics.length > 0 && (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => fileRef.current?.click()}>Đổi ảnh khác</button>
+          )}
+          <input ref={fileRef} type="file" accept="image/*" multiple={!!cfg.multi} hidden onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
         </div>
         {cfg.fields.map((f) => (
           <div className="form-group" key={f.key}>
@@ -195,7 +295,10 @@ const SETTING_FIELDS = [
   { key: 'contact_phone', label: 'Điện thoại', area: 'Liên hệ' },
   { key: 'contact_email', label: 'Email', area: 'Liên hệ' },
   { key: 'contact_hours', label: 'Giờ học', area: 'Liên hệ' },
-  { key: 'contact_facebook', label: 'Link Facebook', area: 'Liên hệ' },
+  { key: 'contact_facebook', label: 'Link Facebook', area: 'Mạng xã hội', placeholder: 'https://facebook.com/…' },
+  { key: 'contact_instagram', label: 'Link Instagram', area: 'Mạng xã hội', placeholder: 'https://instagram.com/…' },
+  { key: 'contact_tiktok', label: 'Link TikTok', area: 'Mạng xã hội', placeholder: 'https://tiktok.com/@…' },
+  { key: 'contact_threads', label: 'Link Threads', area: 'Mạng xã hội', placeholder: 'https://threads.net/@…' },
 ];
 
 function SettingsForm() {
@@ -213,16 +316,17 @@ function SettingsForm() {
     } finally { setLoading(false); }
   };
 
-  const areas = ['Trang chủ', 'Số liệu', 'Liên hệ'];
+  const areas = ['Trang chủ', 'Số liệu', 'Liên hệ', 'Mạng xã hội'];
   return (
     <div style={{ maxWidth: 640 }}>
       {areas.map((area) => (
         <div key={area} style={{ background: 'white', borderRadius: 12, padding: '1.25rem', marginBottom: 16, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
           <h3 style={{ margin: '0 0 1rem', fontSize: '1rem', fontWeight: 700, color: '#1A1A2E' }}>{area}</h3>
+          {area === 'Mạng xã hội' && <div style={{ fontSize: '0.78rem', color: '#888', margin: '-0.5rem 0 0.75rem' }}>Hiện thành logo từng app ở phần Liên hệ cuối trang chủ (để trống = không hiện).</div>}
           {SETTING_FIELDS.filter((f) => f.area === area).map((f) => (
             <div className="form-group" key={f.key}>
               <label className="label">{f.label}</label>
-              <input className="input" value={s[f.key] || ''} onChange={(e) => setS({ ...s, [f.key]: e.target.value })} />
+              <input className="input" placeholder={(f as any).placeholder} value={s[f.key] || ''} onChange={(e) => setS({ ...s, [f.key]: e.target.value })} />
             </div>
           ))}
         </div>
@@ -232,20 +336,39 @@ function SettingsForm() {
   );
 }
 
+// Giáo viên & trợ giảng: hồ sơ trên trang chủ + trợ giảng các lớp (lịch làm việc, gán lớp)
+function StaffTab() {
+  const [sub, setSub] = useState<'profiles' | 'class-assistants'>('profiles');
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+        {([['profiles', 'Hồ sơ trên trang chủ'], ['class-assistants', 'Trợ giảng các lớp (lịch, gán lớp)']] as const).map(([k, l]) => (
+          <button key={k} className="btn btn-sm" onClick={() => setSub(k)}
+            style={{ background: sub === k ? '#1A1A2E' : 'white', color: sub === k ? 'white' : '#666', border: '1px solid #E0E0E0' }}>{l}</button>
+        ))}
+      </div>
+      {sub === 'profiles' ? <CollectionManager collection="staff" /> : <AssistantManagement />}
+    </div>
+  );
+}
+
 const TABS = [
+  { key: 'activities', label: 'Các hoạt động' },
   { key: 'featured-students', label: 'Học sinh tiêu biểu' },
   { key: 'staff', label: 'Giáo viên & Trợ giảng' },
-  { key: 'achievements', label: 'Kinh nghiệm' },
+  { key: 'ads', label: 'Quảng cáo' },
   { key: 'settings', label: 'Liên hệ & Trang chủ' },
 ];
 
 export default function SiteContent() {
-  const [tab, setTab] = useState('featured-students');
+  const [params, setParams] = useSearchParams();
+  const tab = TABS.some((t) => t.key === params.get('tab')) ? params.get('tab')! : 'activities';
+  const setTab = (k: string) => setParams({ tab: k }, { replace: true });
   return (
     <div className="fade-in">
       <h1 className="page-title" style={{ marginBottom: '0.5rem' }}>Nội dung trang giới thiệu</h1>
       <p style={{ margin: '0 0 1.25rem', color: '#888', fontSize: '0.86rem' }}>
-        Mục <b>Khóa học tiêu biểu</b> trên trang chủ lấy thẳng từ <b>Quản lý khóa học</b>, không cần nhập riêng ở đây nữa.
+        Mục <b>Khóa học</b> trên trang chủ lấy thẳng từ <b>Quản lý khóa học</b> (chia hàng theo danh mục của khóa).
       </p>
 
       <div style={{ display: 'flex', gap: 4, background: '#F5F5F5', padding: 4, borderRadius: 10, marginBottom: '1.5rem', flexWrap: 'wrap', width: 'fit-content' }}>
@@ -257,7 +380,10 @@ export default function SiteContent() {
         ))}
       </div>
 
-      {tab === 'settings' ? <SettingsForm /> : <CollectionManager collection={tab} key={tab} />}
+      {tab === 'settings' ? <SettingsForm />
+        : tab === 'ads' ? <AdManagement />
+        : tab === 'staff' ? <StaffTab />
+        : <CollectionManager collection={tab} key={tab} />}
     </div>
   );
 }

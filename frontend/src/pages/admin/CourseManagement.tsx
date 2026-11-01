@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../lib/api';
 import Modal from '../../components/Modal';
+import { CategoryField } from '../../components/CourseFields';
 import { toast } from '../../components/Toast';
 import { Plus, Edit, Trash2, BookOpen, School, Users, ChevronRight } from 'lucide-react';
 
@@ -10,6 +11,7 @@ interface Course {
   title: string;
   description: string;
   thumbnail: string;
+  category: string | null;
   creator_name: string;
   created_by: number | null;
   class_count: number;
@@ -23,7 +25,7 @@ export default function CourseManagement() {
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<Course | null>(null);
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({ title: '', description: '', teacher_id: '' });
+  const [form, setForm] = useState({ title: '', description: '', teacher_id: '', category: '' });
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
@@ -40,7 +42,7 @@ export default function CourseManagement() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ title: '', description: '', teacher_id: '' });
+    setForm({ title: '', description: '', teacher_id: '', category: '' });
     setFile(null);
     setPreview('');
     setModal(true);
@@ -50,7 +52,7 @@ export default function CourseManagement() {
     setEditing(c);
     // Chỉ pre-select khi khóa đang thuộc một giáo viên (created_by là GV); admin-quản-lý → bỏ trống.
     const ownedByTeacher = teachers.some((t) => t.id === c.created_by);
-    setForm({ title: c.title, description: c.description || '', teacher_id: ownedByTeacher ? String(c.created_by) : '' });
+    setForm({ title: c.title, description: c.description || '', teacher_id: ownedByTeacher ? String(c.created_by) : '', category: c.category || '' });
     setFile(null);
     setPreview(c.thumbnail ? `/uploads/courses/${c.thumbnail}` : '');
     setModal(true);
@@ -61,7 +63,7 @@ export default function CourseManagement() {
     setLoading(true);
     try {
       let courseId: number;
-      const payload = { title: form.title, description: form.description, teacher_id: form.teacher_id || null };
+      const payload = { title: form.title, description: form.description, teacher_id: form.teacher_id || null, category: form.category };
       if (editing) {
         await api.put(`/admin/courses/${editing.id}`, payload);
         courseId = editing.id;
@@ -112,6 +114,7 @@ export default function CourseManagement() {
               </div>
             )}
             <div style={{ padding: '1rem' }}>
+              {c.category && <span className="badge badge-green" style={{ marginBottom: 6 }}>{c.category}</span>}
               <h3 style={{ margin: '0 0 6px', fontSize: '1rem', fontWeight: 700 }}>{c.title}</h3>
               {c.description && <p style={{ margin: '0 0 10px', fontSize: '0.83rem', color: '#888', lineHeight: 1.5 }}>{c.description}</p>}
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: '0.78rem', color: '#999', marginBottom: 10 }}>
@@ -163,6 +166,7 @@ export default function CourseManagement() {
           <label className="label">Mô tả</label>
           <textarea className="input" placeholder="Mô tả khóa học..." value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} />
         </div>
+        <CategoryField value={form.category} onChange={(v) => setForm({ ...form, category: v })} existing={courses.map((c: any) => c.category)} />
         <div className="form-group">
           <label className="label">Giáo viên phụ trách</label>
           <select className="input" value={form.teacher_id} onChange={(e) => setForm({ ...form, teacher_id: e.target.value })}>

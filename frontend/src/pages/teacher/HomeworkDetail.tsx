@@ -6,10 +6,11 @@ import GradingDetails from '../../components/GradingDetails';
 import StructuredAnswerReview from '../../components/StructuredAnswerReview';
 import FileViewer from '../../components/FileViewer';
 import HomeworkReport, { ATTENDANCE_LABEL, type MarkUpdate, type ReportInfo } from '../../components/HomeworkReport';
+import SubmitForStudentModal from '../../components/SubmitForStudentModal';
 import { toast } from '../../components/Toast';
 import { parsePartsConfig, hasObjectiveParts } from '../../lib/homeworkParts';
 import { summarizeEssayFeedback, homeworkHasEssay } from '../../lib/feedbackSummary';
-import { ChevronLeft, Users, CheckCircle, XCircle, Clock, Bot, Star, Eye, Download, Repeat } from 'lucide-react';
+import { ChevronLeft, Users, CheckCircle, XCircle, Clock, Bot, Star, Eye, Download, Repeat, Camera } from 'lucide-react';
 
 // Danh sách URL file của một bài nộp (hỗ trợ cũ: 1 file, mới: nhiều file dạng JSON)
 function submissionFileUrls(s: any): string[] {
@@ -28,6 +29,8 @@ export default function HomeworkDetail() {
   const [loading, setLoading] = useState(false);
   const [regrading, setRegrading] = useState<number | null>(null);
   const [viewFiles, setViewFiles] = useState<string[] | null>(null);
+  // Học sinh đang được giáo viên nộp hộ (mở hộp chụp ảnh / chọn file)
+  const [submitFor, setSubmitFor] = useState<any>(null);
   // Thanh chọn: tất cả / đã nộp / chưa nộp (lọc danh sách) hoặc "Nhận xét" (khối nhận xét cả lớp)
   const [filter, setFilter] = useState<'all' | 'submitted' | 'missing' | 'review'>('all');
 
@@ -298,7 +301,10 @@ export default function HomeworkDetail() {
                   <td><strong>{s.full_name}</strong><div style={{ fontSize: '0.78rem', color: '#999' }}>{s.username}</div></td>
                   <td>
                     {submitted
-                      ? <span className="badge badge-green"><CheckCircle size={10} style={{ marginRight: 4 }} />Đã nộp</span>
+                      ? <>
+                          <span className="badge badge-green"><CheckCircle size={10} style={{ marginRight: 4 }} />Đã nộp</span>
+                          {s.submitted_by && <div style={{ fontSize: '0.72rem', color: '#6A1B9A', marginTop: 3 }} title={s.submitted_by_name ? `Nộp hộ bởi ${s.submitted_by_name}` : undefined}><Camera size={10} style={{ verticalAlign: 'middle' }} /> GV nộp hộ</div>}
+                        </>
                       : isOverdue
                         ? <span className="badge badge-red"><XCircle size={10} style={{ marginRight: 4 }} />Chưa nộp bài</span>
                         : <span className="badge badge-gray">Chưa nộp</span>}
@@ -342,8 +348,9 @@ export default function HomeworkDetail() {
                       : '—'}
                   </td>
                   <td>
-                    {submitted ? (
-                      <div style={{ display: 'flex', gap: 6 }}>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {submitted && (
+                      <>
                         <button className="btn btn-secondary btn-sm" onClick={() => openGrade({ ...s, id: s.submission_id })}>
                           <Star size={13} /> {s.score !== null ? 'Sửa điểm' : 'Chấm'}
                         </button>
@@ -353,8 +360,12 @@ export default function HomeworkDetail() {
                             {regrading === s.submission_id ? '...' : 'AI'}
                           </button>
                         )}
-                      </div>
-                    ) : '—'}
+                      </>
+                    )}
+                      <button className="btn btn-ghost btn-sm" onClick={() => setSubmitFor(s)} title="Chụp ảnh / chọn file bài làm và nộp thay học sinh">
+                        <Camera size={13} /> {submitted ? 'Nộp lại hộ' : 'Nộp hộ'}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );
@@ -389,6 +400,10 @@ export default function HomeworkDetail() {
         {grading?.structured_answers && <StructuredAnswerReview partsConfig={hw.parts_config} structuredAnswers={grading.structured_answers} />}
         {grading?.grading_details && <GradingDetails details={grading.grading_details} />}
       </Modal>
+
+      {/* Nộp hộ học sinh */}
+      <SubmitForStudentModal open={!!submitFor} onClose={() => setSubmitFor(null)} homeworkId={id!} student={submitFor}
+        resubmit={!!submitFor?.submission_id} onDone={fetchHw} />
 
       {/* File Viewer Modal */}
       {viewFiles && <FileViewer files={viewFiles} onClose={() => setViewFiles(null)} />}

@@ -180,13 +180,18 @@ router.get('/my-courses', (req, res) => {
   res.json(db.prepare(q + ' ORDER BY co.created_at DESC').all(...p));
 });
 
+// Danh mục khóa học (THCS, THPT, HSA, TSA…): chữ tự do, tối đa 40 ký tự, trống = chưa phân loại
+const cleanCategory = (v) => { const t = String(v ?? '').trim().replace(/\s+/g, ' '); return t ? t.slice(0, 40) : null; };
+// Lịch học của lớp (vd "Thứ 2, 4, 6: 18:00 – 19:30"), mỗi dòng một buổi — hiện ở trang khóa học công khai
+const cleanSchedule = (v) => String(v ?? '').trim().slice(0, 500) || null;
+
 router.post('/courses', (req, res) => {
-  const { title, description } = req.body;
+  const { title, description, category } = req.body;
   if (!title) return res.status(400).json({ message: 'Cần tiêu đề khóa học' });
   const db = getDb();
   const result = db.prepare(
-    'INSERT INTO courses (title,description,created_by) VALUES (?,?,?)'
-  ).run(title, description || null, req.user.id);
+    'INSERT INTO courses (title,description,created_by,category) VALUES (?,?,?,?)'
+  ).run(title, description || null, req.user.id, cleanCategory(category));
   res.status(201).json({ id: result.lastInsertRowid, title });
 });
 
@@ -217,7 +222,7 @@ router.get('/courses/:courseId', (req, res) => {
 });
 
 router.put('/courses/:courseId', (req, res) => {
-  const { title, description } = req.body;
+  const { title, description, category } = req.body;
   const db = getDb();
   const course = db.prepare('SELECT * FROM courses WHERE id=?').get(req.params.courseId);
   if (!course) return res.status(404).json({ message: 'Không tìm thấy' });
@@ -225,6 +230,7 @@ router.put('/courses/:courseId', (req, res) => {
   const sets = []; const vals = [];
   if (title) { sets.push('title=?'); vals.push(title); }
   if (description !== undefined) { sets.push('description=?'); vals.push(description); }
+  if (category !== undefined) { sets.push('category=?'); vals.push(cleanCategory(category)); }
   if (sets.length > 0) { vals.push(req.params.courseId); db.prepare(`UPDATE courses SET ${sets.join(',')} WHERE id=?`).run(...vals); }
   res.json({ message: 'Đã cập nhật' });
 });
@@ -240,7 +246,7 @@ router.delete('/courses/:courseId', (req, res) => {
 
 // ── Classes (always inside a course) ──────────────────────────────────
 router.post('/courses/:courseId/classes', (req, res) => {
-  const { title, description } = req.body;
+  const { title, description, schedule } = req.body;
   if (!title) return res.status(400).json({ message: 'Cần tiêu đề lớp học' });
   const db = getDb();
   const course = db.prepare('SELECT * FROM courses WHERE id=? AND active=1').get(req.params.courseId);
@@ -249,8 +255,8 @@ router.post('/courses/:courseId/classes', (req, res) => {
   // Lớp luôn do giáo viên phụ trách khóa học đảm nhận, kể cả khi admin là người tạo lớp.
   const tid = course.created_by || req.user.id;
   const result = db.prepare(
-    'INSERT INTO classes (course_id,title,description,teacher_id) VALUES (?,?,?,?)'
-  ).run(req.params.courseId, title, description || null, tid);
+    'INSERT INTO classes (course_id,title,description,teacher_id,schedule) VALUES (?,?,?,?,?)'
+  ).run(req.params.courseId, title, description || null, tid, cleanSchedule(schedule));
   res.status(201).json({ id: result.lastInsertRowid, title });
 });
 
@@ -297,7 +303,7 @@ router.get('/classes/:id/ranking', (req, res) => {
 });
 
 router.put('/classes/:id', (req, res) => {
-  const { title, description } = req.body;
+  const { title, description, schedule } = req.body;
   const db = getDb();
   const cls = db.prepare('SELECT * FROM classes WHERE id=?').get(req.params.id);
   if (!cls) return res.status(404).json({ message: 'Không tìm thấy' });
@@ -305,6 +311,7 @@ router.put('/classes/:id', (req, res) => {
   const sets = []; const vals = [];
   if (title) { sets.push('title=?'); vals.push(title); }
   if (description !== undefined) { sets.push('description=?'); vals.push(description); }
+  if (schedule !== undefined) { sets.push('schedule=?'); vals.push(cleanSchedule(schedule)); }
   if (sets.length > 0) { vals.push(req.params.id); db.prepare(`UPDATE classes SET ${sets.join(',')} WHERE id=?`).run(...vals); }
   res.json({ message: 'Đã cập nhật' });
 });

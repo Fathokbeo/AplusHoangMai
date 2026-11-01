@@ -37,7 +37,11 @@ app.use('/uploads', uploadsAuth, express.static(path.join(__dirname, '../uploads
 
 // Routes — public first to avoid auth middleware catch-all
 app.use('/api/auth', require('./routes/auth'));
+// Thi thử: phần công khai (khách vãng lai) + phần quản lý của admin — đặt trước /api/public và /api/admin
+const mockExams = require('./routes/mockExams');
+app.use('/api/public/mock-exams', mockExams.publicRouter);
 app.use('/api/public', require('./routes/public'));
+app.use('/api/admin/mock-exams', mockExams.adminRouter);
 app.use('/api/admin/content', require('./routes/content'));  // trước /api/admin
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/teacher', require('./routes/teacher'));

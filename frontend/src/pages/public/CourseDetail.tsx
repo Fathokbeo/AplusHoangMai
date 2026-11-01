@@ -4,6 +4,7 @@ import PublicLayout from '../../components/PublicLayout';
 import api from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from '../../components/Toast';
+import { ScheduleLines } from '../../components/CourseFields';
 import { BookOpen, Users, GraduationCap, LogIn, Lock } from 'lucide-react';
 
 export default function CourseDetail() {
@@ -50,10 +51,17 @@ export default function CourseDetail() {
 
   return (
     <PublicLayout>
-      <div style={{ background: 'linear-gradient(135deg, #1A1A2E, #0F3460)', padding: '3rem 2rem', textAlign: 'center', color: 'white' }}>
-        <BookOpen size={40} style={{ marginBottom: 12 }} />
-        <h1 style={{ margin: 0, fontSize: '2rem', fontWeight: 800 }}>{course.title}</h1>
-        {course.description && <p style={{ margin: '8px 0 0', color: 'rgba(255,255,255,0.85)' }}>{course.description}</p>}
+      {/* Đầu trang: ảnh của khóa học làm nền (phủ lớp tối để chữ dễ đọc); chưa có ảnh thì dùng nền màu */}
+      <div style={{
+        position: 'relative', padding: '4rem 2rem 3rem', textAlign: 'center', color: 'white', overflow: 'hidden',
+        background: course.thumbnail
+          ? `linear-gradient(180deg, rgba(10,12,30,0.3) 0%, rgba(10,12,30,0.7) 100%), url(/uploads/courses/${encodeURIComponent(course.thumbnail)}) center / cover no-repeat`
+          : 'linear-gradient(135deg, #C62828 0%, #1565C0 100%)',
+      }}>
+        {!course.thumbnail && <BookOpen size={40} style={{ marginBottom: 12 }} />}
+        {course.category && <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.35)', borderRadius: 99, padding: '3px 12px', fontSize: '0.8rem', fontWeight: 700, marginBottom: 10 }}>{course.category}</div>}
+        <h1 style={{ margin: 0, fontSize: '2rem', fontWeight: 800, textShadow: '0 2px 12px rgba(0,0,0,0.35)' }}>{course.title}</h1>
+        {course.description && <p style={{ margin: '10px auto 0', color: 'rgba(255,255,255,0.9)', maxWidth: 720, lineHeight: 1.6 }}>{course.description}</p>}
       </div>
 
       <section style={{ maxWidth: 900, margin: '0 auto', padding: '2.5rem 2rem' }}>
@@ -76,7 +84,12 @@ export default function CourseDetail() {
             {classes.map((cls) => (
               <div key={cls.id} style={{ background: 'white', borderRadius: 14, boxShadow: '0 2px 12px rgba(0,0,0,0.07)', padding: '1.25rem 1.5rem' }}>
                 <h3 style={{ margin: '0 0 10px', fontSize: '1.05rem', fontWeight: 800, color: '#1A1A2E' }}>{cls.title}</h3>
-                <div style={{ display: 'flex', gap: 20, fontSize: '0.85rem', color: '#666', marginBottom: 14 }}>
+                {/* Lịch học của lớp */}
+                <div style={{ background: '#FFF8F0', border: '1px solid #FFE0B2', borderRadius: 10, padding: '0.65rem 0.85rem', marginBottom: 12 }}>
+                  <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#E65100', marginBottom: 4 }}>Lịch học</div>
+                  {cls.schedule ? <ScheduleLines schedule={cls.schedule} /> : <span style={{ fontSize: '0.85rem', color: '#999' }}>Chưa cập nhật — liên hệ trung tâm để biết lịch học.</span>}
+                </div>
+                <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: '0.85rem', color: '#666', marginBottom: 14 }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <GraduationCap size={15} color="#1565C0" /> GV phụ trách: <strong>{cls.teacher_name || 'Chưa cập nhật'}</strong>
                   </span>

@@ -8,9 +8,13 @@ import { useEffect, useRef, useState } from 'react';
 interface Props {
   url: string;
   zoom: number;
+  // Số trang xếp cạnh nhau trên một hàng (2 = hai trang đề song song, dùng cho đề toàn tự luận)
+  columns?: 1 | 2;
 }
 
-export default function PdfCanvasViewer({ url, zoom }: Props) {
+const GAP = 14;
+
+export default function PdfCanvasViewer({ url, zoom, columns = 1 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const docRef = useRef<any>(null);
   // Tác vụ vẽ (RenderTask) đang chạy của từng trang — phải hủy tác vụ CŨ trước khi vẽ lại cùng canvas
@@ -52,14 +56,15 @@ export default function PdfCanvasViewer({ url, zoom }: Props) {
       const page = await docRef.current.getPage(1);
       if (cancelled) return;
       const naturalWidth = page.getViewport({ scale: 1 }).width;
-      const available = Math.max(100, container.clientWidth - 32); // trừ padding 16px mỗi bên
+      // trừ padding 16px mỗi bên (+ khoảng cách giữa các trang khi xếp nhiều cột)
+      const available = Math.max(100, (container.clientWidth - 32 - GAP * (columns - 1)) / columns);
       setFitScale(available / naturalWidth);
     };
     recompute();
     const ro = new ResizeObserver(() => recompute());
     ro.observe(container);
     return () => { cancelled = true; ro.disconnect(); };
-  }, [status]);
+  }, [status, columns]);
 
   // Vẽ lại tất cả các trang khi có tài liệu, đổi mức "vừa khít" hoặc đổi zoom
   useEffect(() => {
@@ -111,8 +116,10 @@ export default function PdfCanvasViewer({ url, zoom }: Props) {
   }
 
   return (
-    <div ref={containerRef} style={{ width: '100%', height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: 16 }}>
-      {status === 'loading' && <div style={{ color: '#999', fontSize: '0.85rem', margin: 'auto' }}>Đang tải đề bài...</div>}
+    <div ref={containerRef} style={columns > 1
+      ? { width: '100%', height: '100%', overflow: 'auto', display: 'grid', gridTemplateColumns: `repeat(${columns}, max-content)`, justifyContent: 'center', alignContent: 'start', gap: GAP, padding: 16 }
+      : { width: '100%', height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: GAP, padding: 16 }}>
+      {status === 'loading' && <div style={{ color: '#999', fontSize: '0.85rem', margin: 'auto', gridColumn: '1 / -1' }}>Đang tải đề bài...</div>}
       {Array.from({ length: numPages }, (_, i) => i + 1).map((p) => (
         <canvas key={p} data-page={p} style={{ boxShadow: '0 2px 10px rgba(0,0,0,0.18)', background: 'white', flexShrink: 0 }} />
       ))}

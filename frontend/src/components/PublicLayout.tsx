@@ -5,10 +5,12 @@ import api from '../lib/api';
 import { PAGE_MAX } from '../lib/layout';
 import HolidayBanner from './HolidayBanner';
 import UserMenu from './UserMenu';
-import { Phone, MapPin, Clock, Mail, ExternalLink, LogIn } from 'lucide-react';
+import { SocialLinks } from './SocialIcons';
+import { Phone, MapPin, Clock, Mail, LogIn } from 'lucide-react';
 
 const NAV = [
   { to: '/', label: 'Trang chủ' },
+  { to: '/thi-thu', label: 'Thi thử' },
 ];
 
 export default function PublicLayout({ children }: { children: ReactNode }) {
@@ -55,7 +57,7 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
           {/* Desktop nav */}
           <div className="desktop-nav">
             {NAV.map((n) => {
-              const active = n.to === pathname;
+              const active = n.to === '/' ? pathname === '/' : pathname.startsWith(n.to);
               return (
                 <Link key={n.to} to={n.to} style={{
                   color: active ? '#C62828' : solid ? '#444' : 'rgba(255,255,255,0.85)',
@@ -78,6 +80,7 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
           </div>
 
           {/* Điện thoại: "Liên hệ" + Đăng nhập để ngoài (máy tính đã có ở thanh trên) */}
+          <Link to="/thi-thu" className="mobile-only" style={{ color: pathname.startsWith('/thi-thu') ? '#C62828' : solid ? '#444' : 'rgba(255,255,255,0.9)', textDecoration: 'none', fontWeight: 700, fontSize: '0.88rem', padding: '6px 6px', whiteSpace: 'nowrap' }}>Thi thử</Link>
           <a href="#contact" className="mobile-only" style={{ color: solid ? '#444' : 'rgba(255,255,255,0.9)', textDecoration: 'none', fontWeight: 600, fontSize: '0.88rem', padding: '6px 6px', whiteSpace: 'nowrap' }}>Liên hệ</a>
           {!user && (
             <Link to="/login" className="btn btn-primary btn-sm mobile-only" style={{ whiteSpace: 'nowrap' }}><LogIn size={14} /> Đăng nhập</Link>
@@ -118,11 +121,13 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
               </div>
             ))}
           </div>
-          {settings.contact_facebook && (
-            <a href={settings.contact_facebook} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm" style={{ marginTop: 16, gap: 6 }}>
-              <ExternalLink size={15} /> Fanpage Facebook
-            </a>
-          )}
+          {/* Mạng xã hội của trung tâm: logo từng app (chỉ hiện app có link) */}
+          <div style={{ marginTop: 16 }}>
+            <SocialLinks size={40} links={{
+              facebook: settings.contact_facebook, instagram: settings.contact_instagram,
+              tiktok: settings.contact_tiktok, threads: settings.contact_threads,
+            }} />
+          </div>
         </div>
       </section>
 

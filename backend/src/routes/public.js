@@ -12,7 +12,7 @@ router.get('/ads', (req, res) => {
 router.get('/courses', (req, res) => {
   const db = getDb();
   res.json(db.prepare(`
-    SELECT c.id, c.title, c.description, c.thumbnail,
+    SELECT c.id, c.title, c.description, c.thumbnail, c.category,
     (SELECT COUNT(DISTINCT cs.student_id) FROM class_students cs JOIN classes cl ON cs.class_id=cl.id
      WHERE cl.course_id=c.id AND cl.active=1) student_count
     FROM courses c WHERE c.active=1 ORDER BY c.created_at DESC
@@ -22,11 +22,11 @@ router.get('/courses', (req, res) => {
 // Chi tiết công khai 1 khóa học: thông tin giáo viên, sĩ số, tên các chương (không kèm bài giảng/bài tập bên trong)
 router.get('/courses/:id', (req, res) => {
   const db = getDb();
-  const course = db.prepare('SELECT id,title,description,thumbnail FROM courses WHERE id=? AND active=1').get(req.params.id);
+  const course = db.prepare('SELECT id,title,description,thumbnail,category FROM courses WHERE id=? AND active=1').get(req.params.id);
   if (!course) return res.status(404).json({ message: 'Không tìm thấy khóa học' });
 
   const classes = db.prepare(`
-    SELECT cl.id, cl.title, u.full_name teacher_name,
+    SELECT cl.id, cl.title, cl.schedule, u.full_name teacher_name,
     (SELECT COUNT(*) FROM class_students cs WHERE cs.class_id=cl.id) student_count
     FROM classes cl LEFT JOIN users u ON cl.teacher_id=u.id
     WHERE cl.course_id=? AND cl.active=1 ORDER BY cl.created_at DESC
@@ -64,6 +64,18 @@ router.get('/staff', (req, res) => {
 router.get('/featured-courses', (req, res) => {
   const db = getDb();
   res.json(db.prepare('SELECT * FROM featured_courses WHERE active=1 ORDER BY display_order, created_at DESC').all());
+});
+
+router.get('/activities', (req, res) => {
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM activities WHERE active=1 ORDER BY display_order, created_at DESC').all();
+  // images: mảng tên file; dữ liệu cũ chỉ có 1 cột image → đưa vào mảng
+  res.json(rows.map((a) => {
+    let images = [];
+    try { images = JSON.parse(a.images || '[]'); } catch { images = []; }
+    if (!images.length && a.image) images = [a.image];
+    return { ...a, images };
+  }));
 });
 
 router.get('/achievements', (req, res) => {

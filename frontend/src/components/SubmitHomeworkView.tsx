@@ -2,6 +2,7 @@
 // Máy tính: chia đôi màn hình — trái là đề (chỉ nội dung, tự phóng to/nhỏ bằng nút +/-, kéo được thanh
 // chia để đổi tỉ lệ 2 bên), phải là chỗ làm bài như cũ.
 // Điện thoại: toàn màn chỉ có chỗ làm bài; bấm "Xem đề" mới hiện đề ở trên (không kéo chia được).
+// essayPages (đề toàn tự luận, máy tính): đề hiện 2 trang song song ở trên, chỗ nộp bài ở dưới.
 import { useEffect, useRef, useState } from 'react';
 import { X, FileText, Upload, Plus, Minus, CheckCircle, Timer, Maximize2, Minimize2 } from 'lucide-react';
 import PartsSolver, { type StudentAnswers } from './PartsSolver';
@@ -37,12 +38,14 @@ interface Props {
   examDeadline: number | null;
   // Hạn NỘP BÀI của cả bài tập (due_date, chuỗi ISO từ server) — null = không có hạn nộp.
   dueDate: string | null;
+  // Đề toàn tự luận: hiện 2 trang đề song song phía trên, phần nộp bài phía dưới (chỉ máy tính)
+  essayPages?: boolean;
 }
 
 export default function SubmitHomeworkView({
   open, onClose, title, pdfUrl, submitObjective, submitEssay, cfg,
   studentAnswers, onAnswersChange, examType, hsaCfg, hsaAnswers, onHsaAnswersChange,
-  submitFiles, onAddFiles, onRemoveFile, loading, canDoSubmit, onSubmit, examDeadline, dueDate,
+  submitFiles, onAddFiles, onRemoveFile, loading, canDoSubmit, onSubmit, examDeadline, dueDate, essayPages = false,
 }: Props) {
   const isMobile = useIsMobile();
   const [showDe, setShowDe] = useState(false);
@@ -141,7 +144,7 @@ export default function SubmitHomeworkView({
 
   const dePanel = pdfUrl && (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <PdfCanvasViewer url={pdfUrl} zoom={zoom} />
+      <PdfCanvasViewer url={pdfUrl} zoom={zoom} columns={essayPages && !isMobile ? 2 : 1} />
       <div style={{
         position: 'absolute', bottom: 14, right: 14, display: 'flex', alignItems: 'center', gap: 2,
         background: 'rgba(32,32,40,0.72)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
@@ -273,6 +276,13 @@ export default function SubmitHomeworkView({
               {dePanel}
             </div>
           )}
+          <div style={{ flex: 1, minHeight: 0 }}>{answerPanel}</div>
+        </div>
+      ) : essayPages && pdfUrl ? (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ flex: '0 0 62%', minHeight: 0, background: '#2A2A35', borderBottom: '1px solid #E0E0E0' }}>
+            {dePanel}
+          </div>
           <div style={{ flex: 1, minHeight: 0 }}>{answerPanel}</div>
         </div>
       ) : (

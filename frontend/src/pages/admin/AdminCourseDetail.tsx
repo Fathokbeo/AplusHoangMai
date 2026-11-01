@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../../lib/api';
 import Modal from '../../components/Modal';
+import { ScheduleField, ScheduleLines } from '../../components/CourseFields';
 import { toast } from '../../components/Toast';
 import { ArrowLeft, School, Users, BookOpen, Plus, Edit, Trash2, ChevronRight } from 'lucide-react';
 
@@ -11,7 +12,7 @@ export default function AdminCourseDetail() {
   const [course, setCourse] = useState<any>(null);
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<any>(null);
-  const [form, setForm] = useState({ title: '', description: '' });
+  const [form, setForm] = useState({ title: '', description: '', schedule: '' });
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -30,13 +31,13 @@ export default function AdminCourseDetail() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ title: '', description: '' });
+    setForm({ title: '', description: '', schedule: '' });
     setModal(true);
   };
 
   const openEdit = (cls: any) => {
     setEditing(cls);
-    setForm({ title: cls.title, description: cls.description || '' });
+    setForm({ title: cls.title, description: cls.description || '', schedule: cls.schedule || '' });
     setModal(true);
   };
 
@@ -48,17 +49,19 @@ export default function AdminCourseDetail() {
         await api.put(`/teacher/classes/${editing.id}`, {
           title: form.title,
           description: form.description,
+          schedule: form.schedule,
         });
         toast.success('Đã cập nhật lớp học');
       } else {
         await api.post(`/admin/courses/${courseId}/classes`, {
           title: form.title,
           description: form.description,
+          schedule: form.schedule,
         });
         toast.success('Đã tạo lớp học');
       }
       setModal(false);
-      setForm({ title: '', description: '' });
+      setForm({ title: '', description: '', schedule: '' });
       fetchCourse();
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Lỗi');
@@ -132,6 +135,7 @@ export default function AdminCourseDetail() {
                 </div>
                 <div style={{ flex: 1 }}>
                   <h3 style={{ margin: '0 0 4px', fontSize: '0.93rem', fontWeight: 700, color: '#1A1A2E' }}>{cls.title}</h3>
+                  {cls.schedule && <div style={{ margin: '2px 0 6px' }}><ScheduleLines schedule={cls.schedule} compact /></div>}
                   {cls.teacher_name && <div style={{ fontSize: '0.78rem', color: '#888', marginBottom: 4 }}>GV: {cls.teacher_name}</div>}
                   <div style={{ display: 'flex', gap: 10, fontSize: '0.76rem', color: '#aaa' }}>
                     <span><Users size={11} style={{ verticalAlign: 'middle' }} /> {cls.student_count} học sinh</span>
@@ -180,6 +184,7 @@ export default function AdminCourseDetail() {
           <textarea className="input" placeholder="Mô tả..." value={form.description}
             onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} />
         </div>
+        <ScheduleField value={form.schedule} onChange={(v) => setForm({ ...form, schedule: v })} />
         <div style={{ fontSize: '0.78rem', color: '#888' }}>
           Lớp học sẽ do <strong>{course.creator_name}</strong> — giáo viên phụ trách khóa học này — quản lý.
         </div>

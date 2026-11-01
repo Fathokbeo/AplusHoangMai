@@ -6,108 +6,14 @@ const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { uploadHomework, uploadSubmission } = require('../middleware/upload');
 const { enqueue, gradeOne } = require('../services/gradingQueue');
-const { needsAiGrading, stripAnswers, stripHsaAnswers, parsePartsConfig, partEnabled, keyIsSet } = require('../services/homeworkParts');
-const { computeMaxScore, DEFAULT_POINTS } = require('../services/homeworkScoring');
+const { needsAiGrading, stripAnswers, stripHsaAnswers } = require('../services/homeworkParts');
+const { computeMaxScore } = require('../services/homeworkScoring');
 const { compareVietnameseName } = require('../services/vietnameseName');
-const { generateFeedbackRubric } = require('../services/aiGrading');
 const { redactSecrets } = require('../services/security');
+const { scheduleRubricGeneration, sanitizePartsConfig, sanitizeHsaConfig, sanitizeTimeLimit, originalName } = require('../services/homeworkForm');
 const { archiveBeforeResubmit, settleBest, parseBest, bestFilenames } = require('../services/bestAttempt');
 
 router.use(authMiddleware);
-
-// Đọc FILE ĐÁP ÁN đúng 1 LẦN (chạy nền, không chặn request) để soạn "quy chuẩn nhận xét" (1 câu mô tả
-// khái quát nội dung đề) — dùng khi chấm tự động sau này để ghép vào mẫu nhận xét theo thang điểm mà
-// KHÔNG cần gọi AI mỗi lần chấm (xem homeworkScoring.composeAutoFeedback + gradingQueue.js).
-// Chỉ chạy khi có file đáp án + ít nhất 1 phần khách quan đã có đáp án (key) sẵn (nếu không thì
-// composeAutoFeedback không có gì để chấm/nhận xét, tạo rubric lúc này sẽ phí lượt AI).
-function scheduleRubricGeneration(homeworkId, answerFilename, partsJson) {
-  const cfg = parsePartsConfig(partsJson);
-  if (!cfg || !answerFilename) return;
-  const hasObjectiveKey = ['multiple_choice', 'true_false', 'short_answer'].some(
-    (k) => partEnabled(cfg, k) && Array.isArray(cfg[k].answers) && cfg[k].answers.some((v) => keyIsSet(k, v))
-  );
-  if (!hasObjectiveKey) return;
-  const answerPath = path.join(__dirname, '../../uploads/homework', answerFilename);
-  generateFeedbackRubric(answerPath)
-    .then((rubric) => {
-      if (!rubric) return;
-      getDb().prepare('UPDATE homework SET feedback_rubric=? WHERE id=?').run(JSON.stringify(rubric), homeworkId);
-      console.log(`[homework] 📝 Đã tạo quy chuẩn nhận xét cho bài tập #${homeworkId}`);
-    })
-    .catch((err) => console.error(`[homework] Tạo quy chuẩn nhận xét lỗi (#${homeworkId}): ${err.message}`));
-}
-
-// Chuẩn hóa parts_config nhận từ form (chuỗi JSON) → chuỗi JSON để lưu, hoặc null.
-function sanitizePartsConfig(raw) {
-  if (raw === undefined || raw === null || raw === '') return null;
-  let obj = raw;
-  if (typeof raw === 'string') {
-    try { obj = JSON.parse(raw); } catch { return null; }
-  }
-  if (!obj || typeof obj !== 'object') return null;
-  const out = {};
-  ['multiple_choice', 'true_false', 'short_answer'].forEach((k) => {
-    const p = obj[k];
-    if (p && p.enabled) {
-      const count = Math.max(0, parseInt(p.count) || 0);
-      const answers = Array.isArray(p.answers) ? p.answers.slice(0, count) : [];
-      const def = DEFAULT_POINTS[k] ?? 0;
-      const points = [];
-      const rawPts = Array.isArray(p.points) ? p.points : [];
-      for (let i = 0; i < count; i++) points.push(typeof rawPts[i] === 'number' && rawPts[i] >= 0 ? rawPts[i] : def);
-      out[k] = { enabled: true, count, answers, points };
-      // Cách chia điểm phần Đúng/Sai khi đúng một phần ('thpt' theo bậc, 'even' chia đều mỗi ý)
-      if (k === 'true_false') out[k].tfMode = p.tfMode === 'even' ? 'even' : 'thpt';
-      // Ghi chú cách điền cho học sinh (chủ yếu phần Trả lời ngắn)
-      if (k === 'short_answer') {
-        const rawNotes = Array.isArray(p.notes) ? p.notes : [];
-        const notes = [];
-        for (let i = 0; i < count; i++) notes.push(String(rawNotes[i] == null ? '' : rawNotes[i]));
-        out[k].notes = notes;
-      }
-    }
-  });
-  if (obj.essay && obj.essay.enabled) {
-    const ep = Number(obj.essay.points);
-    out.essay = { enabled: true, points: isFinite(ep) && ep >= 0 ? ep : 3 };
-  }
-  return Object.keys(out).length ? JSON.stringify(out) : null;
-}
-
-// Chuẩn hóa hsa_config nhận từ form (chuỗi JSON) → chuỗi JSON để lưu, hoặc null.
-// Mỗi câu: { kind: 'multiple_choice'|'short_answer', answer, note? } — luôn 1 điểm/câu.
-function sanitizeHsaConfig(raw) {
-  if (raw === undefined || raw === null || raw === '') return null;
-  let obj = raw;
-  if (typeof raw === 'string') {
-    try { obj = JSON.parse(raw); } catch { return null; }
-  }
-  if (!obj || typeof obj !== 'object' || !Array.isArray(obj.questions)) return null;
-  const count = Math.max(0, Math.min(50, obj.questions.length));
-  const questions = [];
-  for (let i = 0; i < count; i++) {
-    const q = obj.questions[i] || {};
-    const kind = q.kind === 'short_answer' ? 'short_answer' : 'multiple_choice';
-    questions.push({
-      kind,
-      answer: typeof q.answer === 'string' ? q.answer : '',
-      note: kind === 'short_answer' ? String(q.note == null ? '' : q.note) : '',
-    });
-  }
-  return questions.length ? JSON.stringify({ questions }) : null;
-}
-
-// Thời gian làm bài tối đa (phút): số nguyên dương, để trống/0 = không giới hạn
-function sanitizeTimeLimit(raw) {
-  const n = parseInt(raw);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-// Tên gốc của file upload (multer đọc tên UTF-8 thành latin1 → đổi lại cho đúng tiếng Việt)
-function originalName(f) {
-  if (!f) return null;
-  try { return Buffer.from(f.originalname, 'latin1').toString('utf8'); } catch { return f.originalname; }
-}
 
 function rmHomeworkFile(name) {
   if (!name) return;
@@ -349,8 +255,9 @@ router.get('/homework/:id', (req, res) => {
 
   // Teacher/admin: all submissions
   const submissions = db.prepare(`
-    SELECT s.*,u.full_name,u.username FROM submissions s
-    JOIN users u ON s.student_id=u.id WHERE s.homework_id=? ORDER BY s.submitted_at DESC
+    SELECT s.*,u.full_name,u.username,sb.full_name submitted_by_name FROM submissions s
+    JOIN users u ON s.student_id=u.id LEFT JOIN users sb ON s.submitted_by=sb.id
+    WHERE s.homework_id=? ORDER BY s.submitted_at DESC
   `).all(req.params.id);
 
   // Danh sách CẢ LỚP kèm bài nộp (nếu có) → giáo viên thấy cả bạn chưa nộp.
@@ -359,9 +266,11 @@ router.get('/homework/:id', (req, res) => {
     SELECT u.id student_id, u.username, u.full_name, cs.sort_order,
            s.id submission_id, s.file_path, s.files, s.structured_answers, s.submitted_at,
            s.score, s.feedback, s.graded_at, s.graded_by_ai, s.grading_details, s.grading_status, s.submit_count, s.best_score,
+           s.submitted_by, sb.full_name submitted_by_name,
            m.quiz_score, m.attendance
     FROM class_students cs JOIN users u ON cs.student_id=u.id
     LEFT JOIN submissions s ON s.homework_id=? AND s.student_id=u.id
+    LEFT JOIN users sb ON s.submitted_by=sb.id
     LEFT JOIN homework_marks m ON m.homework_id=? AND m.student_id=u.id
     WHERE cs.class_id=? AND u.active=1
   `).all(req.params.id, req.params.id, hw.class_id);
@@ -407,6 +316,71 @@ router.post('/homework/:id/start', requireRole('student'), (req, res) => {
   res.json({ started_at: startedAt, time_limit_minutes: hw.time_limit_minutes || null });
 });
 
+// ── Nhận một bài nộp (dùng chung: học sinh tự nộp / giáo viên nộp hộ) ──────
+// enforceLimits=false (giáo viên nộp hộ): bỏ qua hạn nộp và giới hạn số lần nộp.
+// submittedBy: id giáo viên/admin nộp hộ (NULL = học sinh tự nộp).
+// Trả về { status, body } để route gửi về; tự xóa file đã tải lên nếu từ chối.
+function acceptSubmission(db, { hw, studentId, uploaded, structuredJson, enforceLimits, submittedBy = null }) {
+  const cleanup = () => uploaded.forEach(f => { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); });
+  const reject = (status, message) => { cleanup(); return { status, body: { message } }; };
+
+  if (uploaded.length > 20) return reject(400, 'Tối đa 20 file mỗi lần nộp');
+  if (uploaded.length === 0 && !structuredJson) return reject(400, 'Cần điền bài làm hoặc nộp ít nhất một file');
+
+  const now = new Date().toISOString();
+  if (enforceLimits && hw.due_date && now > hw.due_date) return reject(400, 'Đã quá hạn nộp bài');
+
+  const existing = db.prepare('SELECT * FROM submissions WHERE homework_id=? AND student_id=?').get(hw.id, studentId);
+
+  // Giới hạn số lần nộp bài (nếu giáo viên có đặt max_attempts) — mỗi lần nộp/nộp lại đều tính 1 lượt
+  const attemptsUsed = existing?.submit_count || 0;
+  if (enforceLimits && hw.max_attempts && attemptsUsed >= hw.max_attempts) {
+    return reject(400, `Đã hết số lần nộp bài cho phép (tối đa ${hw.max_attempts} lần)`);
+  }
+
+  const filenames = uploaded.map(f => f.filename);
+  const filesJson = filenames.length ? JSON.stringify(filenames) : null;
+
+  // Nộp lại: cất lần nộp có điểm cao nhất (kèm file) để so với lần mới sau khi chấm; file của lần
+  // không cần giữ thì xóa luôn.
+  const best = existing ? archiveBeforeResubmit(existing) : { bestJson: null, bestScore: null };
+
+  // Có đáp án (file tự luận hoặc key objective) → đưa vào hàng đợi chấm AI ('pending'); không có → giáo viên chấm tay (NULL)
+  const aiGrade = needsAiGrading(hw);
+  const initialStatus = aiGrade ? 'pending' : null;
+  const newSubmitCount = attemptsUsed + 1;
+
+  let submissionId;
+  if (existing) {
+    db.prepare('UPDATE submissions SET file_path=?,files=?,structured_answers=?,submitted_at=?,score=NULL,feedback=NULL,grading_details=NULL,graded_at=NULL,graded_by_ai=0,grading_status=?,grading_attempts=0,submit_count=?,best_attempt=?,best_score=?,submitted_by=? WHERE id=?')
+      .run(filenames[0] || null, filesJson, structuredJson, now, initialStatus, newSubmitCount, best.bestJson, best.bestScore, submittedBy, existing.id);
+    submissionId = existing.id;
+  } else {
+    const r = db.prepare('INSERT INTO submissions (homework_id,student_id,file_path,files,structured_answers,submitted_at,grading_status,grading_attempts,submit_count,submitted_by) VALUES (?,?,?,?,?,?,?,0,?,?)')
+      .run(hw.id, studentId, filenames[0] || null, filesJson, structuredJson, now, initialStatus, newSubmitCount, submittedBy);
+    submissionId = r.lastInsertRowid;
+  }
+
+  // Nhận bài NGAY, không chờ chấm. Việc chấm AI chạy nền (có thử lại nếu lỗi).
+  if (aiGrade) enqueue(submissionId);
+
+  const sub = db.prepare('SELECT * FROM submissions WHERE id=?').get(submissionId);
+  let message = aiGrade
+    ? 'Nộp bài thành công. Hệ thống đang tự động chấm, kết quả sẽ hiển thị sau ít phút.'
+    : 'Nộp bài thành công.';
+  if (enforceLimits && hw.max_attempts) message += ` (đã dùng ${newSubmitCount}/${hw.max_attempts} lần nộp)`;
+  return { status: 200, body: { message, submission: sub } };
+}
+
+// Đáp án có cấu trúc điền ở giao diện làm bài (trắc nghiệm / đúng-sai / trả lời ngắn) → chuỗi JSON hoặc null
+function parseStructured(raw) {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? JSON.stringify(parsed) : null;
+  } catch { return null; } // bỏ qua nếu không hợp lệ
+}
+
 // ── Submit homework (student) ──────────────────────────────────────────
 router.post(
   '/homework/:id/submit',
@@ -417,75 +391,45 @@ router.post(
     const uploaded = req.files || [];
     const cleanup = () => uploaded.forEach(f => { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); });
 
-    if (uploaded.length > 20) { cleanup(); return res.status(400).json({ message: 'Tối đa 20 file mỗi lần nộp' }); }
-
-    // Đáp án có cấu trúc học sinh điền ở giao diện làm bài (trắc nghiệm / đúng-sai / trả lời ngắn)
-    let structuredJson = null;
-    if (req.body.structured_answers) {
-      try {
-        const parsed = JSON.parse(req.body.structured_answers);
-        if (parsed && typeof parsed === 'object') structuredJson = JSON.stringify(parsed);
-      } catch { /* bỏ qua nếu không hợp lệ */ }
-    }
-
-    if (uploaded.length === 0 && !structuredJson) {
-      return res.status(400).json({ message: 'Cần điền bài làm hoặc nộp ít nhất một file' });
-    }
-
     const db = getDb();
     const hw = db.prepare('SELECT * FROM homework WHERE id=?').get(req.params.id);
     if (!hw) { cleanup(); return res.status(404).json({ message: 'Không tìm thấy bài tập' }); }
 
-    const now = new Date().toISOString();
-    if (hw.due_date && now > hw.due_date) {
-      cleanup();
-      return res.status(400).json({ message: 'Đã quá hạn nộp bài' });
-    }
-
     const enrolled = db.prepare('SELECT * FROM class_students WHERE class_id=? AND student_id=?').get(hw.class_id, req.user.id);
     if (!enrolled) { cleanup(); return res.status(403).json({ message: 'Bạn không thuộc lớp này' }); }
 
-    const existing = db.prepare('SELECT * FROM submissions WHERE homework_id=? AND student_id=?').get(req.params.id, req.user.id);
+    const r = acceptSubmission(db, {
+      hw, studentId: req.user.id, uploaded, structuredJson: parseStructured(req.body.structured_answers), enforceLimits: true,
+    });
+    res.status(r.status).json(r.body);
+  }
+);
 
-    // Giới hạn số lần nộp bài (nếu giáo viên có đặt max_attempts) — mỗi lần nộp/nộp lại đều tính 1 lượt
-    const attemptsUsed = existing?.submit_count || 0;
-    if (hw.max_attempts && attemptsUsed >= hw.max_attempts) {
-      cleanup();
-      return res.status(400).json({ message: `Đã hết số lần nộp bài cho phép (tối đa ${hw.max_attempts} lần)` });
-    }
+// ── Nộp hộ học sinh (teacher/admin) ────────────────────────────────────
+// Giáo viên chụp ảnh / chọn file bài làm của học sinh và nộp thay: không tính hạn nộp, không trừ lượt
+// theo giới hạn; được chấm AI như bài học sinh tự nộp. Ghi lại người nộp hộ (submitted_by).
+router.post(
+  '/homework/:id/submit-for/:studentId',
+  requireRole('teacher', 'admin'),
+  uploadSubmission.any(),
+  (req, res) => {
+    const uploaded = req.files || [];
+    const cleanup = () => uploaded.forEach(f => { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); });
 
-    const filenames = uploaded.map(f => f.filename);
-    const filesJson = filenames.length ? JSON.stringify(filenames) : null;
+    const db = getDb();
+    const hw = db.prepare('SELECT h.*, c.teacher_id FROM homework h JOIN classes c ON h.class_id=c.id WHERE h.id=?').get(req.params.id);
+    if (!hw) { cleanup(); return res.status(404).json({ message: 'Không tìm thấy bài tập' }); }
+    if (req.user.role === 'teacher' && hw.teacher_id !== req.user.id) { cleanup(); return res.status(403).json({ message: 'Forbidden' }); }
 
-    // Nộp lại: cất lần nộp có điểm cao nhất (kèm file) để so với lần mới sau khi chấm; file của lần
-    // không cần giữ thì xóa luôn.
-    const best = existing ? archiveBeforeResubmit(existing) : { bestJson: null, bestScore: null };
+    const studentId = Number(req.params.studentId);
+    const enrolled = db.prepare('SELECT 1 FROM class_students WHERE class_id=? AND student_id=?').get(hw.class_id, studentId);
+    if (!enrolled) { cleanup(); return res.status(400).json({ message: 'Học sinh không thuộc lớp này' }); }
 
-    // Có đáp án (file tự luận hoặc key objective) → đưa vào hàng đợi chấm AI ('pending'); không có → giáo viên chấm tay (NULL)
-    const aiGrade = needsAiGrading(hw);
-    const initialStatus = aiGrade ? 'pending' : null;
-    const newSubmitCount = attemptsUsed + 1;
-
-    let submissionId;
-    if (existing) {
-      db.prepare('UPDATE submissions SET file_path=?,files=?,structured_answers=?,submitted_at=?,score=NULL,feedback=NULL,grading_details=NULL,graded_at=NULL,graded_by_ai=0,grading_status=?,grading_attempts=0,submit_count=?,best_attempt=?,best_score=? WHERE id=?')
-        .run(filenames[0] || null, filesJson, structuredJson, now, initialStatus, newSubmitCount, best.bestJson, best.bestScore, existing.id);
-      submissionId = existing.id;
-    } else {
-      const r = db.prepare('INSERT INTO submissions (homework_id,student_id,file_path,files,structured_answers,submitted_at,grading_status,grading_attempts,submit_count) VALUES (?,?,?,?,?,?,?,0,?)')
-        .run(req.params.id, req.user.id, filenames[0] || null, filesJson, structuredJson, now, initialStatus, newSubmitCount);
-      submissionId = r.lastInsertRowid;
-    }
-
-    // Nhận bài NGAY, không chờ chấm. Việc chấm AI chạy nền (có thử lại nếu lỗi).
-    if (aiGrade) enqueue(submissionId);
-
-    const sub = db.prepare('SELECT * FROM submissions WHERE id=?').get(submissionId);
-    let message = aiGrade
-      ? 'Nộp bài thành công. Hệ thống đang tự động chấm, kết quả sẽ hiển thị sau ít phút.'
-      : 'Nộp bài thành công.';
-    if (hw.max_attempts) message += ` (đã dùng ${newSubmitCount}/${hw.max_attempts} lần nộp)`;
-    res.json({ message, submission: sub });
+    const r = acceptSubmission(db, {
+      hw, studentId, uploaded, structuredJson: parseStructured(req.body.structured_answers), enforceLimits: false, submittedBy: req.user.id,
+    });
+    if (r.status === 200) r.body.message = r.body.message.replace('Nộp bài thành công', 'Đã nộp hộ học sinh');
+    res.status(r.status).json(r.body);
   }
 );
 

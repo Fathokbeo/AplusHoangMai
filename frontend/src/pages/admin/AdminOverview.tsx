@@ -2,11 +2,24 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
-import { Users, BookOpen, School, GraduationCap, ClipboardList, FileCheck, TrendingUp, ChevronRight } from 'lucide-react';
+import { Users, BookOpen, School, GraduationCap, ClipboardList, FileCheck, ChevronRight, ClipboardCheck, Sparkles, Image, UserCog, LayoutTemplate, Phone, Trophy } from 'lucide-react';
 import TeachingOverview from '../../components/TeachingOverview';
 import { greeting, todayLabel, SectionHeader, EmptyState } from '../../components/overviewUi';
 
 // Trang "Tổng quan" của admin: số liệu toàn trung tâm, thao tác nhanh, danh sách lớp và khóa học.
+const QUICK_ACTIONS = [
+  { to: '/admin/users', label: 'Quản lý tài khoản', icon: Users, color: '#C62828', bg: '#FFEBEE' },
+  { to: '/admin/courses', label: 'Khóa học', icon: BookOpen, color: '#2E7D32', bg: '#E8F5E9' },
+  { to: '/admin/classes', label: 'Lớp học', icon: School, color: '#E65100', bg: '#FFF3E0' },
+  { to: '/admin/mock-exams', label: 'Thi thử (đề & bài làm)', icon: ClipboardCheck, color: '#1565C0', bg: '#E3F2FD' },
+  { to: '/admin/content?tab=activities', label: 'Các hoạt động', icon: Sparkles, color: '#6A1B9A', bg: '#F3E5F5' },
+  { to: '/admin/content?tab=featured-students', label: 'Học sinh tiêu biểu', icon: Trophy, color: '#C62828', bg: '#FFEBEE' },
+  { to: '/admin/content?tab=staff', label: 'Giáo viên & Trợ giảng', icon: UserCog, color: '#1565C0', bg: '#E3F2FD' },
+  { to: '/admin/content?tab=ads', label: 'Quảng cáo (banner)', icon: Image, color: '#00695C', bg: '#E0F2F1' },
+  { to: '/admin/content?tab=settings', label: 'Liên hệ & mạng xã hội', icon: Phone, color: '#2E7D32', bg: '#E8F5E9' },
+  { to: '/admin/content', label: 'Nội dung trang chủ', icon: LayoutTemplate, color: '#555', bg: '#F0F0F0' },
+];
+
 export default function AdminOverview() {
   const { user } = useAuth();
   const [stats, setStats] = useState<any>(null);
@@ -35,16 +48,17 @@ export default function AdminOverview() {
   const quickActions = (
     <section>
       <SectionHeader title="Thao tác nhanh" />
-      <div className="card" style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-        <Link to="/admin/users" className="btn btn-primary">
-          <Users size={16} /> Quản lý tài khoản
-        </Link>
-        <Link to="/admin/courses" className="btn btn-secondary">
-          <BookOpen size={16} /> Quản lý khóa học
-        </Link>
-        <Link to="/admin/ads" className="btn btn-success">
-          <TrendingUp size={16} /> Quản lý quảng cáo
-        </Link>
+      {/* Lối tắt tới mọi chức năng quản lý */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 10 }}>
+        {QUICK_ACTIONS.map(({ to, label, icon: Icon, color, bg }) => (
+          <Link key={to} to={to} className="card" style={{ padding: '0.8rem 0.9rem', display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
+            <span style={{ width: 36, height: 36, borderRadius: 10, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Icon size={18} color={color} />
+            </span>
+            <span style={{ fontWeight: 600, fontSize: '0.88rem', color: '#1A1A2E', flex: 1, minWidth: 0 }}>{label}</span>
+            <ChevronRight size={15} color="#CCC" />
+          </Link>
+        ))}
       </div>
     </section>
   );

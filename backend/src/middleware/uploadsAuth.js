@@ -2,10 +2,10 @@ const { getDb } = require('../db/database');
 const { userFromRequest } = require('../services/security');
 
 // Ảnh của trang giới thiệu công khai (trang chủ, khóa tiêu biểu, giáo viên...) — khách vãng lai xem được.
-const PUBLIC_DIRS = new Set(['ads', 'courses', 'featured_students', 'staff', 'featured_courses', 'achievements']);
+const PUBLIC_DIRS = new Set(['ads', 'courses', 'featured_students', 'staff', 'featured_courses', 'achievements', 'activities']);
 
 // Thư mục cần đăng nhập + đúng quyền: đề bài, đáp án, bài nộp, video và tài liệu bài giảng, ảnh trợ giảng.
-const PROTECTED_DIRS = new Set(['homework', 'submissions', 'videos', 'lessons', 'assistants']);
+const PROTECTED_DIRS = new Set(['homework', 'submissions', 'videos', 'lessons', 'assistants', 'mock', 'mock_submissions']);
 
 // Chặn ký tự đại diện của LIKE để tên file do người dùng gửi lên không khớp nhầm sang bản ghi khác.
 const likeSafe = (s) => s.replace(/[\\%_]/g, (m) => '\\' + m);
@@ -21,6 +21,10 @@ function checkFileAccess(db, user, dir, file) {
   const verdict = (allowed) => (allowed ? 'ok' : 'forbidden');
 
   if (dir === 'assistants') return 'ok'; // ảnh trợ giảng: mọi tài khoản đã đăng nhập đều xem được
+
+  // Thi thử: file đề / đáp án / bài làm của khách chỉ admin xem qua link file.
+  // (Khách làm bài xem đề qua API riêng /api/public/mock-exams/:id/pdf — không bao giờ lộ file đáp án.)
+  if (dir === 'mock' || dir === 'mock_submissions') return verdict(user.role === 'admin');
 
   if (dir === 'homework') {
     const hw = db.prepare('SELECT class_id,answer_file,answer_visible_date FROM homework WHERE pdf_file=? OR answer_file=?').get(file, file);

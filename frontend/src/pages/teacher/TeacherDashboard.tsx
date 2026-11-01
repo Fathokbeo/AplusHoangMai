@@ -4,6 +4,7 @@ import api from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { BookOpen, Users, School, Plus, Edit, Trash2, ChevronRight } from 'lucide-react';
 import Modal from '../../components/Modal';
+import { CategoryField } from '../../components/CourseFields';
 import { toast } from '../../components/Toast';
 
 export default function TeacherDashboard() {
@@ -11,7 +12,7 @@ export default function TeacherDashboard() {
   const [courses, setCourses] = useState<any[]>([]);
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<any>(null);
-  const [form, setForm] = useState({ title: '', description: '' });
+  const [form, setForm] = useState({ title: '', description: '', category: '' });
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState('');
   const [loading, setLoading] = useState(false);
@@ -23,7 +24,7 @@ export default function TeacherDashboard() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ title: '', description: '' });
+    setForm({ title: '', description: '', category: '' });
     setFile(null);
     setPreview('');
     setModal(true);
@@ -33,7 +34,7 @@ export default function TeacherDashboard() {
     e.preventDefault();
     e.stopPropagation();
     setEditing(c);
-    setForm({ title: c.title, description: c.description || '' });
+    setForm({ title: c.title, description: c.description || '', category: c.category || '' });
     setFile(null);
     setPreview(c.thumbnail ? `/uploads/courses/${c.thumbnail}` : '');
     setModal(true);
@@ -45,11 +46,11 @@ export default function TeacherDashboard() {
     try {
       let courseId: number;
       if (editing) {
-        await api.put(`/teacher/courses/${editing.id}`, { title: form.title, description: form.description });
+        await api.put(`/teacher/courses/${editing.id}`, { title: form.title, description: form.description, category: form.category });
         courseId = editing.id;
         toast.success('Đã cập nhật');
       } else {
-        const { data } = await api.post('/teacher/courses', { title: form.title, description: form.description });
+        const { data } = await api.post('/teacher/courses', { title: form.title, description: form.description, category: form.category });
         courseId = data.id;
         toast.success('Đã tạo khóa học');
       }
@@ -110,6 +111,7 @@ export default function TeacherDashboard() {
                 </div>
               )}
               <div style={{ padding: '1rem' }}>
+                {c.category && <span className="badge badge-green" style={{ marginBottom: 6 }}>{c.category}</span>}
                 <h3 style={{ margin: '0 0 6px', fontSize: '0.95rem', fontWeight: 700, color: '#1A1A2E' }}>{c.title}</h3>
                 {c.description && <p style={{ margin: '0 0 10px', fontSize: '0.82rem', color: '#888', lineHeight: 1.4 }}>{c.description}</p>}
                 <div style={{ display: 'flex', gap: 12, fontSize: '0.78rem', color: '#999', borderTop: '1px solid #F5F5F5', paddingTop: 10, marginTop: 10, marginBottom: 10 }}>
@@ -158,6 +160,7 @@ export default function TeacherDashboard() {
           <textarea className="input" placeholder="Mô tả khóa học..." value={form.description}
             onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} />
         </div>
+        <CategoryField value={form.category} onChange={(v) => setForm({ ...form, category: v })} existing={courses.map((c: any) => c.category)} />
         <div className="form-group">
           <label className="label">Ảnh đại diện</label>
           <div className="dropzone" onClick={() => fileRef.current?.click()}>

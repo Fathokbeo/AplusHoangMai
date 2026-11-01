@@ -7,14 +7,15 @@ import Layout from './components/Layout';
 import Login from './pages/Login';
 import Home from './pages/Home';
 import CourseDetail from './pages/public/CourseDetail';
+import MockExamTake, { MockExamList } from './pages/public/MockExam';
 
 import AdminOverview from './pages/admin/AdminOverview';
 import UserManagement from './pages/admin/UserManagement';
-import AdManagement from './pages/admin/AdManagement';
 import CourseManagement from './pages/admin/CourseManagement';
 import AdminCourseDetail from './pages/admin/AdminCourseDetail';
 import ClassManagement from './pages/admin/ClassManagement';
 import SiteContent from './pages/admin/SiteContent';
+import MockExamManagement from './pages/admin/MockExamManagement';
 
 import TeacherDashboard from './pages/teacher/TeacherDashboard';
 import TeacherOverview from './pages/teacher/TeacherOverview';
@@ -56,6 +57,9 @@ function AppRoutes() {
       <Route path="/khoa-hoc" element={<Navigate to="/#khoa-hoc" replace />} />
       <Route path="/kinh-nghiem" element={<Navigate to="/#kinh-nghiem" replace />} />
       <Route path="/courses/:id" element={<CourseDetail />} />
+      {/* Thi thử cho khách vãng lai (không cần đăng nhập) */}
+      <Route path="/thi-thu" element={<MockExamList />} />
+      <Route path="/thi-thu/:id" element={<MockExamTake />} />
       <Route path="/login" element={user ? <Navigate to={`/${user.role}/overview`} replace /> : <Login />} />
 
       {/* Admin */}
@@ -66,8 +70,10 @@ function AppRoutes() {
         <Route path="courses" element={<CourseManagement />} />
         <Route path="courses/:courseId" element={<AdminCourseDetail />} />
         <Route path="classes" element={<ClassManagement />} />
+        <Route path="mock-exams" element={<MockExamManagement />} />
         <Route path="content" element={<SiteContent />} />
-        <Route path="ads" element={<AdManagement />} />
+        {/* Quảng cáo đã gộp vào Nội dung trang */}
+        <Route path="ads" element={<Navigate to="/admin/content?tab=ads" replace />} />
       </Route>
 
       {/* Teacher (admin cũng vào được) */}
