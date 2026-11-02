@@ -53,6 +53,14 @@ function TestInput({ value, onSave }: { value: number | null; onSave: (v: number
 // (forPdf=true: table-layout cố định, các cột điểm chia đều phần bề ngang còn lại → vừa khít trang A4 ngang)
 function ScoreTable({ data, forPdf, onSaveTest }: { data: any; forPdf: boolean; onSaveTest?: (sid: number, v: number | null) => Promise<void> }) {
   const sessions: any[] = data.sessions;
+  // Bản PDF: xếp học sinh theo hạng (hạng 1 trên cùng; chưa có hạng xuống cuối, giữ thứ tự lớp) và bỏ cột Hạng.
+  // Màn hình: giữ đúng thứ tự sẵn có của lớp, có cột Hạng.
+  const students: any[] = forPdf
+    ? data.students.map((st: any, i: number) => ({ st, i }))
+      .sort((a: any, b: any) => (a.st.rank ?? Infinity) - (b.st.rank ?? Infinity) || a.i - b.i)
+      .map((x: any) => x.st)
+    : data.students;
+  const showRank = !forPdf;
   const fs = forPdf ? (sessions.length > 10 ? 11 : 12.5) : 14;
   const th = { padding: forPdf ? '6px 3px' : '8px 6px', fontSize: fs * 0.82, fontWeight: 700, color: '#666', background: '#FAFAFA', borderBottom: '1px solid #EEE', borderLeft: '1px solid #F0F0F0', textAlign: 'center' as const, whiteSpace: 'nowrap' as const, textTransform: 'none' as const, letterSpacing: 0 };
   const td = { padding: forPdf ? '6px 3px' : '7px 6px', fontSize: fs, borderTop: '1px solid #F2F2F2', borderLeft: '1px solid #F5F5F5', textAlign: 'center' as const, whiteSpace: 'nowrap' as const };
@@ -66,7 +74,7 @@ function ScoreTable({ data, forPdf, onSaveTest }: { data: any; forPdf: boolean; 
         <colgroup>
           <col style={{ width: 32 }} /><col style={{ width: NAME_W }} />
           {sessions.map((s) => <Fragment key={s.id}><col /><col /></Fragment>)}
-          <col style={{ width: 74 }} /><col style={{ width: 58 }} /><col style={{ width: 52 }} />
+          <col style={{ width: 74 }} /><col style={{ width: 58 }} />
         </colgroup>
       )}
       <thead>
@@ -80,7 +88,7 @@ function ScoreTable({ data, forPdf, onSaveTest }: { data: any; forPdf: boolean; 
           ))}
           <th rowSpan={2} style={{ ...th, color: '#6A1B9A', whiteSpace: 'normal', minWidth: forPdf ? undefined : 82 }}>KT cuối tháng<div style={{ fontWeight: 500, fontSize: fs * 0.72 }}>hệ số 2</div></th>
           <th rowSpan={2} style={{ ...th, color: '#C62828', minWidth: forPdf ? undefined : 58 }}>ĐTB</th>
-          <th rowSpan={2} style={{ ...th, minWidth: forPdf ? undefined : 52 }}>Hạng</th>
+          {showRank && <th rowSpan={2} style={{ ...th, minWidth: 52 }}>Hạng</th>}
         </tr>
         <tr>
           {sessions.map((s) => (
@@ -92,7 +100,7 @@ function ScoreTable({ data, forPdf, onSaveTest }: { data: any; forPdf: boolean; 
         </tr>
       </thead>
       <tbody>
-        {data.students.map((st: any, i: number) => {
+        {students.map((st: any, i: number) => {
           const bg = i % 2 ? '#FCFCFC' : '#FFFFFF';
           const t = tone(st.avg);
           return (
@@ -113,12 +121,12 @@ function ScoreTable({ data, forPdf, onSaveTest }: { data: any; forPdf: boolean; 
               <td style={{ ...td }}>
                 <span style={{ fontWeight: 800, color: t.c, background: t.b, borderRadius: 99, padding: '2px 9px' }}>{fmt(st.avg)}</span>
               </td>
-              <td style={{ ...td, fontWeight: 800 }}>{st.rank ? (st.rank <= 3 ? `${MEDAL[st.rank - 1]} ${st.rank}` : st.rank) : '—'}</td>
+              {showRank && <td style={{ ...td, fontWeight: 800 }}>{st.rank ? (st.rank <= 3 ? `${MEDAL[st.rank - 1]} ${st.rank}` : st.rank) : '—'}</td>}
             </tr>
           );
         })}
         {data.students.length === 0 && (
-          <tr><td colSpan={5 + sessions.length * 2} style={{ ...td, padding: '1.5rem', color: '#999' }}>Lớp chưa có học sinh</td></tr>
+          <tr><td colSpan={(showRank ? 5 : 4) + sessions.length * 2} style={{ ...td, padding: '1.5rem', color: '#999' }}>Lớp chưa có học sinh</td></tr>
         )}
       </tbody>
     </table>
