@@ -42,8 +42,13 @@ html[data-holiday] .topbar::after {
   content: ''; position: absolute; left: 0; right: 0; bottom: -16px; height: 22px;
   background: var(--hd-garland) repeat-x left top; pointer-events: none;
 }
-@media (max-width: 640px) {
-  html[data-holiday] .topbar::before { width: 150px; height: 40px; top: 9px; }
+/* Điện thoại: bên trái thanh là logo + tên trung tâm → dời sticker sang khoảng trống cạnh nút tài khoản, nhỏ lại;
+   màn rất hẹp thì ẩn để không đè chữ */
+@media (max-width: 768px) {
+  html[data-holiday] .topbar::before { left: auto; right: 84px; transform: none; width: 92px; height: 30px; top: 15px; }
+}
+@media (max-width: 380px) {
+  html[data-holiday] .topbar::before { display: none; }
 }
 html[data-holiday-topbar-dark] .topbar { box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35); }
 html[data-holiday-topbar-dark] .topbar .btn-ghost { color: #E8EAF6; border-color: rgba(255, 255, 255, 0.28); background: rgba(255, 255, 255, 0.06); }

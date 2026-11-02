@@ -7,7 +7,7 @@ const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { uploadVideo, uploadCourseThumbnail, uploadLessonFile, uploadAssistantPhoto } = require('../middleware/upload');
 const { hardDeleteCourse, hardDeleteClass, hardDeleteStudent } = require('../services/cascade');
-const { classRankingReport, classAverages } = require('../services/classRanking');
+const { classRankingReport, classAverages, classMonthlySummary, classMonths } = require('../services/classRanking');
 const { compareVietnameseName } = require('../services/vietnameseName');
 
 router.use(authMiddleware, requireRole('teacher', 'admin'));
@@ -300,6 +300,50 @@ router.get('/classes/:id/ranking', (req, res) => {
   if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
 
   res.json(classRankingReport(db, req.params.id, req.query.month));
+});
+
+// ── Tổng kết tháng của lớp ─────────────────────────────────────────────
+// ?month=YYYY-MM (mặc định tháng hiện tại): các buổi (BTVN tạo trong tháng), điểm BTVN + 10 phút từng buổi,
+// điểm kiểm tra cuối tháng (hệ số 2), điểm TB và hạng — cùng số liệu với bảng xếp hạng tháng.
+router.get('/classes/:id/monthly-summary', (req, res) => {
+  const db = getDb();
+  const cls = db.prepare('SELECT * FROM classes WHERE id=? AND active=1').get(req.params.id);
+  if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp' });
+  if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  const sum = classMonthlySummary(db, cls.id, req.query.month);
+  // Thứ tự học sinh giống danh sách lớp (kéo thả hoặc theo tên)
+  sum.students.sort((a, b) => (cls.custom_student_order ? (a.sort_order - b.sort_order) : 0) || compareVietnameseName(a.full_name, b.full_name));
+  sum.students.forEach((s) => { delete s.sort_order; });
+  const months = classMonths(db, cls.id);
+  if (!months.includes(sum.current_month)) { months.push(sum.current_month); months.sort(); months.reverse(); }
+  const course = cls.course_id ? db.prepare('SELECT title FROM courses WHERE id=?').get(cls.course_id) : null;
+  res.json({ ...sum, months, class_title: cls.title, course_title: course?.title || null });
+});
+
+// Lưu điểm kiểm tra cuối tháng. Body: { month: 'YYYY-MM', scores: [{ student_id, score: 0–10 | null }] }
+router.put('/classes/:id/month-tests', (req, res) => {
+  const db = getDb();
+  const cls = db.prepare('SELECT * FROM classes WHERE id=? AND active=1').get(req.params.id);
+  if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp' });
+  if (req.user.role === 'teacher' && cls.teacher_id !== req.user.id) return res.status(403).json({ message: 'Forbidden' });
+  const ym = String(req.body?.month || '');
+  if (!/^\d{4}-\d{2}$/.test(ym)) return res.status(400).json({ message: 'Tháng không hợp lệ' });
+  const scores = Array.isArray(req.body?.scores) ? req.body.scores : [];
+  if (!scores.length) return res.status(400).json({ message: 'Không có dữ liệu' });
+  const inClass = db.prepare('SELECT 1 FROM class_students WHERE class_id=? AND student_id=?');
+  const rows = [];
+  for (const it of scores) {
+    const sid = Number(it?.student_id);
+    if (!inClass.get(cls.id, sid)) return res.status(400).json({ message: 'Học sinh không thuộc lớp' });
+    const v = it.score === null || it.score === '' || it.score === undefined ? null : Number(String(it.score).replace(',', '.'));
+    if (v !== null && !(Number.isFinite(v) && v >= 0 && v <= 10)) return res.status(400).json({ message: 'Điểm kiểm tra phải từ 0 đến 10' });
+    rows.push([sid, v]);
+  }
+  const now = new Date().toISOString();
+  const up = db.prepare(`INSERT INTO class_month_tests (class_id,student_id,ym,score,updated_at,updated_by) VALUES (?,?,?,?,?,?)
+    ON CONFLICT(class_id,student_id,ym) DO UPDATE SET score=excluded.score, updated_at=excluded.updated_at, updated_by=excluded.updated_by`);
+  db.transaction(() => rows.forEach(([sid, v]) => up.run(cls.id, sid, ym, v, now, req.user.id)))();
+  res.json({ message: 'Đã lưu điểm kiểm tra' });
 });
 
 router.put('/classes/:id', (req, res) => {

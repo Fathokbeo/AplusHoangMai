@@ -6,6 +6,7 @@ import Modal from '../../components/Modal';
 import VideoPlayer from '../../components/VideoPlayer';
 import FileViewer from '../../components/FileViewer';
 import RankingBoard from '../../components/RankingBoard';
+import MonthlySummary from '../../components/MonthlySummary';
 import PartsEditor from '../../components/PartsEditor';
 import HsaEditor from '../../components/HsaEditor';
 import useIsMobile from '../../lib/useIsMobile';
@@ -19,7 +20,7 @@ import FacebookIcon from '../../components/FacebookIcon';
 import {
   Users, BookOpen, ClipboardList, Edit, Trash2,
   UserPlus, UserMinus, Play, File, ChevronLeft, Upload, Clock, Eye, EyeOff, Layers, Video, Search,
-  ChevronDown, ChevronRight, Trophy, FileSpreadsheet, Download, Paperclip, FileText, X, Plus, GripVertical,
+  ChevronDown, ChevronRight, Trophy, CalendarRange, FileSpreadsheet, Download, Paperclip, FileText, X, Plus, GripVertical,
   UserCog, Phone, Camera, Calendar, Repeat
 } from 'lucide-react';
 
@@ -61,7 +62,7 @@ export default function ClassDetail() {
   const { id } = useParams();
   const [cls, setCls] = useState<any>(null);
   const [allStudents, setAllStudents] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'students' | 'content' | 'assistants' | 'ranking'>('content');
+  const [activeTab, setActiveTab] = useState<'students' | 'content' | 'assistants' | 'ranking' | 'summary'>('content');
   const [lessonModal, setLessonModal] = useState(false);
   const [editingLesson, setEditingLesson] = useState<any>(null);
   const [hwModal, setHwModal] = useState(false);
@@ -806,6 +807,7 @@ export default function ClassDetail() {
     { key: 'content', label: `Nội dung (${chapters.length} chương)`, icon: Layers },
     { key: 'assistants', label: `Trợ giảng (${cls.assistants?.length || 0})`, icon: UserCog },
     { key: 'ranking', label: 'Xếp hạng', icon: Trophy },
+    { key: 'summary', label: 'Tổng kết tháng', icon: CalendarRange },
   ];
 
   const scheduleAssistant = (cls.assistants || []).find((a: any) => a.id === scheduleAssistantId) || null;
@@ -1043,6 +1045,7 @@ export default function ClassDetail() {
 
       {/* Ranking tab: xếp hạng theo tháng, top 3 gắn huy chương vàng/bạc/đồng */}
       {activeTab === 'ranking' && <RankingBoard url={`/teacher/classes/${id}/ranking`} />}
+      {activeTab === 'summary' && <MonthlySummary classId={id!} />}
 
       {/* Add Student Modal */}
       <Modal open={addStudentModal} onClose={() => setAddStudentModal(false)} title="Thêm học sinh vào lớp"

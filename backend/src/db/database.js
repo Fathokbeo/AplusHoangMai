@@ -485,6 +485,18 @@ function initSchema() {
   // Khóa học: danh mục do người tạo đặt (THCS, THPT, HSA, TSA…); lớp học: lịch học hiển thị ở trang khóa học
   addCol('courses', 'category', 'TEXT');
   addCol('classes', 'schedule', 'TEXT');
+  // Điểm kiểm tra cuối tháng (hệ số 2 trong Tổng kết tháng) — mỗi học sinh 1 điểm / lớp / tháng
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS class_month_tests (
+      class_id INTEGER NOT NULL,
+      student_id INTEGER NOT NULL,
+      ym TEXT NOT NULL,
+      score REAL,
+      updated_at DATETIME,
+      updated_by INTEGER,
+      PRIMARY KEY (class_id, student_id, ym)
+    );
+  `);
 
   // Gộp "Kinh nghiệm & Thành tích" vào "Các hoạt động" (chạy 1 lần): chép từng mục sang bảng activities,
   // ảnh được CHÉP (không di chuyển) sang uploads/activities. Bảng achievements giữ nguyên làm bản lưu.
