@@ -3,10 +3,11 @@
 // Mỗi BÀI TẬP (BTVN) là 1 buổi học, thuộc tháng theo NGÀY TẠO bài. Điểm TB tháng của 1 học sinh (thang 10):
 //   - Điểm BTVN mỗi buổi (quy về thang 10): quá hạn mà chưa có điểm → 0; chưa tới hạn & chưa có điểm → bỏ qua.
 //   - Điểm 10 phút mỗi buổi (giáo viên nhập ở mục Nhận xét): không có → BỎ QUA (không tính 0).
-//   - Điểm kiểm tra cuối tháng: HỆ SỐ 2; thiếu điểm → 0 — chỉ áp dụng khi tháng đã kết thúc hoặc lớp đã có
-//     ít nhất 1 điểm kiểm tra của tháng đó (giữa tháng chưa kiểm tra thì chưa kéo điểm cả lớp xuống).
+//   - Điểm kiểm tra cuối tháng: HỆ SỐ 2.
 //   TB = (tổng BTVN + tổng 10p + 2 × KT) / (số điểm BTVN + số điểm 10p + 2)
-// Bảng xếp hạng tháng (giáo viên, học sinh, Bảng vàng trang chủ) đều dùng điểm TB này.
+// Hai bản điểm TB:
+//   - avg (TẠM, hiện trên web + mọi bảng xếp hạng): học sinh CHƯA có điểm KT thì tạm chưa tính phần KT.
+//   - avg_final (CHÍNH THỨC, dùng khi xuất file PDF tổng kết tháng): luôn tính KT, thiếu điểm KT = 0.
 
 const round1 = (n) => Math.round(n * 10) / 10;
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -70,8 +71,6 @@ function classMonthlySummary(db, classId, month, nowIso) {
   const testOf = new Map();
   db.prepare('SELECT student_id,score FROM class_month_tests WHERE class_id=? AND ym=? AND score IS NOT NULL').all(classId, ym)
     .forEach((r) => testOf.set(r.student_id, r.score));
-  // Điểm kiểm tra thiếu → 0 khi tháng đã qua, hoặc lớp đã có điểm kiểm tra tháng này
-  const testCounted = ym < currentYm || testOf.size > 0;
 
   const rows = students.map((st) => {
     let sum = 0, n = 0, graded = 0;
@@ -88,21 +87,30 @@ function classMonthlySummary(db, classId, month, nowIso) {
       return { btvn, missing, quiz };
     });
     const test = testOf.has(st.id) ? Number(testOf.get(st.id)) : null;
-    if (testCounted) { sum += 2 * (test ?? 0); n += 2; }
+    // Tạm: có điểm KT mới tính; chính thức: luôn tính KT (thiếu = 0)
+    const live = test !== null ? { sum: sum + 2 * test, n: n + 2 } : { sum, n };
+    const fin = { sum: sum + 2 * (test ?? 0), n: n + 2 };
     return {
       id: st.id, username: st.username, full_name: st.full_name, sort_order: st.sort_order,
-      cells, test, avg: n > 0 ? round1(sum / n) : null, counted: n, graded,
+      cells, test, avg: live.n > 0 ? round1(live.sum / live.n) : null, counted: live.n, graded,
+      avg_final: round1(fin.sum / fin.n),
     };
   });
 
-  // Hạng theo điểm TB giảm dần, đồng điểm → đồng hạng (1, 2, 2, 4); chưa có điểm TB → không xếp hạng
-  const ranked = rows.filter((r) => r.avg !== null).sort((x, y) => y.avg - x.avg);
-  let lastAvg = null, lastRank = 0;
-  ranked.forEach((r, i) => { if (lastAvg === null || r.avg < lastAvg) { lastRank = i + 1; lastAvg = r.avg; } r.rank = lastRank; });
-  rows.forEach((r) => { if (r.rank === undefined) r.rank = null; });
+  // Hạng theo điểm TB giảm dần, đồng điểm → đồng hạng (1, 2, 2, 4); chưa có điểm TB → không xếp hạng.
+  // rank theo ĐTB tạm (web); rank_final theo ĐTB chính thức (file PDF).
+  const assignRank = (key, rankKey) => {
+    const ranked = rows.filter((r) => r[key] !== null).sort((x, y) => y[key] - x[key]);
+    let lastAvg = null, lastRank = 0;
+    ranked.forEach((r, i) => { if (lastAvg === null || r[key] < lastAvg) { lastRank = i + 1; lastAvg = r[key]; } r[rankKey] = lastRank; });
+    rows.forEach((r) => { if (r[rankKey] === undefined) r[rankKey] = null; });
+    return ranked.length;
+  };
+  const rankedTotal = assignRank('avg', 'rank');
+  assignRank('avg_final', 'rank_final');
 
   return {
-    month: ym, current_month: currentYm, test_counted: testCounted, ranked_total: ranked.length,
+    month: ym, current_month: currentYm, ranked_total: rankedTotal,
     sessions: sessions.map((h) => ({ id: h.id, title: h.title, created_at: h.created_at, due_date: h.due_date, max_score: h.max_score })),
     students: rows,
   };

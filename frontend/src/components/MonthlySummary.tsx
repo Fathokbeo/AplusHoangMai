@@ -57,9 +57,11 @@ function ScoreTable({ data, forPdf, onSaveTest }: { data: any; forPdf: boolean; 
   // Màn hình: giữ đúng thứ tự sẵn có của lớp, có cột Hạng.
   const students: any[] = forPdf
     ? data.students.map((st: any, i: number) => ({ st, i }))
-      .sort((a: any, b: any) => (a.st.rank ?? Infinity) - (b.st.rank ?? Infinity) || a.i - b.i)
+      .sort((a: any, b: any) => (a.st.rank_final ?? Infinity) - (b.st.rank_final ?? Infinity) || a.i - b.i)
       .map((x: any) => x.st)
     : data.students;
+  // Web: ĐTB tạm (chưa có KT thì chưa tính KT). PDF: ĐTB chính thức (thiếu KT tính 0).
+  const avgOf = (st: any) => (forPdf ? st.avg_final : st.avg);
   const showRank = !forPdf;
   const fs = forPdf ? (sessions.length > 10 ? 11 : 12.5) : 14;
   const th = { padding: forPdf ? '6px 3px' : '8px 6px', fontSize: fs * 0.82, fontWeight: 700, color: '#666', background: '#FAFAFA', borderBottom: '1px solid #EEE', borderLeft: '1px solid #F0F0F0', textAlign: 'center' as const, whiteSpace: 'nowrap' as const, textTransform: 'none' as const, letterSpacing: 0 };
@@ -102,7 +104,7 @@ function ScoreTable({ data, forPdf, onSaveTest }: { data: any; forPdf: boolean; 
       <tbody>
         {students.map((st: any, i: number) => {
           const bg = i % 2 ? '#FCFCFC' : '#FFFFFF';
-          const t = tone(st.avg);
+          const t = tone(avgOf(st));
           return (
             <tr key={st.id} data-pdf-break style={{ background: bg }}>
               <td style={{ ...td, ...stick(0, bg), width: 34, minWidth: 34, maxWidth: 34, boxSizing: 'border-box', color: '#999', borderLeft: 'none' }}>{i + 1}</td>
@@ -116,10 +118,12 @@ function ScoreTable({ data, forPdf, onSaveTest }: { data: any; forPdf: boolean; 
               <td style={{ ...td }}>
                 {onSaveTest && !forPdf
                   ? <TestInput value={st.test} onSave={(v) => onSaveTest(st.id, v)} />
-                  : <span style={{ fontWeight: 700, color: st.test === null ? '#BBB' : '#6A1B9A' }}>{fmt(st.test)}</span>}
+                  : st.test === null && forPdf
+                    ? <span style={{ fontWeight: 700, color: '#C62828' }} title="Không có điểm kiểm tra — tính 0">0</span>
+                    : <span style={{ fontWeight: 700, color: st.test === null ? '#BBB' : '#6A1B9A' }}>{fmt(st.test)}</span>}
               </td>
               <td style={{ ...td }}>
-                <span style={{ fontWeight: 800, color: t.c, background: t.b, borderRadius: 99, padding: '2px 9px' }}>{fmt(st.avg)}</span>
+                <span style={{ fontWeight: 800, color: t.c, background: t.b, borderRadius: 99, padding: '2px 9px' }}>{fmt(avgOf(st))}</span>
               </td>
               {showRank && <td style={{ ...td, fontWeight: 800 }}>{st.rank ? (st.rank <= 3 ? `${MEDAL[st.rank - 1]} ${st.rank}` : st.rank) : '—'}</td>}
             </tr>
@@ -134,15 +138,17 @@ function ScoreTable({ data, forPdf, onSaveTest }: { data: any; forPdf: boolean; 
 }
 
 function Card({ data, isMobile, forPdf = false, months, onMonth, onDownload, downloading, onSaveTest }: any) {
-  const scored = data.students.filter((s: any) => s.avg !== null);
-  const classAvg = scored.length ? scored.reduce((a: number, s: any) => a + s.avg, 0) / scored.length : null;
-  const top = scored.length ? Math.max(...scored.map((s: any) => s.avg)) : null;
+  // Web: ĐTB tạm; PDF: ĐTB chính thức (thiếu điểm KT tính 0)
+  const avgKey = forPdf ? 'avg_final' : 'avg';
+  const scored = data.students.filter((s: any) => s[avgKey] !== null);
+  const classAvg = scored.length ? scored.reduce((a: number, s: any) => a + s[avgKey], 0) / scored.length : null;
+  const top = scored.length ? Math.max(...scored.map((s: any) => s[avgKey])) : null;
   const testsIn = data.students.filter((s: any) => s.test !== null).length;
   const stats = [
     { label: 'Số buổi trong tháng', value: String(data.sessions.length), sub: 'tính theo ngày tạo BTVN' },
     { label: 'Điểm TB cả lớp', value: fmt(classAvg === null ? null : Math.round(classAvg * 100) / 100), sub: `${scored.length}/${data.students.length} HS có điểm` },
-    { label: 'Điểm TB cao nhất', value: fmt(top), sub: top === null ? 'chưa có điểm' : `${scored.filter((s: any) => s.avg === top).length} HS đạt mức này` },
-    { label: 'Kiểm tra cuối tháng', value: `${testsIn}/${data.students.length}`, sub: data.test_counted ? 'thiếu điểm tính 0' : 'chưa tính (chưa nhập điểm)' },
+    { label: 'Điểm TB cao nhất', value: fmt(top), sub: top === null ? 'chưa có điểm' : `${scored.filter((s: any) => s[avgKey] === top).length} HS đạt mức này` },
+    { label: 'Kiểm tra cuối tháng', value: `${testsIn}/${data.students.length}`, sub: forPdf ? 'thiếu điểm KT tính 0' : 'chưa có điểm thì tạm chưa tính vào ĐTB' },
   ];
 
   return (
@@ -188,8 +194,9 @@ function Card({ data, isMobile, forPdf = false, months, onMonth, onDownload, dow
         <div data-pdf-break style={{ fontSize: '0.78rem', color: '#777', lineHeight: 1.6 }}>
           <strong>Cách tính:</strong> ĐTB = (tổng điểm BTVN + tổng điểm 10 phút + 2 × điểm kiểm tra cuối tháng) ÷ (số điểm BTVN + số điểm 10 phút + 2).
           BTVN quá hạn chưa nộp tính <span style={{ color: '#C62828', fontWeight: 700 }}>0</span>; buổi không có điểm 10 phút thì bỏ qua;
-          thiếu điểm kiểm tra cuối tháng tính 0 (khi tháng đã kết thúc hoặc lớp đã nhập điểm kiểm tra).
-          {!forPdf && <> Kéo ngang bảng để xem đủ các buổi.</>}
+          {forPdf
+            ? <>không có điểm kiểm tra cuối tháng tính <span style={{ color: '#C62828', fontWeight: 700 }}>0</span>. Danh sách xếp theo thứ hạng.</>
+            : <>bạn chưa có điểm kiểm tra cuối tháng thì <strong>tạm chưa tính</strong> phần này (khi xuất file PDF sẽ tính 0). Kéo ngang bảng để xem đủ các buổi.</>}
         </div>
         <div style={{ border: '1px solid #EEE', borderRadius: 12, overflowX: forPdf ? 'visible' : 'auto', WebkitOverflowScrolling: 'touch' }}>
           <ScoreTable data={data} forPdf={forPdf} onSaveTest={onSaveTest} />
