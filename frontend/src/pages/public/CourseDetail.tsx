@@ -4,7 +4,8 @@ import PublicLayout from '../../components/PublicLayout';
 import api from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from '../../components/Toast';
-import { ScheduleLines } from '../../components/CourseFields';
+import ScheduleGrid, { scheduleHasData } from '../../components/ScheduleGrid';
+import { normalizeSchedule } from '../../lib/assistantSchedule';
 import { BookOpen, Users, GraduationCap, LogIn, Lock } from 'lucide-react';
 
 export default function CourseDetail() {
@@ -48,6 +49,7 @@ export default function CourseDetail() {
   if (!course) return null;
 
   const classes: any[] = course.classes || [];
+  const schedule = normalizeSchedule(course.schedule);
 
   return (
     <PublicLayout>
@@ -77,6 +79,14 @@ export default function CourseDetail() {
           </div>
         )}
 
+        {/* Lịch học của khóa: bảng 7 ngày × các ca có học (giống lịch trợ giảng); điện thoại cuộn ngang */}
+        <div style={{ background: 'white', borderRadius: 14, boxShadow: '0 2px 12px rgba(0,0,0,0.07)', padding: '1.25rem 1.5rem', marginBottom: 16 }}>
+          <h3 style={{ margin: '0 0 10px', fontSize: '1.05rem', fontWeight: 800, color: '#1A1A2E' }}>Lịch học</h3>
+          {scheduleHasData(schedule)
+            ? <ScheduleGrid value={schedule} hideEmptyRows />
+            : <span style={{ fontSize: '0.88rem', color: '#999' }}>Chưa cập nhật — liên hệ trung tâm để biết lịch học.</span>}
+        </div>
+
         {classes.length === 0 ? (
           <div style={{ textAlign: 'center', color: '#999', padding: '3rem', background: 'white', borderRadius: 12 }}>Chưa có lớp học nào cho khóa này</div>
         ) : (
@@ -84,11 +94,6 @@ export default function CourseDetail() {
             {classes.map((cls) => (
               <div key={cls.id} style={{ background: 'white', borderRadius: 14, boxShadow: '0 2px 12px rgba(0,0,0,0.07)', padding: '1.25rem 1.5rem' }}>
                 <h3 style={{ margin: '0 0 10px', fontSize: '1.05rem', fontWeight: 800, color: '#1A1A2E' }}>{cls.title}</h3>
-                {/* Lịch học của lớp */}
-                <div style={{ background: '#FFF8F0', border: '1px solid #FFE0B2', borderRadius: 10, padding: '0.65rem 0.85rem', marginBottom: 12 }}>
-                  <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#E65100', marginBottom: 4 }}>Lịch học</div>
-                  {cls.schedule ? <ScheduleLines schedule={cls.schedule} /> : <span style={{ fontSize: '0.85rem', color: '#999' }}>Chưa cập nhật — liên hệ trung tâm để biết lịch học.</span>}
-                </div>
                 <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: '0.85rem', color: '#666', marginBottom: 14 }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <GraduationCap size={15} color="#1565C0" /> GV phụ trách: <strong>{cls.teacher_name || 'Chưa cập nhật'}</strong>

@@ -192,18 +192,19 @@ function resolveTeacherId(db, teacherId) {
 // Danh mục khóa học (THCS, THPT, HSA, TSA…): chữ tự do, tối đa 40 ký tự, trống = chưa phân loại
 const cleanCategory = (v) => { const t = String(v ?? '').trim().replace(/\s+/g, ' '); return t ? t.slice(0, 40) : null; };
 // Lịch học của lớp (vd "Thứ 2, 4, 6: 18:00 – 19:30"), mỗi dòng một buổi — hiện ở trang khóa học công khai
+const { cleanScheduleGrid } = require('../services/scheduleGrid');
 const cleanSchedule = (v) => String(v ?? '').trim().slice(0, 500) || null;
 
 router.post('/courses', (req, res) => {
-  const { title, description, teacher_id, category } = req.body;
+  const { title, description, teacher_id, category, schedule } = req.body;
   if (!title) return res.status(400).json({ message: 'Cần tiêu đề khóa học' });
   const db = getDb();
   // created_by = giáo viên được chỉ định (để khóa hiện trong "Khóa học của tôi" của GV đó), hoặc admin nếu bỏ trống.
   const tid = resolveTeacherId(db, teacher_id);
   if (tid === undefined) return res.status(400).json({ message: 'Giáo viên không hợp lệ' });
   const result = db.prepare(
-    'INSERT INTO courses (title,description,created_by,category) VALUES (?,?,?,?)'
-  ).run(title, description || null, tid || req.user.id, cleanCategory(category));
+    'INSERT INTO courses (title,description,created_by,category,schedule) VALUES (?,?,?,?,?)'
+  ).run(title, description || null, tid || req.user.id, cleanCategory(category), cleanScheduleGrid(schedule));
   res.status(201).json({ id: result.lastInsertRowid, title });
 });
 
@@ -215,13 +216,14 @@ router.post('/courses/:id/thumbnail', uploadCourseThumbnail.single('thumbnail'),
 });
 
 router.put('/courses/:id', (req, res) => {
-  const { title, description, active, teacher_id, category } = req.body;
+  const { title, description, active, teacher_id, category, schedule } = req.body;
   const db = getDb();
   const sets = []; const vals = [];
   if (title) { sets.push('title=?'); vals.push(title); }
   if (description !== undefined) { sets.push('description=?'); vals.push(description); }
   if (active !== undefined) { sets.push('active=?'); vals.push(active ? 1 : 0); }
   if (category !== undefined) { sets.push('category=?'); vals.push(cleanCategory(category)); }
+  if (schedule !== undefined) { sets.push('schedule=?'); vals.push(cleanScheduleGrid(schedule)); }
   // Chỉ định lại giáo viên phụ trách khóa (created_by). Bỏ trống → admin quản lý.
   let newTeacherId;
   if (teacher_id !== undefined) {

@@ -183,15 +183,16 @@ router.get('/my-courses', (req, res) => {
 // Danh mục khóa học (THCS, THPT, HSA, TSA…): chữ tự do, tối đa 40 ký tự, trống = chưa phân loại
 const cleanCategory = (v) => { const t = String(v ?? '').trim().replace(/\s+/g, ' '); return t ? t.slice(0, 40) : null; };
 // Lịch học của lớp (vd "Thứ 2, 4, 6: 18:00 – 19:30"), mỗi dòng một buổi — hiện ở trang khóa học công khai
+const { cleanScheduleGrid } = require('../services/scheduleGrid');
 const cleanSchedule = (v) => String(v ?? '').trim().slice(0, 500) || null;
 
 router.post('/courses', (req, res) => {
-  const { title, description, category } = req.body;
+  const { title, description, category, schedule } = req.body;
   if (!title) return res.status(400).json({ message: 'Cần tiêu đề khóa học' });
   const db = getDb();
   const result = db.prepare(
-    'INSERT INTO courses (title,description,created_by,category) VALUES (?,?,?,?)'
-  ).run(title, description || null, req.user.id, cleanCategory(category));
+    'INSERT INTO courses (title,description,created_by,category,schedule) VALUES (?,?,?,?,?)'
+  ).run(title, description || null, req.user.id, cleanCategory(category), cleanScheduleGrid(schedule));
   res.status(201).json({ id: result.lastInsertRowid, title });
 });
 
@@ -222,7 +223,7 @@ router.get('/courses/:courseId', (req, res) => {
 });
 
 router.put('/courses/:courseId', (req, res) => {
-  const { title, description, category } = req.body;
+  const { title, description, category, schedule } = req.body;
   const db = getDb();
   const course = db.prepare('SELECT * FROM courses WHERE id=?').get(req.params.courseId);
   if (!course) return res.status(404).json({ message: 'Không tìm thấy' });
@@ -231,6 +232,7 @@ router.put('/courses/:courseId', (req, res) => {
   if (title) { sets.push('title=?'); vals.push(title); }
   if (description !== undefined) { sets.push('description=?'); vals.push(description); }
   if (category !== undefined) { sets.push('category=?'); vals.push(cleanCategory(category)); }
+  if (schedule !== undefined) { sets.push('schedule=?'); vals.push(cleanScheduleGrid(schedule)); }
   if (sets.length > 0) { vals.push(req.params.courseId); db.prepare(`UPDATE courses SET ${sets.join(',')} WHERE id=?`).run(...vals); }
   res.json({ message: 'Đã cập nhật' });
 });

@@ -4,6 +4,8 @@ import api from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { BookOpen, Users, School, Plus, Edit, Trash2, ChevronRight } from 'lucide-react';
 import Modal from '../../components/Modal';
+import ScheduleGrid from '../../components/ScheduleGrid';
+import { emptySchedule, normalizeSchedule } from '../../lib/assistantSchedule';
 import { CategoryField } from '../../components/CourseFields';
 import { toast } from '../../components/Toast';
 
@@ -12,7 +14,7 @@ export default function TeacherDashboard() {
   const [courses, setCourses] = useState<any[]>([]);
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<any>(null);
-  const [form, setForm] = useState({ title: '', description: '', category: '' });
+  const [form, setForm] = useState({ title: '', description: '', category: '', schedule: emptySchedule() });
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState('');
   const [loading, setLoading] = useState(false);
@@ -24,7 +26,7 @@ export default function TeacherDashboard() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ title: '', description: '', category: '' });
+    setForm({ title: '', description: '', category: '', schedule: emptySchedule() });
     setFile(null);
     setPreview('');
     setModal(true);
@@ -34,7 +36,7 @@ export default function TeacherDashboard() {
     e.preventDefault();
     e.stopPropagation();
     setEditing(c);
-    setForm({ title: c.title, description: c.description || '', category: c.category || '' });
+    setForm({ title: c.title, description: c.description || '', category: c.category || '', schedule: normalizeSchedule(c.schedule) });
     setFile(null);
     setPreview(c.thumbnail ? `/uploads/courses/${c.thumbnail}` : '');
     setModal(true);
@@ -46,11 +48,11 @@ export default function TeacherDashboard() {
     try {
       let courseId: number;
       if (editing) {
-        await api.put(`/teacher/courses/${editing.id}`, { title: form.title, description: form.description, category: form.category });
+        await api.put(`/teacher/courses/${editing.id}`, { title: form.title, description: form.description, category: form.category, schedule: form.schedule });
         courseId = editing.id;
         toast.success('Đã cập nhật');
       } else {
-        const { data } = await api.post('/teacher/courses', { title: form.title, description: form.description, category: form.category });
+        const { data } = await api.post('/teacher/courses', { title: form.title, description: form.description, category: form.category, schedule: form.schedule });
         courseId = data.id;
         toast.success('Đã tạo khóa học');
       }
@@ -141,6 +143,7 @@ export default function TeacherDashboard() {
         open={modal}
         onClose={() => setModal(false)}
         title={editing ? 'Chỉnh sửa khóa học' : 'Tạo khóa học mới'}
+        size="xl"
         footer={
           <>
             <button className="btn btn-ghost" onClick={() => setModal(false)}>Hủy</button>
@@ -161,6 +164,13 @@ export default function TeacherDashboard() {
             onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} />
         </div>
         <CategoryField value={form.category} onChange={(v) => setForm({ ...form, category: v })} existing={courses.map((c: any) => c.category)} />
+        <div className="form-group">
+          <label className="label">Lịch học</label>
+          <div style={{ fontSize: '0.75rem', color: '#888', marginBottom: 6 }}>
+            Ghi tên lớp (hoặc phòng học) vào ca có học, để trống nếu không học ca đó. Lịch này hiện ở trang khóa học công khai.
+          </div>
+          <ScheduleGrid value={form.schedule} editing onChange={(v) => setForm({ ...form, schedule: v })} placeholder="" />
+        </div>
         <div className="form-group">
           <label className="label">Ảnh đại diện</label>
           <div className="dropzone" onClick={() => fileRef.current?.click()}>

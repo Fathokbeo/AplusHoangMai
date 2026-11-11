@@ -22,7 +22,7 @@ router.get('/courses', (req, res) => {
 // Chi tiết công khai 1 khóa học: thông tin giáo viên, sĩ số, tên các chương (không kèm bài giảng/bài tập bên trong)
 router.get('/courses/:id', (req, res) => {
   const db = getDb();
-  const course = db.prepare('SELECT id,title,description,thumbnail,category FROM courses WHERE id=? AND active=1').get(req.params.id);
+  const course = db.prepare('SELECT id,title,description,thumbnail,category,schedule FROM courses WHERE id=? AND active=1').get(req.params.id);
   if (!course) return res.status(404).json({ message: 'Không tìm thấy khóa học' });
 
   const classes = db.prepare(`

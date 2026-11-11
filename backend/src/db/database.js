@@ -484,6 +484,8 @@ function initSchema() {
   addCol('staff', 'threads_url', 'TEXT');
   // Khóa học: danh mục do người tạo đặt (THCS, THPT, HSA, TSA…); lớp học: lịch học hiển thị ở trang khóa học
   addCol('courses', 'category', 'TEXT');
+  // Lịch học của khóa (JSON bảng 7 ngày × 7 ca, giống lịch trợ giảng)
+  addCol('courses', 'schedule', 'TEXT');
   addCol('classes', 'schedule', 'TEXT');
   // Điểm kiểm tra cuối tháng (hệ số 2 trong Tổng kết tháng) — mỗi học sinh 1 điểm / lớp / tháng
   db.exec(`
