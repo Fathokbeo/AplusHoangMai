@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import api from '../lib/api';
 import { toast } from './Toast';
 import useIsMobile from '../lib/useIsMobile';
-import { CalendarRange, Download, Loader2 } from 'lucide-react';
+import { CalendarRange, Download, FileSpreadsheet, Loader2 } from 'lucide-react';
 
 // Tab "Tổng kết tháng" của lớp (giáo viên / admin): mỗi BTVN tạo trong tháng là 1 buổi, mỗi buổi 2 cột điểm
 // (BTVN + 10 phút — cùng số liệu với mục Nhận xét), cột cuối "Kiểm tra cuối tháng" (hệ số 2) giáo viên tự điền,
@@ -137,7 +137,7 @@ function ScoreTable({ data, forPdf, onSaveTest }: { data: any; forPdf: boolean; 
   );
 }
 
-function Card({ data, isMobile, forPdf = false, months, onMonth, onDownload, downloading, onSaveTest }: any) {
+function Card({ data, isMobile, forPdf = false, months, onMonth, onDownload, onDownloadExcel, downloading, onSaveTest }: any) {
   // Web: ĐTB tạm; PDF: ĐTB chính thức (thiếu điểm KT tính 0)
   const avgKey = forPdf ? 'avg_final' : 'avg';
   const scored = data.students.filter((s: any) => s[avgKey] !== null);
@@ -171,6 +171,9 @@ function Card({ data, isMobile, forPdf = false, months, onMonth, onDownload, dow
               <button className="btn btn-sm" onClick={onDownload} disabled={downloading} style={{ background: 'white', color: '#C62828', border: 'none', fontWeight: 700 }}>
                 {downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} {downloading ? 'Đang tạo...' : 'Tải PDF'}
               </button>
+              <button className="btn btn-sm" onClick={onDownloadExcel} style={{ background: 'white', color: '#2E7D32', border: 'none', fontWeight: 700 }}>
+                <FileSpreadsheet size={14} /> Tải Excel
+              </button>
             </div>
           )}
         </div>
@@ -193,7 +196,7 @@ function Card({ data, isMobile, forPdf = false, months, onMonth, onDownload, dow
         </div>
         <div data-pdf-break style={{ fontSize: '0.78rem', color: '#777', lineHeight: 1.6 }}>
           <strong>Cách tính:</strong> ĐTB = (tổng điểm BTVN + tổng điểm 10 phút + 2 × điểm kiểm tra cuối tháng) ÷ (số điểm BTVN + số điểm 10 phút + 2).
-          BTVN quá hạn chưa nộp tính <span style={{ color: '#C62828', fontWeight: 700 }}>0</span>; buổi không có điểm 10 phút thì bỏ qua;
+          BTVN quá hạn chưa nộp tính <span style={{ color: '#C62828', fontWeight: 700 }}>0</span>; buổi không có điểm 10 phút thì bỏ qua;{' '}
           {forPdf
             ? <>không có điểm kiểm tra cuối tháng tính <span style={{ color: '#C62828', fontWeight: 700 }}>0</span>. Danh sách xếp theo thứ hạng.</>
             : <>bạn chưa có điểm kiểm tra cuối tháng thì <strong>tạm chưa tính</strong> phần này (khi xuất file PDF sẽ tính 0). Kéo ngang bảng để xem đủ các buổi.</>}
@@ -230,6 +233,47 @@ async function exportLandscapePdf(node: HTMLElement, filename: string) {
     first = false; y = end;
   }
   pdf.save(filename);
+}
+
+// Xuất Excel (.xlsx): cùng số liệu với bản PDF (ĐTB chính thức — thiếu KT tính 0, xếp theo hạng) nhưng ô điểm
+// để dạng SỐ để giáo viên tính toán tiếp được; giữ cột Hạng. Ô trống = chưa có điểm.
+async function exportExcel(data: any) {
+  const XLSX = await import('xlsx');
+  const sessions: any[] = data.sessions;
+  const students: any[] = data.students.map((st: any, i: number) => ({ st, i }))
+    .sort((a: any, b: any) => (a.st.rank_final ?? Infinity) - (b.st.rank_final ?? Infinity) || a.i - b.i)
+    .map((x: any) => x.st);
+  const num = (v: number | null | undefined) => (v === null || v === undefined ? '' : Math.round(v * 100) / 100);
+  const nCols = 2 + sessions.length * 2 + 3;
+  const blank = () => Array(nCols).fill('');
+
+  const title = blank(); title[0] = `TỔNG KẾT THÁNG ${monthLabel(data.month)} — Lớp ${data.class_title || ''}${data.course_title ? ` · ${data.course_title}` : ''}`;
+  const note = blank(); note[0] = 'ĐTB = (tổng BTVN + tổng 10 phút + 2 × KT cuối tháng) ÷ (số điểm BTVN + số điểm 10 phút + 2). BTVN quá hạn chưa nộp tính 0; buổi không có điểm 10 phút bỏ qua; không có điểm KT cuối tháng tính 0.';
+  const h1 = blank(); const h2 = blank();
+  h1[0] = 'STT'; h1[1] = 'Họ và tên';
+  sessions.forEach((s, i) => { h1[2 + i * 2] = `Buổi ${i + 1} (${dayLabel(s.created_at)})`; h2[2 + i * 2] = 'BTVN'; h2[3 + i * 2] = '10p'; });
+  const kt = 2 + sessions.length * 2;
+  h1[kt] = 'KT cuối tháng (hệ số 2)'; h1[kt + 1] = 'ĐTB'; h1[kt + 2] = 'Hạng';
+
+  const rows = students.map((st, i) => {
+    const r: any[] = [i + 1, st.full_name];
+    st.cells.forEach((c: any) => { r.push(num(c.btvn), num(c.quiz)); });
+    r.push(st.test === null ? 0 : num(st.test), num(st.avg_final), st.rank_final ?? '');
+    return r;
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet([title, note, blank(), h1, h2, ...rows]);
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: nCols - 1 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: nCols - 1 } },
+    ...[0, 1, kt, kt + 1, kt + 2].map((c) => ({ s: { r: 3, c }, e: { r: 4, c } })),
+    ...sessions.map((_, i) => ({ s: { r: 3, c: 2 + i * 2 }, e: { r: 3, c: 3 + i * 2 } })),
+  ];
+  ws['!cols'] = [{ wch: 5 }, { wch: 26 }, ...sessions.flatMap(() => [{ wch: 8 }, { wch: 7 }]), { wch: 12 }, { wch: 7 }, { wch: 6 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, `Tháng ${monthLabel(data.month).replace('/', '-')}`);
+  const cls = String(data.class_title || '').replace(/[\\/:*?"<>|]/g, '').trim();
+  XLSX.writeFile(wb, `Tổng kết tháng ${monthLabel(data.month).replace('/', '-')} ${cls}.xlsx`);
 }
 
 // Bề rộng khung dựng bản PDF (px) — tỉ lệ đúng khổ A4 ngang trừ lề, chữ vẫn đủ lớn khi in
@@ -280,7 +324,8 @@ export default function MonthlySummary({ classId }: { classId: string | number }
   return (
     <>
       <Card data={data} isMobile={isMobile} months={data.months} onMonth={(m: string) => { setMonth(m); load(m); }}
-        onDownload={() => setExporting(true)} downloading={exporting} onSaveTest={saveTest} />
+        onDownload={() => setExporting(true)} downloading={exporting} onSaveTest={saveTest}
+        onDownloadExcel={() => exportExcel(data).then(() => toast.success('Đã tải file Excel')).catch(() => toast.error('Không tạo được file Excel'))} />
       {exporting && (
         <div style={{ position: 'fixed', left: -100000, top: 0, width: PDF_WIDTH, pointerEvents: 'none' }} aria-hidden>
           <div ref={pdfRef} style={{ width: PDF_WIDTH, background: 'white' }}>
