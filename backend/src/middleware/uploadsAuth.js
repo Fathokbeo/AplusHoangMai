@@ -2,7 +2,8 @@ const { getDb } = require('../db/database');
 const { userFromRequest } = require('../services/security');
 
 // Ảnh của trang giới thiệu công khai (trang chủ, khóa tiêu biểu, giáo viên...) — khách vãng lai xem được.
-const PUBLIC_DIRS = new Set(['ads', 'courses', 'featured_students', 'staff', 'featured_courses', 'achievements', 'activities']);
+// avatars: ảnh đại diện học sinh, hiện trên Bảng vàng trang chủ (tên file ngẫu nhiên, không đoán được).
+const PUBLIC_DIRS = new Set(['ads', 'courses', 'featured_students', 'staff', 'featured_courses', 'achievements', 'activities', 'avatars']);
 
 // Thư mục cần đăng nhập + đúng quyền: đề bài, đáp án, bài nộp, video và tài liệu bài giảng, ảnh trợ giảng.
 const PROTECTED_DIRS = new Set(['homework', 'submissions', 'videos', 'lessons', 'assistants', 'mock', 'mock_submissions']);

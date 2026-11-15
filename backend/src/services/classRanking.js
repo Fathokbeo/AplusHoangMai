@@ -225,4 +225,13 @@ function monthlyTopStudents(db, { months = 6, limit = 5, nowIso } = {}) {
   }).filter((m) => m.students.length > 0);
 }
 
-module.exports = { classAverages, classMonthlySummary, classRanking, classRankingReport, classMonths, studentOverallAverage, monthlyTopStudents, prevYm, isOverdue, ymOf };
+// Gắn ảnh đại diện (users.avatar) vào kết quả monthlyTopStudents — đọc mới mỗi lần, tháng nào cũng cùng 1 ảnh.
+function withAvatars(db, months) {
+  const ids = [...new Set(months.flatMap((m) => m.students.map((s) => s.id)))];
+  const avatars = new Map(ids.length
+    ? db.prepare(`SELECT id,avatar FROM users WHERE avatar IS NOT NULL AND id IN (${ids.map(() => '?').join(',')})`).all(...ids).map((u) => [u.id, u.avatar])
+    : []);
+  return months.map((m) => ({ ...m, students: m.students.map((s) => ({ ...s, avatar: avatars.get(s.id) || null })) }));
+}
+
+module.exports = { classAverages, classMonthlySummary, classRanking, classRankingReport, classMonths, studentOverallAverage, monthlyTopStudents, withAvatars, prevYm, isOverdue, ymOf };

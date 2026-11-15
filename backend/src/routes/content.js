@@ -4,7 +4,8 @@ const path = require('path');
 const fs = require('fs');
 const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
-const { uploadContent } = require('../middleware/upload');
+const { uploadContent, uploadStudentAvatar } = require('../middleware/upload');
+const { monthlyTopStudents, withAvatars } = require('../services/classRanking');
 
 router.use(authMiddleware, requireRole('admin'));
 
@@ -50,6 +51,36 @@ function imageUploadFor(req, res, next) {
   else up.single('image')(req, res, next);
 }
 const parseImages = (json) => { try { const a = JSON.parse(json || '[]'); return Array.isArray(a) ? a.filter((x) => typeof x === 'string') : []; } catch { return []; } };
+
+// ── Ảnh Bảng vàng tháng (tab Học sinh tiêu biểu) ───────────────────────
+// Ảnh lưu CỐ ĐỊNH làm ảnh đại diện của học sinh (users.avatar, file trong uploads/avatars) → tháng sau bạn đó lại
+// lên Bảng vàng thì trang chủ tự hiện ảnh, không phải chụp lại. Chỉ admin đặt / đổi / xóa (trang chủ không có nút).
+router.get('/honor-board', (req, res) => {
+  const db = getDb();
+  res.json(withAvatars(db, monthlyTopStudents(db, { months: 6, limit: 5 })).map((m) => ({
+    month: m.month,
+    students: m.students.map(({ id, full_name, classes, avg, rank, avatar }) => ({ id, full_name, classes, avg, rank, avatar })),
+  })));
+});
+
+router.post('/honor-board/students/:id/avatar', uploadStudentAvatar.single('photo'), (req, res) => {
+  if (!req.file) return res.status(400).json({ message: 'Cần file ảnh' });
+  const db = getDb();
+  const st = db.prepare("SELECT id,avatar FROM users WHERE id=? AND role='student'").get(req.params.id);
+  if (!st) { rmImage('avatars', req.file.filename); return res.status(404).json({ message: 'Không tìm thấy học sinh' }); }
+  db.prepare('UPDATE users SET avatar=? WHERE id=?').run(req.file.filename, st.id);
+  rmImage('avatars', st.avatar); // ảnh mới thay ảnh cũ
+  res.json({ avatar: req.file.filename });
+});
+
+router.delete('/honor-board/students/:id/avatar', (req, res) => {
+  const db = getDb();
+  const st = db.prepare("SELECT id,avatar FROM users WHERE id=? AND role='student'").get(req.params.id);
+  if (!st) return res.status(404).json({ message: 'Không tìm thấy học sinh' });
+  db.prepare('UPDATE users SET avatar=NULL WHERE id=?').run(st.id);
+  rmImage('avatars', st.avatar);
+  res.json({ ok: true });
+});
 
 // ── List (admin: tất cả, kể cả ẩn) ─────────────────────────────────────
 router.get('/:collection', (req, res) => {

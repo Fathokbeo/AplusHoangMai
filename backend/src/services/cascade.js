@@ -32,6 +32,8 @@ function hardDeleteStudent(db, studentId) {
   // Gỡ liên kết "người tạo" để không vướng ràng buộc, rồi xóa tài khoản
   db.prepare('UPDATE courses SET created_by=NULL WHERE created_by=?').run(studentId);
   db.prepare('UPDATE users SET created_by=NULL WHERE created_by=?').run(studentId);
+  const st = db.prepare("SELECT avatar FROM users WHERE id=? AND role='student'").get(studentId);
+  if (st) rmFile('avatars', st.avatar); // ảnh đại diện (chụp ở Bảng vàng)
   db.prepare("DELETE FROM users WHERE id=? AND role='student'").run(studentId);
 }
 

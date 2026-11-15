@@ -5,6 +5,7 @@ import Modal from '../../components/Modal';
 import { toast } from '../../components/Toast';
 import AdManagement from './AdManagement';
 import AssistantManagement from '../teacher/AssistantManagement';
+import HonorBoardPhotos from './HonorBoardPhotos';
 import { Plus, Edit, Trash2, Eye, EyeOff, ImageIcon, X, ArrowLeft, ArrowRight, ChevronLeft } from 'lucide-react';
 
 // Nội dung trang giới thiệu (trang chủ): các hoạt động, học sinh tiêu biểu, giáo viên & trợ giảng (kèm trợ giảng
@@ -386,6 +387,7 @@ export default function SiteContent() {
       {tab === 'settings' ? <SettingsForm />
         : tab === 'ads' ? <AdManagement />
         : tab === 'staff' ? <StaffTab />
+        : tab === 'featured-students' ? <><HonorBoardPhotos /><CollectionManager collection={tab} key={tab} /></>
         : <CollectionManager collection={tab} key={tab} />}
     </div>
   );

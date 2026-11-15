@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getDb } = require('../db/database');
-const { monthlyTopStudents } = require('../services/classRanking');
+const { monthlyTopStudents, withAvatars } = require('../services/classRanking');
 
 router.get('/ads', (req, res) => {
   const db = getDb();
@@ -45,15 +45,18 @@ router.get('/featured-students', (req, res) => {
 });
 
 // "Bảng vàng" theo tháng: học sinh có điểm TB tháng cao nhất (tự tính, không cần nhập tay).
-// Trang chủ ai cũng xem được → chỉ trả họ tên + lớp + điểm TB; giữ kết quả 60 giây cho đỡ tính lại.
+// Trang chủ ai cũng xem được → chỉ trả họ tên + lớp + điểm TB + ảnh đại diện; giữ kết quả tính điểm 60 giây cho đỡ
+// tính lại. Ảnh đại diện (admin đặt ở trang Học sinh tiêu biểu) luôn đọc mới từ users.avatar.
 let topCache = { at: 0, data: null };
 router.get('/top-students', (req, res) => {
+  const db = getDb();
   if (!topCache.data || Date.now() - topCache.at > 60e3) {
-    const data = monthlyTopStudents(getDb(), { months: 6, limit: 5 })
-      .map((m) => ({ month: m.month, students: m.students.map(({ full_name, classes, avg, rank }) => ({ full_name, classes, avg, rank })) }));
-    topCache = { at: Date.now(), data };
+    topCache = { at: Date.now(), data: monthlyTopStudents(db, { months: 6, limit: 5 }) };
   }
-  res.json(topCache.data);
+  res.json(withAvatars(db, topCache.data).map((m) => ({
+    month: m.month,
+    students: m.students.map(({ full_name, classes, avg, rank, avatar }) => ({ full_name, classes, avg, rank, avatar })),
+  })));
 });
 
 router.get('/staff', (req, res) => {

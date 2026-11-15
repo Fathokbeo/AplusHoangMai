@@ -104,6 +104,16 @@ const uploadCourseThumbnail = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
 });
 
+// Ảnh đại diện học sinh (admin đặt ở tab Học sinh tiêu biểu, hiện trên Bảng vàng trang chủ)
+const uploadStudentAvatar = multer({
+  storage: createStorage('avatars'),
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Chỉ chấp nhận file ảnh'));
+  },
+  limits: { fileSize: 8 * 1024 * 1024 },
+});
+
 const uploadAssistantPhoto = multer({
   storage: createStorage('assistants'),
   fileFilter: (req, file, cb) => {
@@ -133,4 +143,4 @@ const uploadContent = {
   'activities': makeImageUpload('activities'),
 };
 
-module.exports = { uploadAd, uploadHomework, uploadSubmission, uploadVideo, uploadCourseThumbnail, uploadContent, uploadLessonFile, uploadAssistantPhoto, uploadMockExam, uploadMockSubmission };
+module.exports = { uploadAd, uploadHomework, uploadSubmission, uploadVideo, uploadCourseThumbnail, uploadContent, uploadLessonFile, uploadAssistantPhoto, uploadStudentAvatar, uploadMockExam, uploadMockSubmission };

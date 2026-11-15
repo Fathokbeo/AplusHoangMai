@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { Crown } from 'lucide-react';
 
 // "Bảng vàng" ở mục Học sinh tiêu biểu (trang chủ): các bạn có điểm TB tháng cao nhất, tự tính theo từng tháng.
-// data: [{ month: 'YYYY-MM', students: [{ full_name, classes, avg, rank }] }] — tháng mới nhất trước.
+// data: [{ month: 'YYYY-MM', students: [{ full_name, classes, avg, rank, avatar }] }] — tháng mới nhất trước.
+// avatar: ảnh đại diện của học sinh — admin đặt ở trang quản lý (Nội dung trang giới thiệu → Học sinh tiêu biểu),
+// lưu theo tài khoản nên tháng nào bạn đó lên bảng vàng cũng tự hiện. Trang chủ chỉ hiển thị, không có nút sửa.
 
 const MEDAL = ['🥇', '🥈', '🥉'];
 const RANK_STYLE = [
@@ -51,12 +53,30 @@ export default function MonthlyHonorBoard({ data }: { data: any[] }) {
           return (
             <div key={`${cur.month}-${i}`} style={{
               borderRadius: 14, padding: '0.8rem 0.85rem', border: `1.5px solid ${st ? st.border : '#F0F0F0'}`,
-              background: st ? st.bg : '#FCFCFC', display: 'flex', alignItems: 'center', gap: 10,
+              background: st ? st.bg : '#FCFCFC', display: 'flex', alignItems: 'center', gap: s.avatar ? 6 : 10,
+              // Có ảnh: xếp dọc (ảnh trên, tên dưới) — thẻ hẹp (5 thẻ/hàng, 2 thẻ/hàng trên điện thoại) vẫn đủ chỗ cho tên
+              flexDirection: s.avatar ? 'column' : 'row', textAlign: s.avatar ? 'center' : undefined,
             }}>
-              <span style={{ fontSize: s.rank <= 3 ? '1.7rem' : '1rem', fontWeight: 800, width: 30, textAlign: 'center', color: '#999', flexShrink: 0 }}>
-                {s.rank <= 3 ? MEDAL[s.rank - 1] : `#${s.rank}`}
-              </span>
-              <div style={{ minWidth: 0, flex: 1 }}>
+              {s.avatar ? (
+                // Huy chương / hạng gắn ở góc ảnh
+                <div style={{ position: 'relative', flexShrink: 0, width: 64, height: 64 }}>
+                  <img src={`/uploads/avatars/${s.avatar}`} alt={s.full_name} loading="lazy"
+                    style={{ width: 64, height: 64, borderRadius: '50%', objectFit: 'cover', display: 'block', border: `2px solid ${st ? st.border : '#E0E0E0'}`, background: 'white', boxSizing: 'border-box' }} />
+                  <span style={{
+                    position: 'absolute', left: -6, bottom: -4, lineHeight: 1,
+                    ...(s.rank <= 3
+                      ? { fontSize: '1.15rem' }
+                      : { fontSize: '0.68rem', fontWeight: 800, color: '#666', background: 'white', border: '1px solid #E0E0E0', borderRadius: 8, padding: '2px 4px' }),
+                  }}>
+                    {s.rank <= 3 ? MEDAL[s.rank - 1] : `#${s.rank}`}
+                  </span>
+                </div>
+              ) : (
+                <span style={{ fontSize: s.rank <= 3 ? '1.7rem' : '1rem', fontWeight: 800, width: 30, textAlign: 'center', color: '#999', flexShrink: 0 }}>
+                  {s.rank <= 3 ? MEDAL[s.rank - 1] : `#${s.rank}`}
+                </span>
+              )}
+              <div style={{ minWidth: 0, flex: 1, width: s.avatar ? '100%' : undefined }}>
                 <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#1A1A2E', lineHeight: 1.3 }}>{s.full_name}</div>
                 {s.classes && <div style={{ fontSize: '0.75rem', color: '#888', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Lớp {s.classes}</div>}
                 <div style={{ fontSize: '0.8rem', marginTop: 2 }}>

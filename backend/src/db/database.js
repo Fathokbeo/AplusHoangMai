@@ -487,6 +487,8 @@ function initSchema() {
   // Lịch học của khóa (JSON bảng 7 ngày × 7 ca, giống lịch trợ giảng)
   addCol('courses', 'schedule', 'TEXT');
   addCol('classes', 'schedule', 'TEXT');
+  // Ảnh đại diện học sinh (tên file trong uploads/avatars) — admin đặt ở tab Học sinh tiêu biểu, Bảng vàng tháng nào cũng tự hiện
+  addCol('users', 'avatar', 'TEXT');
   // Điểm kiểm tra cuối tháng (hệ số 2 trong Tổng kết tháng) — mỗi học sinh 1 điểm / lớp / tháng
   db.exec(`
     CREATE TABLE IF NOT EXISTS class_month_tests (
