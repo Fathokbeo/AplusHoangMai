@@ -364,6 +364,9 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
             </button>
           )}
         </div>
+        {/* Phần dưới dải tiêu đề: nội dung bên trái, logo trung tâm lấp khoảng trống bên phải (máy tính + PDF) */}
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 20 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
         {(infoEditable || lesson || lessonDate) && (
           <div style={{ marginTop: 14, paddingLeft: isMobile ? 0 : 60 }}>
             {infoEditable && <style>{`.report-head-input::placeholder { color: rgba(255,255,255,0.6); }`}</style>}
@@ -396,6 +399,14 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
           ].filter(Boolean).map((t) => (
             <span key={t} style={{ background: 'rgba(255,255,255,0.16)', borderRadius: 99, padding: '3px 12px', fontSize: '0.8rem', fontWeight: 600 }}>{t}</span>
           ))}
+        </div>
+        </div>
+        {!isMobile && (
+          // Ảnh logo có nhiều lề trắng → phóng to trong khung trắng bo góc để phần logo lấp đầy khung
+          <div style={{ width: 150, height: 112, flexShrink: 0, background: 'white', borderRadius: 14, overflow: 'hidden', boxShadow: '0 4px 14px rgba(0,0,0,0.18)' }}>
+            <img src="/logo.jpg" alt="Aplus Hoàng Mai" style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scale(1.6)', display: 'block' }} />
+          </div>
+        )}
         </div>
       </div>
 
@@ -469,14 +480,14 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
           <div style={{ border: '1px solid #EEE', borderRadius: 12, overflow: 'hidden' }}>
             {!isMobile && (
               <div data-pdf-break style={{ display: 'grid', gridTemplateColumns: forPdf ? COLS_PDF : COLS, gap: 12, padding: '0.6rem 1rem', background: '#FAFAFA', fontSize: '0.72rem', fontWeight: 700, color: '#888', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                <span>STT</span><span>Họ và tên</span><span>Điểm</span><span style={{ textAlign: 'center' }}>Điểm 10p</span><span>Nhận xét</span><span>Điểm danh</span>
+                <span style={{ textAlign: 'center' }}>STT</span><span>Họ và tên</span><span style={{ textAlign: 'center' }}>Điểm</span><span style={{ textAlign: 'center' }}>Điểm 10p</span><span style={{ textAlign: 'center' }}>Nhận xét</span><span style={{ textAlign: 'center' }}>Điểm danh</span>
               </div>
             )}
             {rows.map(({ s, review }, i) => {
               const missing = review.kind === 'missing';
               const band = review.kind === 'graded' ? bandOf(review.score / max) : null;
               const scoreCell = review.kind === 'graded' ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: isMobile ? undefined : 'center', gap: 6 }}>
                   <div style={{ flex: 1, height: 6, background: '#F0F0F0', borderRadius: 99, overflow: 'hidden', maxWidth: 52 }}>
                     <div style={{ width: `${Math.min(100, (review.score / max) * 100)}%`, height: '100%', background: band!.color, borderRadius: 99 }} />
                   </div>
@@ -494,7 +505,7 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
                 <div>
                   <div style={{ fontSize: '0.84rem', lineHeight: 1.55, whiteSpace: 'pre-line', color: missing ? '#C62828' : review.kind === 'graded' ? '#333' : '#999' }}>{detailed}</div>
                   {essayLine && (
-                    <div style={{ fontSize: '0.82rem', lineHeight: 1.5, color: '#333', marginTop: 4, paddingLeft: 8, borderLeft: '3px solid #C62828' }}>
+                    <div style={{ display: isMobile ? 'block' : 'inline-block', fontSize: '0.82rem', lineHeight: 1.5, color: '#333', marginTop: 4, paddingLeft: 8, borderLeft: '3px solid #C62828' }}>
                       <strong style={{ color: '#C62828' }}>Tự luận:</strong> {essayLine}
                     </div>
                   )}
@@ -522,12 +533,12 @@ function ReportCard({ hw, roster, isMobile, forPdf = false, downloading = false,
                 </div>
               ) : (
                 <div key={s.student_id} data-pdf-break style={{ display: 'grid', gridTemplateColumns: forPdf ? COLS_PDF : COLS, gap: 12, alignItems: 'center', padding: '0.7rem 1rem', borderTop: '1px solid #F2F2F2', background: rowBg }}>
-                  <span style={{ fontSize: '0.85rem', color: '#999' }}>{i + 1}</span>
+                  <span style={{ fontSize: '0.85rem', color: '#999', textAlign: 'center' }}>{i + 1}</span>
                   <strong title={s.full_name} style={{ fontSize: '0.9rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.full_name}</strong>
-                  <div>{scoreCell}</div>
+                  <div style={{ textAlign: 'center' }}>{scoreCell}</div>
                   <div style={{ textAlign: 'center' }}>{quizCell}</div>
-                  {comment}
-                  <div>{attCell}</div>
+                  <div style={{ textAlign: 'center' }}>{comment}</div>
+                  <div style={{ textAlign: 'center' }}>{attCell}</div>
                 </div>
               );
             })}
