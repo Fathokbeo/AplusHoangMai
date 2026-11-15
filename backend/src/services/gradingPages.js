@@ -228,14 +228,27 @@ async function renderGradedPages(pages, final, opts = {}) {
       const r = boxToRect(it.box_2d, W, H);
       if (!r) continue;
       const color = COLORS[it.status] || COLORS.partial;
-      let x = Math.min(W - s * 4.6, r.x + r.w + s * 0.4);
-      let y = Math.max(s * 0.2, r.y);
-      while (placed.some((p) => Math.abs(p.x - x) < s * 3 && Math.abs(p.y - y) < s * 1.1)) y += s * 1.15;
-      placed.push({ x, y });
-      if (it.status === 'correct') drawCheck(g, x, y, s, color);
-      else if (it.status === 'partial') drawPartial(g, x, y, s, color);
-      else drawCross(g, x, y, s, color);
-      label(g, `${it.short || ''} ${fmt(it.points)}/${fmt(it.max_points)}`.trim(), x + s * 1.15, y + s * 0.78, fs1, color);
+      // Dấu vừa với chiều cao dòng của ý (các câu trắc nghiệm nằm sát nhau) và căn giữa theo dòng đó
+      const si = Math.round(Math.min(s, Math.max(18, r.h * 0.9)));
+      const fi = Math.max(14, Math.round(si * 0.62));
+      const text = `${it.short || ''} ${fmt(it.points)}/${fmt(it.max_points)}`.trim();
+      g.save(); g.font = `bold ${fi}px ${FONT_CSS}`; const tw = g.measureText(txt(text)).width; g.restore();
+      const w = si * 1.15 + tw + 8;
+      let x = Math.min(W - w - 4, r.x + r.w + si * 0.4);
+      // Ý ngắn (1 dòng) → căn giữa dòng; ý dài nhiều dòng → đặt ở dòng đầu của lời giải
+      let y = Math.max(2, r.h <= si * 2.2 ? r.y + (r.h - si) / 2 : r.y);
+      // Trùng chỗ với dấu đã vẽ → dịch sang PHẢI (giữ đúng dòng); hết chỗ mới xuống dưới
+      for (let guard = 0; guard < 20; guard++) {
+        const hit = placed.find((p) => x < p.x + p.w && x + w > p.x && y < p.y + p.h && y + si > p.y);
+        if (!hit) break;
+        if (hit.x + hit.w + 6 + w <= W) x = hit.x + hit.w + 6;
+        else { x = Math.min(W - w - 4, r.x + r.w + si * 0.4); y = hit.y + hit.h + 2; }
+      }
+      placed.push({ x, y, w, h: si });
+      if (it.status === 'correct') drawCheck(g, x, y, si, color);
+      else if (it.status === 'partial') drawPartial(g, x, y, si, color);
+      else drawCross(g, x, y, si, color);
+      label(g, text, x + si * 1.15, y + si * 0.78, fi, color);
     }
 
     const name = `${opts.prefix || 'graded'}_${k + 1}.jpg`;

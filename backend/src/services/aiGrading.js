@@ -460,7 +460,13 @@ Trả về JSON theo schema.`,
     score: final.score,
     feedback: final.feedback,
     details: toDetails(final.items),
-    marks: { pages: graded, review },
+    // items: vị trí + kết quả từng ý (không kèm lời giải) để vẽ lại ảnh chấm mà không cần gọi AI lại
+    marks: {
+      pages: graded,
+      review,
+      items: final.items.map((it) => ({ short: it.short, status: it.status, points: it.points, max_points: it.max_points, page: it.page, box_2d: it.box_2d, errors: it.errors })),
+      page_order: final.page_order,
+    },
     raw: { run1: r1, run2: r2, final },
   };
 }
