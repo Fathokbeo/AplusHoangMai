@@ -10,7 +10,8 @@ import SubmitForStudentModal from '../../components/SubmitForStudentModal';
 import { toast } from '../../components/Toast';
 import { parsePartsConfig, hasObjectiveParts } from '../../lib/homeworkParts';
 import { summarizeEssayFeedback, homeworkHasEssay } from '../../lib/feedbackSummary';
-import { ChevronLeft, Users, CheckCircle, XCircle, Clock, Bot, Star, Eye, Download, Repeat, Camera } from 'lucide-react';
+import { ChevronLeft, Users, CheckCircle, XCircle, Clock, Bot, Star, Eye, Download, Repeat, Camera, AlertTriangle } from 'lucide-react';
+import { gradedPageUrls, gradedReview } from '../../lib/gradedPages';
 
 // Danh sách URL file của một bài nộp (hỗ trợ cũ: 1 file, mới: nhiều file dạng JSON)
 function submissionFileUrls(s: any): string[] {
@@ -29,6 +30,8 @@ export default function HomeworkDetail() {
   const [loading, setLoading] = useState(false);
   const [regrading, setRegrading] = useState<number | null>(null);
   const [viewFiles, setViewFiles] = useState<string[] | null>(null);
+  // Bài nộp đang mở ở chế độ "Xem bài chấm" (ảnh đã sửa + chi tiết từng câu + đối chiếu 2 lần AI chấm)
+  const [viewGraded, setViewGraded] = useState<any>(null);
   // Học sinh đang được giáo viên nộp hộ (mở hộp chụp ảnh / chọn file)
   const [submitFor, setSubmitFor] = useState<any>(null);
   // Thanh chọn: tất cả / đã nộp / chưa nộp (lọc danh sách) hoặc "Nhận xét" (khối nhận xét cả lớp)
@@ -283,12 +286,10 @@ export default function HomeworkDetail() {
             <tr>
               <th>Học sinh</th>
               <th>Trạng thái</th>
-              <th>Thời gian nộp</th>
-              <th>Số lần nộp</th>
-              <th>File bài</th>
+              <th>Nộp lúc</th>
+              <th>Bài làm</th>
               <th>Điểm</th>
-              <th>Chấm bởi</th>
-              <th>Thao tác</th>
+              <th style={{ textAlign: 'right' }}>Thao tác</th>
             </tr>
           </thead>
           <tbody>
@@ -296,37 +297,55 @@ export default function HomeworkDetail() {
               const submitted = !!s.submission_id;
               const sc = submitted && s.score !== null ? scoreColor(s.score, hw.max_score) : null;
               const fileUrls = submitted ? submissionFileUrls(s) : [];
+              const graded = submitted ? gradedPageUrls(s.graded_pages) : [];
+              const review = submitted ? gradedReview(s.graded_pages) : null;
+              const at = submitted ? new Date(s.submitted_at) : null;
               return (
                 <tr key={s.student_id}>
-                  <td><strong>{s.full_name}</strong><div style={{ fontSize: '0.78rem', color: '#999' }}>{s.username}</div></td>
+                  <td><strong>{s.full_name}</strong><div style={{ fontSize: '0.76rem', color: '#999' }}>{s.username}</div></td>
                   <td>
                     {submitted
                       ? <>
-                          <span className="badge badge-green"><CheckCircle size={10} style={{ marginRight: 4 }} />Đã nộp</span>
-                          {s.submitted_by && <div style={{ fontSize: '0.72rem', color: '#6A1B9A', marginTop: 3 }} title={s.submitted_by_name ? `Nộp hộ bởi ${s.submitted_by_name}` : undefined}><Camera size={10} style={{ verticalAlign: 'middle' }} /> GV nộp hộ</div>}
+                          <span className="badge badge-green" style={{ whiteSpace: 'nowrap' }}><CheckCircle size={10} style={{ marginRight: 4 }} />Đã nộp</span>
+                          {s.submitted_by && <div style={{ fontSize: '0.7rem', color: '#6A1B9A', marginTop: 3, whiteSpace: 'nowrap' }} title={s.submitted_by_name ? `Nộp hộ bởi ${s.submitted_by_name}` : undefined}>GV nộp hộ</div>}
                         </>
                       : isOverdue
-                        ? <span className="badge badge-red"><XCircle size={10} style={{ marginRight: 4 }} />Chưa nộp bài</span>
+                        ? <span className="badge badge-red" style={{ whiteSpace: 'nowrap' }}><XCircle size={10} style={{ marginRight: 4 }} />Chưa nộp bài</span>
                         : <span className="badge badge-gray">Chưa nộp</span>}
                   </td>
-                  <td style={{ fontSize: '0.82rem', color: '#888' }}>{submitted ? new Date(s.submitted_at).toLocaleString('vi-VN') : '—'}</td>
-                  <td style={{ fontSize: '0.82rem' }}>
-                    {submitted ? `${s.submit_count || 1}${hw.max_attempts ? `/${hw.max_attempts}` : ''}` : '—'}
+                  <td style={{ fontSize: '0.8rem', color: '#777', whiteSpace: 'nowrap' }}>
+                    {at ? (
+                      <>
+                        {at.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} · {at.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })}
+                        <div style={{ fontSize: '0.7rem', color: '#aaa' }}>Lần {s.submit_count || 1}{hw.max_attempts ? `/${hw.max_attempts}` : ''}</div>
+                      </>
+                    ) : '—'}
                   </td>
                   <td>
-                    {fileUrls.length > 0 ? (
-                      <button className="btn btn-ghost btn-sm" onClick={() => setViewFiles(fileUrls)}>
-                        <Eye size={13} /> Xem{fileUrls.length > 1 ? ` (${fileUrls.length})` : ''}
+                    {graded.length > 0 ? (
+                      <button className="btn btn-ghost btn-sm" style={{ whiteSpace: 'nowrap', color: '#C62828' }} onClick={() => setViewGraded(s)}
+                        title={review?.needs_teacher ? 'Hai lần AI chấm lệch nhau nhiều — nên xem lại' : 'Ảnh bài làm đã chấm: đúng/sai từng câu, gạch chỗ sai'}>
+                        <Eye size={13} /> Xem bài chấm
+                        {review?.needs_teacher && <AlertTriangle size={13} color="#E65100" />}
+                      </button>
+                    ) : fileUrls.length > 0 ? (
+                      <button className="btn btn-ghost btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={() => setViewFiles(fileUrls)}>
+                        <Eye size={13} /> Xem bài{fileUrls.length > 1 ? ` (${fileUrls.length})` : ''}
                       </button>
                     ) : submitted && s.structured_answers ? (
                       <span style={{ fontSize: '0.78rem', color: '#6A1B9A' }}>Đã làm bài</span>
                     ) : '—'}
                   </td>
-                  <td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
                     {submitted ? (
                       s.score !== null ? (
-                        <span style={{ background: sc?.bg, color: sc?.color, padding: '3px 10px', borderRadius: 99, fontWeight: 700, fontSize: '0.88rem' }}>
-                          {s.score}/{hw.max_score}
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ background: sc?.bg, color: sc?.color, padding: '3px 10px', borderRadius: 99, fontWeight: 700, fontSize: '0.88rem' }}>
+                            {s.score}/{hw.max_score}
+                          </span>
+                          {s.graded_by_ai
+                            ? <span title="AI chấm" style={{ color: '#6A1B9A', display: 'inline-flex' }}><Bot size={14} /></span>
+                            : <span title="Giáo viên chấm" style={{ fontSize: '0.68rem', color: '#1565C0', fontWeight: 700 }}>GV</span>}
                         </span>
                       ) : (s.grading_status === 'pending' || s.grading_status === 'grading') ? (
                         <span style={{ color: '#1565C0', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -343,27 +362,21 @@ export default function HomeworkDetail() {
                     ) : <span style={{ color: '#ccc' }}>—</span>}
                   </td>
                   <td>
-                    {submitted
-                      ? (s.graded_by_ai ? <span className="badge badge-purple"><Bot size={10} style={{ marginRight: 4 }} />AI</span> : s.score !== null ? <span className="badge badge-blue">Thủ công</span> : '—')
-                      : '—'}
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {submitted && (
-                      <>
-                        <button className="btn btn-secondary btn-sm" onClick={() => openGrade({ ...s, id: s.submission_id })}>
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
+                      {submitted && (
+                        <button className="btn btn-secondary btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={() => openGrade({ ...s, id: s.submission_id })}>
                           <Star size={13} /> {s.score !== null ? 'Sửa điểm' : 'Chấm'}
                         </button>
-                        {aiGradable && (fileUrls.length > 0 || s.structured_answers) && (
-                          <button className="btn btn-ghost btn-sm" onClick={() => regrade(s.submission_id)} disabled={regrading === s.submission_id} title="Chấm lại bằng AI">
-                            <Bot size={13} style={{ color: '#6A1B9A' }} />
-                            {regrading === s.submission_id ? '...' : 'AI'}
-                          </button>
-                        )}
-                      </>
-                    )}
-                      <button className="btn btn-ghost btn-sm" onClick={() => setSubmitFor(s)} title="Chụp ảnh / chọn file bài làm và nộp thay học sinh">
-                        <Camera size={13} /> {submitted ? 'Nộp lại hộ' : 'Nộp hộ'}
+                      )}
+                      {submitted && aiGradable && (fileUrls.length > 0 || s.structured_answers) && (
+                        <button className="btn btn-ghost btn-sm" onClick={() => regrade(s.submission_id)} disabled={regrading === s.submission_id} title="Chấm lại bằng AI">
+                          <Bot size={14} style={{ color: '#6A1B9A' }} />
+                          {regrading === s.submission_id && '...'}
+                        </button>
+                      )}
+                      <button className="btn btn-ghost btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={() => setSubmitFor(s)}
+                        title={submitted ? 'Nộp lại hộ học sinh (chụp ảnh / chọn file)' : 'Nộp hộ học sinh (chụp ảnh / chọn file)'}>
+                        <Camera size={14} />{!submitted && ' Nộp hộ'}
                       </button>
                     </div>
                   </td>
@@ -371,10 +384,10 @@ export default function HomeworkDetail() {
               );
             })}
             {roster.length === 0 && (
-              <tr><td colSpan={8} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Lớp chưa có học sinh</td></tr>
+              <tr><td colSpan={6} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Lớp chưa có học sinh</td></tr>
             )}
             {roster.length > 0 && visibleRoster.length === 0 && (
-              <tr><td colSpan={8} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Không có học sinh nào trong nhóm lọc này</td></tr>
+              <tr><td colSpan={6} style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Không có học sinh nào trong nhóm lọc này</td></tr>
             )}
           </tbody>
         </table>
@@ -407,6 +420,59 @@ export default function HomeworkDetail() {
 
       {/* File Viewer Modal */}
       {viewFiles && <FileViewer files={viewFiles} onClose={() => setViewFiles(null)} />}
+
+      {/* Xem bài chấm: ảnh bài làm AI đã sửa (đúng thứ tự trang, ✓/✗ từng câu, gạch chỗ sai) */}
+      {viewGraded && (
+        <FileViewer
+          files={gradedPageUrls(viewGraded.graded_pages)}
+          onClose={() => setViewGraded(null)}
+          title={`Bài chấm: ${viewGraded.full_name} — ${viewGraded.score ?? '?'}/${hw.max_score}`}
+          headerExtra={submissionFileUrls(viewGraded).length > 0 && (
+            <button className="btn btn-ghost btn-sm" onClick={() => { const f = submissionFileUrls(viewGraded); setViewGraded(null); setViewFiles(f); }}>Bài gốc</button>
+          )}
+          aside={<GradedAside sub={viewGraded} />}
+        />
+      )}
+    </div>
+  );
+}
+
+// Cột bên phải khi xem bài chấm: cảnh báo cần xem lại, đối chiếu 2 lần AI chấm, chi tiết từng câu.
+function GradedAside({ sub }: { sub: any }) {
+  const review = gradedReview(sub.graded_pages);
+  const diffs = (review?.comparison || []).filter((c) => Math.abs((c.run1_points ?? 0) - (c.run2_points ?? 0)) > 1e-9 || Math.abs((c.final_points ?? 0) - (c.run1_points ?? 0)) > 1e-9);
+  return (
+    <div>
+      {review && (
+        <div style={{ fontSize: '0.8rem', color: '#555', marginBottom: 10 }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {review.run1 && <span className="badge badge-gray">Lần 1: {review.run1.score}</span>}
+            {review.run2 && <span className="badge badge-gray">Lần 2: {review.run2.score}</span>}
+            {review.final && <span className="badge badge-purple">Chốt: {review.final.score}</span>}
+          </div>
+          {review.needs_teacher && (
+            <div style={{ marginTop: 8, padding: '6px 10px', background: '#FFF3E0', color: '#E65100', borderRadius: 8, display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+              <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+              <span>{review.note || 'Hai lần AI chấm lệch nhau nhiều — nên xem lại bài này.'}</span>
+            </div>
+          )}
+          {review.skipped && (
+            <div style={{ marginTop: 8, color: '#2E7D32' }}>Hai lần chấm khớp nhau ở mọi ý — không cần đối chiếu thêm.</div>
+          )}
+          {diffs.length > 0 && (
+            <details style={{ marginTop: 8 }}>
+              <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Đối chiếu 2 lần chấm ({diffs.length} ý lệch)</summary>
+              {diffs.map((c, i) => (
+                <div key={i} style={{ marginTop: 6, padding: '6px 8px', background: '#FAFAFA', borderRadius: 6 }}>
+                  <strong>{c.question}</strong>: lần 1 {c.run1_points} · lần 2 {c.run2_points} → chốt {c.final_points}
+                  <div style={{ color: '#666', marginTop: 2 }}>{c.analysis}</div>
+                </div>
+              ))}
+            </details>
+          )}
+        </div>
+      )}
+      <GradingDetails details={sub.grading_details} />
     </div>
   );
 }

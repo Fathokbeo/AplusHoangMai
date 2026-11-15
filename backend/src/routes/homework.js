@@ -12,6 +12,7 @@ const { compareVietnameseName } = require('../services/vietnameseName');
 const { redactSecrets } = require('../services/security');
 const { scheduleRubricGeneration, sanitizePartsConfig, sanitizeHsaConfig, sanitizeTimeLimit, originalName } = require('../services/homeworkForm');
 const { archiveBeforeResubmit, settleBest, parseBest, bestFilenames } = require('../services/bestAttempt');
+const { removeGradedFiles, gradedPagesForStudent } = require('../services/gradingPages');
 
 router.use(authMiddleware);
 
@@ -34,7 +35,7 @@ function submissionFilenames(sub) {
 function withBestFallback(sub) {
   const best = sub.score === null || sub.score === undefined ? parseBest(sub.best_attempt) : null;
   if (!best) return sub;
-  return { ...sub, score: best.score, feedback: best.feedback, grading_details: best.grading_details, graded_at: best.graded_at, graded_by_ai: best.graded_by_ai, showing_best: true };
+  return { ...sub, score: best.score, feedback: best.feedback, grading_details: best.grading_details, graded_pages: best.graded_pages ?? null, graded_at: best.graded_at, graded_by_ai: best.graded_by_ai, showing_best: true };
 }
 
 // ── Create homework (teacher/admin) ────────────────────────────────────
@@ -198,8 +199,10 @@ router.delete('/homework/:id/files/:kind', requireRole('teacher', 'admin'), (req
 router.delete('/homework/:id', requireRole('teacher', 'admin'), (req, res) => {
   const db = getDb();
   // Xóa các bài nộp tham chiếu trước (tránh lỗi FOREIGN KEY)
-  const subs = db.prepare('SELECT file_path,files,best_attempt FROM submissions WHERE homework_id=?').all(req.params.id);
+  const subs = db.prepare('SELECT file_path,files,best_attempt,graded_pages FROM submissions WHERE homework_id=?').all(req.params.id);
   subs.forEach(s => {
+    removeGradedFiles(s.graded_pages);
+    removeGradedFiles((parseBest(s.best_attempt) || {}).graded_pages);
     [...submissionFilenames(s), ...bestFilenames(s)].forEach(name => {
       const f = path.join(__dirname, '../../uploads/submissions', name);
       if (fs.existsSync(f)) fs.unlinkSync(f);
@@ -234,7 +237,13 @@ router.get('/homework/:id', (req, res) => {
     // Lần nộp mới đang chờ chấm mà đã có lần trước có điểm → hiện kết quả lần trước (điểm cao nhất)
     const view = submission ? withBestFallback(submission) : null;
     const safeSubmission = view
-      ? { ...view, feedback: canSeeAnswer ? view.feedback : null, grading_details: canSeeAnswer ? view.grading_details : null }
+      ? {
+          ...view,
+          feedback: canSeeAnswer ? view.feedback : null,
+          grading_details: canSeeAnswer ? view.grading_details : null,
+          // Ảnh bài đã chấm (AI sửa) chỉ hiện từ "Thời gian xem đáp án"; trước đó học sinh xem bài đã nộp.
+          graded_pages: canSeeAnswer ? gradedPagesForStudent(view.graded_pages) : null,
+        }
       : null;
     if (safeSubmission) delete safeSubmission.best_attempt;
     // Giới hạn số lần nộp bài (nếu giáo viên có đặt): hết hạn hoặc hết lượt đều không cho nộp nữa.
@@ -265,7 +274,7 @@ router.get('/homework/:id', (req, res) => {
   const roster = db.prepare(`
     SELECT u.id student_id, u.username, u.full_name, cs.sort_order,
            s.id submission_id, s.file_path, s.files, s.structured_answers, s.submitted_at,
-           s.score, s.feedback, s.graded_at, s.graded_by_ai, s.grading_details, s.grading_status, s.submit_count, s.best_score,
+           s.score, s.feedback, s.graded_at, s.graded_by_ai, s.grading_details, s.graded_pages, s.grading_status, s.submit_count, s.best_score,
            s.submitted_by, sb.full_name submitted_by_name,
            m.quiz_score, m.attendance
     FROM class_students cs JOIN users u ON cs.student_id=u.id
@@ -352,7 +361,7 @@ function acceptSubmission(db, { hw, studentId, uploaded, structuredJson, enforce
 
   let submissionId;
   if (existing) {
-    db.prepare('UPDATE submissions SET file_path=?,files=?,structured_answers=?,submitted_at=?,score=NULL,feedback=NULL,grading_details=NULL,graded_at=NULL,graded_by_ai=0,grading_status=?,grading_attempts=0,submit_count=?,best_attempt=?,best_score=?,submitted_by=? WHERE id=?')
+    db.prepare('UPDATE submissions SET file_path=?,files=?,structured_answers=?,submitted_at=?,score=NULL,feedback=NULL,grading_details=NULL,graded_pages=NULL,graded_at=NULL,graded_by_ai=0,grading_status=?,grading_attempts=0,submit_count=?,best_attempt=?,best_score=?,submitted_by=? WHERE id=?')
       .run(filenames[0] || null, filesJson, structuredJson, now, initialStatus, newSubmitCount, best.bestJson, best.bestScore, submittedBy, existing.id);
     submissionId = existing.id;
   } else {

@@ -4,7 +4,7 @@ import { parsePartsConfig } from './homeworkParts';
 // Chuẩn form, ngắn gọn: làm đủ & đúng → "Có làm, trình bày đầy đủ."; còn lại chỉ nêu câu nào
 // làm thiếu / sai, KHÔNG nêu chi tiết lỗi. Nhận xét chi tiết học sinh thấy trên web giữ nguyên.
 
-type Detail = { question?: string; status?: string; comment?: string };
+type Detail = { question?: string; status?: string; comment?: string; label?: string; error_types?: string[] };
 
 const OBJECTIVE_RE = /^(trắc nghiệm|đúng\/sai|trả lời ngắn)\b/i;
 const NOT_DONE_RE = /không làm|chưa làm|bỏ trống|để trống|bỏ qua|không có (bài|lời giải)|không thấy (bài|lời giải)|không trình bày/i;
@@ -22,7 +22,18 @@ function questionLabel(q: string): string {
   return q.replace(/tự\s*luận/i, '').replace(/[:\-–]/g, ' ').trim() || q;
 }
 
-const joinLabels = (labels: string[]) => [...new Set(labels)].join(', ');
+// Gộp nhãn cùng câu: ["5a","5b","5c","6b"] → "5abc, 6b"
+const joinLabels = (labels: string[]) => {
+  const groups = new Map<string, string[]>();
+  [...new Set(labels.filter(Boolean))].forEach((l) => {
+    const m = l.match(/^(.*?\d)\s*([a-zđ])$/i);
+    const key = m ? m[1] : `\u0000${l}`;
+    groups.set(key, [...(groups.get(key) || []), m ? m[2].toLowerCase() : l]);
+  });
+  return [...groups.entries()].map(([k, v]) => (k.startsWith('\u0000') ? v[0] : k + v.sort().join(''))).join(', ');
+};
+// Nhãn ngắn của 1 ý: ưu tiên label AI trả về ("5a"), không có thì rút từ tên câu
+const itemLabel = (d: Detail) => String(d.label || '').replace(/^\s*(câu|bài)\s*/i, '').trim() || questionLabel(String(d.question || ''));
 
 type HwLike = { parts_config?: any; exam_type?: string };
 
@@ -147,7 +158,10 @@ export function buildStudentReview(s: any, hw: HwLike & { due_date?: string | nu
       objWrong.set(obj.label, arr);
       return;
     }
-    const label = questionLabel(q);
+    const label = itemLabel(d);
+    // AI chấm mới: đã gắn sẵn loại lỗi (TT/TB/DD/KT/KL) cho từng ý
+    const typed = (Array.isArray(d.error_types) ? d.error_types : []).filter((t): t is ErrorTag => ['TT', 'TB', 'DD', 'KT', 'KL'].includes(t));
+    if (typed.length) { typed.forEach((t) => byTag.set(t, [...(byTag.get(t) || []), label])); return; }
     if (NOT_DONE_RE.test(comment)) { notDone.push(label); return; }
     const rule = TAG_RULES.find((r) => r.re.test(comment));
     if (rule) { byTag.set(rule.key, [...(byTag.get(rule.key) || []), label]); return; }

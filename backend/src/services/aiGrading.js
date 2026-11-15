@@ -1,9 +1,28 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fs = require('fs');
 const path = require('path');
 const { parsePartsConfig, partEnabled, describeAnswerKey, describeStudentAnswers } = require('./homeworkParts');
+const { generateJson, generateJsonMulti, isQuotaError } = require('./geminiClient');
+const { preparePages, renderGradedPages } = require('./gradingPages');
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY);
+// ── Chọn model ───────────────────────────────────────────────────────────────────────
+// Chấm bài: CHỈ dùng model "mạnh" (Flash đời mới, có suy luận). Hai lần chấm độc lập dùng 2 model KHÁC
+// nhau (lỗi của 2 model ít trùng nhau → đối chiếu bắt được nhiều chỗ sai hơn), lần đối chiếu dùng model
+// mạnh nhất. Ghi đè bằng biến môi trường GEMINI_GRADING_MODELS="m1,m2,..." (theo thứ tự ưu tiên).
+// Không rơi xuống bản Lite khi chấm: hết quota thì để hàng đợi chấm lại sau, không chấm kém chính xác.
+const DEFAULT_GRADING_MODELS = [
+  'gemini-3.8-flash',
+  'gemini-3.7-flash',
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
+  'gemini-3-flash-preview',
+];
+// Việc nhẹ (đọc bảng đáp án, tóm tắt chủ đề) → Lite trước để dành quota model mạnh cho chấm bài.
+const LITE_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite', ...DEFAULT_GRADING_MODELS];
+
+function gradingModels() {
+  const env = String(process.env.GEMINI_GRADING_MODELS || '').split(',').map((s) => s.trim()).filter(Boolean);
+  return env.length ? env : DEFAULT_GRADING_MODELS;
+}
 
 function fileToBase64(filePath) {
   return fs.readFileSync(filePath).toString('base64');
@@ -11,66 +30,173 @@ function fileToBase64(filePath) {
 
 function getMimeType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
-  const map = {
-    '.pdf':  'application/pdf',
-    '.jpg':  'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.png':  'image/png',
-    '.webp': 'image/webp',
-  };
+  const map = { '.pdf': 'application/pdf', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' };
   return map[ext] || 'application/octet-stream';
 }
 
 function buildInlinePart(filePath) {
-  return {
-    inlineData: {
-      data: fileToBase64(filePath),
-      mimeType: getMimeType(filePath),
-    },
-  };
+  return { inlineData: { data: fileToBase64(filePath), mimeType: getMimeType(filePath) } };
 }
 
-// Free tier: các model Flash "xịn" chỉ có 20 request/NGÀY mỗi model (5 req/phút),
-// còn Flash Lite 3.x có tới 500 request/ngày (15 req/phút). Gemini Pro free tier = 0, không dùng được.
-// Chiến lược: lần chấm ĐẦU của mỗi bài dùng Flash xịn (chính xác nhất) — 50 bài/ngày vừa khít
-// tổng quota 4 model Flash (4×20=80). Các lần chấm lại dùng Flash Lite (quota 2×500=1000/ngày).
-const STRONG_MODELS = [
-  'gemini-3.6-flash',
-  'gemini-3.5-flash',
-  'gemini-3-flash-preview',
-  'gemini-2.5-flash',
-  // Hết sạch quota Flash xịn thì rơi xuống Lite thay vì fail
-  'gemini-3.5-flash-lite',
-  'gemini-3.1-flash-lite',
-];
-const LITE_MODELS = [
-  'gemini-3.5-flash-lite',
-  'gemini-3.1-flash-lite',
-  // Lite hết quota (hiếm) thì mượn Flash xịn — đủ cả 4 model để tối đa khả năng chấm được (không dừng giữa chừng)
-  'gemini-3.6-flash',
-  'gemini-3.5-flash',
-  'gemini-3-flash-preview',
-  'gemini-2.5-flash',
-];
-// Trích đáp án từ file là việc dễ (đọc bảng đáp án) → dùng Lite để dành quota Flash xịn cho chấm bài
-const EXTRACT_MODELS = LITE_MODELS;
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
-// Giới hạn đầu ra để tiết kiệm token + ép trả JSON thuần (không markdown)
-const GENERATION_CONFIG = {
-  temperature: 0.7,
-  maxOutputTokens: 4096,
-  responseMimeType: 'application/json',
+// ── JSON schema kết quả chấm (Gemini responseSchema). Thứ tự trường = thứ tự AI viết: chép lại bài làm
+//    → đối chiếu, nêu lý do → mới cho điểm (điểm là KẾT LUẬN của lý do, không phải đoán trước).
+const ITEM_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    question: { type: 'STRING', description: 'Tên ý đầy đủ, vd "Tự luận Bài I.1", "Tự luận Bài 3b", "TN câu 2"' },
+    short: { type: 'STRING', description: 'Nhãn rất ngắn để vẽ lên ảnh, vd "I.1", "3b", "TN2"' },
+    max_points: { type: 'NUMBER', description: 'Điểm tối đa của ý theo biểu điểm' },
+    page: { type: 'INTEGER', description: 'Số TRANG (1..N) chứa bài làm ý này; 0 nếu học sinh không làm' },
+    box_2d: { type: 'ARRAY', items: { type: 'INTEGER' }, description: '[ymin, xmin, ymax, xmax] thang 0-1000 bao phần bài làm ý này trên trang' },
+    student_work: { type: 'STRING', description: 'Chép lại ngắn gọn học sinh đã viết gì cho ý này (hoặc "không làm")' },
+    attempted: { type: 'BOOLEAN', description: 'Học sinh CÓ viết bài làm cho ý này trong ảnh không' },
+    reason: { type: 'STRING', description: 'Đối chiếu với đáp án/biểu điểm: đúng ở đâu, sai ở bước nào, vì sao trừ điểm' },
+    errors: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          page: { type: 'INTEGER' },
+          box_2d: { type: 'ARRAY', items: { type: 'INTEGER' } },
+          note: { type: 'STRING', description: 'Ghi chú lỗi rất ngắn (≤ 12 từ)' },
+        },
+        required: ['page', 'box_2d', 'note'],
+        propertyOrdering: ['page', 'box_2d', 'note'],
+      },
+    },
+    error_types: {
+      type: 'ARRAY',
+      items: { type: 'STRING', enum: ['TT', 'TB', 'DD', 'KT', 'KL'] },
+      description: 'Loại lỗi của ý (rỗng nếu đúng hết / không làm): TT tính toán sai; TB trình bày, lập luận chưa chặt chẽ, thiếu bước, thiếu điều kiện; DD đọc đề sai/sót yêu cầu; KT sai kiến thức, sai công thức/phương pháp; KL thiếu/sai kết luận, kí hiệu, đơn vị',
+    },
+    status: { type: 'STRING', enum: ['correct', 'partial', 'wrong', 'missing'] },
+    points: { type: 'NUMBER', description: 'Điểm đạt được của ý (0..max_points)' },
+  },
+  required: ['question', 'short', 'max_points', 'page', 'student_work', 'attempted', 'reason', 'status', 'points'],
+  propertyOrdering: ['question', 'short', 'max_points', 'page', 'box_2d', 'student_work', 'attempted', 'reason', 'errors', 'error_types', 'status', 'points'],
 };
 
-// Đọc đáp án từ file: cần CHÍNH XÁC, ổn định → nhiệt độ thấp.
-const EXTRACT_CONFIG = {
-  temperature: 0.1,
-  maxOutputTokens: 2048,
-  responseMimeType: 'application/json',
+const GRADE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    page_order: { type: 'ARRAY', items: { type: 'INTEGER' }, description: 'Thứ tự đọc ĐÚNG của các trang (hoán vị của 1..N)' },
+    rubric_total: { type: 'NUMBER', description: 'Tổng điểm GỐC theo biểu điểm của tất cả các ý trong phạm vi chấm' },
+    items: { type: 'ARRAY', items: ITEM_SCHEMA },
+    feedback: { type: 'STRING' },
+  },
+  required: ['page_order', 'rubric_total', 'items', 'feedback'],
+  propertyOrdering: ['page_order', 'rubric_total', 'items', 'feedback'],
 };
+
+const REVIEW_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    comparison: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          question: { type: 'STRING' },
+          run1_points: { type: 'NUMBER' },
+          run2_points: { type: 'NUMBER' },
+          analysis: { type: 'STRING', description: 'Xem lại bài làm thật: lần nào chấm sai, sai vì sao (đọc nhầm chữ, bỏ sót bước, áp sai biểu điểm...)' },
+          final_points: { type: 'NUMBER' },
+        },
+        required: ['question', 'run1_points', 'run2_points', 'analysis', 'final_points'],
+        propertyOrdering: ['question', 'run1_points', 'run2_points', 'analysis', 'final_points'],
+      },
+    },
+    page_order: GRADE_SCHEMA.properties.page_order,
+    rubric_total: GRADE_SCHEMA.properties.rubric_total,
+    items: GRADE_SCHEMA.properties.items,
+    feedback: { type: 'STRING' },
+  },
+  required: ['comparison', 'page_order', 'rubric_total', 'items', 'feedback'],
+  propertyOrdering: ['comparison', 'page_order', 'rubric_total', 'items', 'feedback'],
+};
+
+// Chuẩn hóa kết quả AI → items hợp lệ + điểm do SERVER cộng (không tin con số tổng AI tự ghi).
+//  - ý học sinh không làm (attempted=false / status missing / không có trang) → 0 điểm
+//  - điểm từng ý bị kẹp trong [0, max_points]
+//  - max_points là điểm GỐC theo biểu điểm; quy đổi về thang = tổng điểm đạt × thang / tổng biểu điểm.
+//    Mẫu số lấy max(tổng max_points các ý, rubric_total AI khai): AI bỏ sót ý nào thì ý đó tính 0 điểm,
+//    KHÔNG phóng điểm lên (chính lỗi "làm 2/4 ý vẫn đủ điểm" trước đây).
+//  - điểm cuối làm tròn theo bước SCORE_STEP (mặc định 0,25 như giáo viên chấm tay).
+function normalizeResult(raw, maxScore, pageCount) {
+  const validPage = (p) => Number.isInteger(Number(p)) && Number(p) >= 1 && Number(p) <= pageCount;
+  const items = (Array.isArray(raw && raw.items) ? raw.items : [])
+    .filter((it) => it && (it.question || it.short))
+    .map((it) => {
+      const max = Math.max(0, Number(it.max_points) || 0);
+      let pts = Math.max(0, Math.min(max, Number(it.points) || 0));
+      let status = ['correct', 'partial', 'wrong', 'missing'].includes(it.status) ? it.status : 'partial';
+      const attempted = it.attempted !== false && status !== 'missing';
+      if (!attempted) { pts = 0; status = 'missing'; }
+      else if (max > 0 && pts >= max - 1e-9) status = 'correct';
+      else if (pts <= 1e-9) status = 'wrong';
+      else status = 'partial';
+      const page = validPage(it.page) ? Number(it.page) : 0;
+      return {
+        question: String(it.question || it.short).slice(0, 100),
+        short: String(it.short || it.question || '').slice(0, 14),
+        max_points: round2(max),
+        points: round2(pts),
+        status,
+        attempted,
+        student_work: String(it.student_work || '').slice(0, 400),
+        reason: String(it.reason || '').slice(0, 700),
+        page,
+        box_2d: Array.isArray(it.box_2d) ? it.box_2d.slice(0, 4).map(Number) : null,
+        errors: (Array.isArray(it.errors) ? it.errors : [])
+          .filter((e) => e && validPage(e.page) && Array.isArray(e.box_2d))
+          .slice(0, 6)
+          .map((e) => ({ page: Number(e.page), box_2d: e.box_2d.slice(0, 4).map(Number), note: String(e.note || '').slice(0, 90) })),
+        error_types: status === 'correct' || status === 'missing' ? []
+          : [...new Set((Array.isArray(it.error_types) ? it.error_types : []).filter((t) => ['TT', 'TB', 'DD', 'KT', 'KL'].includes(t)))],
+      };
+    });
+
+  const sumMax = round2(items.reduce((s, it) => s + it.max_points, 0));
+  const sumPts = round2(items.reduce((s, it) => s + it.points, 0));
+  const rubricTotal = Number(raw && raw.rubric_total) > 0 ? Number(raw.rubric_total) : 0;
+  const denom = Math.max(sumMax, rubricTotal || maxScore);
+  let score = maxScore > 0 && denom > 0 ? (sumPts * maxScore) / denom : sumPts;
+  const step = Number(process.env.SCORE_STEP) > 0 ? Number(process.env.SCORE_STEP) : 0.25;
+  score = round2(Math.round(score / step + 1e-9) * step);
+  score = Math.max(0, Math.min(maxScore, score));
+
+  // Thứ tự trang: phải là hoán vị của 1..N, thiếu trang nào thì nối vào cuối
+  let order = (Array.isArray(raw && raw.page_order) ? raw.page_order : []).map(Number).filter((p) => validPage(p));
+  order = [...new Set(order)];
+  for (let i = 1; i <= pageCount; i++) if (!order.includes(i)) order.push(i);
+
+  return { score, sumMax, sumPts, rubricTotal, items, page_order: order, feedback: String((raw && raw.feedback) || '').slice(0, 1500) };
+}
+
+// items → grading_details lưu DB (giữ các trường cũ question/status/comment để giao diện + nhận xét
+// tự động hiện có vẫn chạy; thêm points/max_points).
+function toDetails(items) {
+  return items.map((it) => {
+    const errTxt = it.errors.length
+      ? ' Lỗi: ' + it.errors.map((e, i) => `(${e.mark_no || i + 1}) ${e.note}`).join('; ') + '.'
+      : '';
+    const base = it.status === 'missing' ? `Không làm ý này. ${it.reason}`.trim() : it.reason;
+    return {
+      question: it.question,
+      status: it.status === 'missing' ? 'wrong' : it.status,
+      comment: `${base}${errTxt}`.slice(0, 900),
+      points: it.points,
+      max_points: it.max_points,
+      label: it.short,              // nhãn ngắn của ý ("5a", "I.2") — để gom nhận xét "câu 5abc, 6b"
+      error_types: it.error_types,  // TT/TB/DD/KT/KL — để nhận xét theo loại lỗi
+    };
+  });
+}
 
 async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 10, gradingNote = '', opts = {}) {
-  const { partsConfig = null, scope = null, studentAnswers = null } = opts;
+  const { partsConfig = null, scope = null, studentAnswers = null, annotatePrefix = null, models: modelsOverride = null, realtime = false } = opts;
   const cfg = parsePartsConfig(partsConfig);
 
   // Phần nào AI cần chấm (scope do hàng đợi truyền vào). Bài cũ (không cfg) → chấm toàn bộ kiểu tự luận.
@@ -81,216 +207,267 @@ async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 1
   };
   const objOnly = { multiple_choice: gradePart('multiple_choice'), true_false: gradePart('true_false'), short_answer: gradePart('short_answer') };
   const gradeObjective = objOnly.multiple_choice || objOnly.true_false || objOnly.short_answer;
-  const gradeEssay = cfg ? gradePart('essay') : true; // bài cũ: chấm toàn bộ như tự luận
+  const gradeEssay = cfg ? gradePart('essay') : true;
 
-  // File đáp án tự luận (PDF) — có thể không có nếu chỉ chấm phần objective
   const hasAnswerFile = !!answerFilePath && fs.existsSync(answerFilePath);
-
-  // Đáp án học sinh đã điền ở giao diện (cho phần khách quan) — dùng thay cho việc dò trong ảnh.
   const studentText = (cfg && gradeObjective && studentAnswers) ? describeStudentAnswers(cfg, studentAnswers) : '';
 
-  // Học sinh có thể nộp nhiều file (nhiều ảnh / PDF) — chuẩn hóa về mảng
   const subPaths = (Array.isArray(submissionFilePaths) ? submissionFilePaths : [submissionFilePaths]).filter(Boolean);
   for (const p of subPaths) {
     if (!fs.existsSync(p)) throw new Error('File bài nộp không tồn tại');
   }
-  // Phải có ÍT NHẤT một nguồn bài làm: ảnh, hoặc đáp án học sinh đã điền sẵn.
   if (subPaths.length === 0 && !studentText) throw new Error('Không có bài làm để AI chấm');
 
-  const noteBlock = gradingNote && gradingNote.trim()
-    ? `\nHƯỚNG DẪN CHẤM CỦA GIÁO VIÊN (BẮT BUỘC tuân theo — chấm phần nào, chấm theo kiểu gì, chia điểm thế nào):\n"""${gradingNote.trim()}"""\n`
-    : '';
+  // Mọi file bài làm → các TRANG ảnh đánh số 1..N (PDF tách trang, ảnh xoay đúng chiều)
+  const pages = subPaths.length ? await preparePages(subPaths) : [];
+  const N = pages.length;
 
-  // Khối đáp án (key) của các phần objective AI phụ trách
+  const hasNote = !!(gradingNote && gradingNote.trim());
+  const noteBlock = hasNote
+    ? `\nGHI CHÚ CHẤM CỦA GIÁO VIÊN (ƯU TIÊN CAO NHẤT):\n"""${gradingNote.trim()}"""\n`
+    : '';
   const answerKeyBlock = gradeObjective
-    ? `\nĐÁP ÁN CÁC PHẦN (key chính thức — dùng để so chấm):\n${describeAnswerKey(cfg, objOnly)}\n`
+    ? `\nĐÁP ÁN CÁC PHẦN KHÁCH QUAN (key chính thức):\n${describeAnswerKey(cfg, objOnly)}\n`
     : '';
-
-  // Mô tả các tài liệu đính kèm theo thứ tự để AI biết đâu là đáp án, đâu là bài làm
-  const docLines = [];
-  if (hasAnswerFile) docLines.push('- Tài liệu đầu tiên (PDF): ĐÁP ÁN chính thức — dùng để lấy đáp án đúng cho MỌI phần (kể cả các câu khách quan chưa có đáp án sẵn).');
-  if (subPaths.length > 1) docLines.push(`- ${subPaths.length} tài liệu tiếp theo: BÀI LÀM CỦA HỌC SINH (nhiều ảnh/trang) — xem xét TẤT CẢ như một bài liền mạch.`);
-  else if (subPaths.length === 1) docLines.push('- Tài liệu tiếp theo: BÀI LÀM CỦA HỌC SINH (ảnh/PDF).');
-  else docLines.push('- (Không có ảnh bài làm — học sinh điền đáp án khách quan ở giao diện, xem mục ĐÁP ÁN HỌC SINH ĐÃ ĐIỀN.)');
-  const docBlock = `\nCÁC TÀI LIỆU ĐÍNH KÈM:\n${docLines.join('\n')}\n`;
-
-  // Đáp án học sinh đã điền sẵn ở giao diện (nếu có) — dùng làm bài làm cho phần khách quan.
   const studentBlock = studentText
-    ? `\nĐÁP ÁN HỌC SINH ĐÃ ĐIỀN Ở GIAO DIỆN (dùng CHÍNH cái này làm bài làm của học sinh cho các phần khách quan, KHÔNG cần dò trong ảnh):\n${studentText}\n`
+    ? `\nĐÁP ÁN HỌC SINH ĐÃ ĐIỀN Ở GIAO DIỆN (dùng CHÍNH cái này làm bài làm phần khách quan, không dò trong ảnh):\n${studentText}\n`
     : '';
 
-  // Phạm vi chấm (chỉ những phần được giao)
   const scopeNames = [];
   if (objOnly.multiple_choice) scopeNames.push('TRẮC NGHIỆM');
   if (objOnly.true_false) scopeNames.push('ĐÚNG/SAI');
   if (objOnly.short_answer) scopeNames.push('TRẢ LỜI NGẮN');
   if (gradeEssay) scopeNames.push('TỰ LUẬN');
   const scopeBlock = cfg
-    ? `\nCHỈ CHẤM CÁC PHẦN SAU (các phần khác đã được hệ thống tự chấm, BỎ QUA): ${scopeNames.join(', ') || '(không có)'}\n`
+    ? `\nCHỈ CHẤM CÁC PHẦN SAU (phần khác hệ thống đã tự chấm, BỎ QUA, không liệt kê): ${scopeNames.join(', ') || '(không có)'}\n`
     : '';
 
-  // Luật chấm riêng cho từng phần được giao
   const ruleLines = [];
-  if (objOnly.multiple_choice) ruleLines.push('- TRẮC NGHIỆM: mỗi câu so với đáp án đúng (A/B/C/D); đúng hay sai theo từng câu, không có điểm một phần.');
+  if (objOnly.multiple_choice) ruleLines.push('- TRẮC NGHIỆM: mỗi câu là 1 ý; đúng đáp án = đủ điểm câu, sai/bỏ trống = 0.');
   if (objOnly.true_false) {
     const tfEven = !!(cfg && cfg.true_false && cfg.true_false.tfMode === 'even');
     ruleLines.push(tfEven
-      ? '- ĐÚNG/SAI (mỗi câu 4 ý a,b,c,d): chia ĐỀU — mỗi ý đúng = 25% điểm câu (đúng 1 ý = 0.25, 2 ý = 0.5, 3 ý = 0.75, cả 4 ý = 1.0; TỈ LỆ trên điểm câu, quy đổi sang điểm thực tế).'
-      : '- ĐÚNG/SAI (mỗi câu 4 ý a,b,c,d): chấm theo CHUẨN THPT — trong 1 câu: đúng 1 ý = 0.1, đúng 2 ý = 0.25, đúng 3 ý = 0.5, đúng cả 4 ý = 1.0 (TỈ LỆ trên điểm câu, quy đổi sang điểm thực tế).');
+      ? '- ĐÚNG/SAI (mỗi câu 4 ý a,b,c,d): mỗi câu là 1 ý; mỗi ý a/b/c/d đúng = 25% điểm câu.'
+      : '- ĐÚNG/SAI (mỗi câu 4 ý a,b,c,d): mỗi câu là 1 ý; chuẩn THPT — đúng 1 ý = 10%, 2 ý = 25%, 3 ý = 50%, cả 4 ý = 100% điểm câu.');
   }
-  if (objOnly.short_answer) ruleLines.push('- TRẢ LỜI NGẮN: khớp LINH HOẠT, chấp nhận biến thể tương đương về mặt toán học (vd "1/2" = "0,5" = "0.5"; "2" = "2,0"; bỏ qua khác biệt khoảng trắng, dấu phẩy/chấm thập phân, hoa/thường).');
+  if (objOnly.short_answer) ruleLines.push('- TRẢ LỜI NGẮN: mỗi câu là 1 ý; chấp nhận dạng tương đương về toán học ("1/2" = "0,5").');
   if (gradeEssay) ruleLines.push(
-    '- TỰ LUẬN: chấm CHẶT CHẼ như giáo viên chấm thi thật — đọc và đối chiếu TỪNG BƯỚC lập luận với đáp án, KHÔNG chỉ nhìn đáp số cuối. Chỉ chấm "correct" khi lập luận đủ căn cứ (nêu rõ định lý/công thức/tính chất áp dụng) VÀ kết quả đúng; không suy diễn có lợi cho học sinh khi chữ viết khó đọc hay lập luận mập mờ — trường hợp đó chấm "partial"/"wrong" chứ không mặc định "correct".\n'
-    + '  • BÀI ĐẠI (tự luận KHÔNG phải hình học — đại số, giải tích, xác suất...): có lời giải/các bước tính toán ĐẦY ĐỦ + đáp số đúng → điểm tối đa. Nếu học sinh CHỈ ghi đáp số/kết quả cuối, KHÔNG trình bày lời giải/các bước tính → dù đáp số đúng cũng CHỈ được TỐI ĐA 50% điểm câu đó.\n'
-    + '  • BÀI HÌNH (có vẽ hình, chứng minh, tính toán hình học — tam giác, đường tròn, tọa độ, thể tích...): điểm tối đa CHỈ khi có ĐỦ CẢ 3: hình vẽ minh họa + lời giải/chứng minh chi tiết (giả thiết/kết luận, dựng hình phụ nếu có, định lý/tính chất/công thức dùng ở từng bước) + đáp số đúng. THIẾU HÌNH VẼ minh họa (dù lời giải và đáp số đúng) → CHỈ được TỐI ĐA 50% điểm câu. CHỈ có hình vẽ, KHÔNG có lời giải/chứng minh → CHỈ được TỐI ĐA 25% (1/4) điểm câu. Không có cả hình vẽ lẫn lời giải (chỉ ghi đáp số) → chấm như trường hợp nặng nhất, CHỈ được TỐI ĐA 25% điểm câu dù đáp số đúng. Khi vi phạm nhiều lỗi cùng lúc, lấy mức trần THẤP NHẤT trong các mức trên (không cộng dồn, không vượt mức trần).'
+    '- TỰ LUẬN: chấm như giáo viên chấm thi thật, đối chiếu TỪNG BƯỚC với đáp án và biểu điểm (không chỉ nhìn đáp số). Bước nào trong biểu điểm có điểm riêng mà học sinh làm đúng thì cho điểm bước đó; sai từ bước nào thì các bước sau phụ thuộc kết quả sai không được điểm.\n'
+    + '  Khi biểu điểm KHÔNG quy định riêng thì áp dụng: • Bài đại số/giải tích/xác suất chỉ ghi đáp số, không có lời giải → tối đa 50% điểm ý. • Bài hình: thiếu hình vẽ minh họa → tối đa 50%; chỉ có hình vẽ, không có lời giải → tối đa 25%; nhiều lỗi cùng lúc lấy mức trần THẤP NHẤT.'
   );
-  const objectiveRules = ruleLines.length ? `\nLUẬT CHẤM TỪNG PHẦN:\n${ruleLines.join('\n')}\n` : '';
 
-  // Hướng dẫn AI lấy bài làm khách quan từ đâu: từ đáp án đã điền sẵn, hay tự dò trong ảnh.
-  const imageScanNote = gradeObjective
-    ? (studentText
-        ? '\nLƯU Ý: Học sinh ĐÃ điền sẵn đáp án các phần khách quan ở giao diện (mục ĐÁP ÁN HỌC SINH ĐÃ ĐIỀN). Hãy dùng CHÍNH các đáp án đó để chấm. Câu nào chưa có đáp án đúng sẵn (ghi "ĐỌC TỪ FILE ĐÁP ÁN") thì TÌM đáp án đúng trong FILE ĐÁP ÁN (PDF) rồi so chấm.\n'
-        : '\nLƯU Ý: Học sinh KHÔNG điền đáp án ở giao diện cho các phần khách quan cần chấm — hãy TỰ DÒ bài làm các phần đó ngay trong ẢNH rồi so với đáp án để chấm. Câu nào chưa có đáp án đúng sẵn thì TÌM trong FILE ĐÁP ÁN.\n')
-    : '';
+  // Hiệu chỉnh theo đối chiếu với điểm giáo viên chấm tay: AI hay trừ những lỗi giáo viên thật không trừ.
+  ruleLines.push(
+    '- MỨC CHẶT MẶC ĐỊNH (chỉ khi ghi chú giáo viên không nói khác): chấm chặt nhưng ĐÚNG biểu điểm — chỉ trừ điểm khi chỉ ra được bước/yêu cầu cụ thể của biểu điểm mà học sinh làm sai hoặc thiếu.\n'
+    + '  • Hình vẽ tay: KHÔNG đo độ dài/số đo trên hình; chỉ trừ khi sai QUAN HỆ (điểm nằm sai tia/sai phía, thiếu điểm, không thẳng hàng, sai trung điểm, thiếu yếu tố đề yêu cầu vẽ).\n'
+    + '  • Lỗi hình thức nhỏ (đơn vị, kí hiệu, viết tắt) mà biểu điểm không có điểm riêng: CÙNG một lỗi lặp lại nhiều ý chỉ trừ MỘT lần 0,25đ cho cả bài; đáp số đúng mà chỉ sai đơn vị thì không trừ quá 0,25đ.\n'
+    + '  • Điểm của ý phải KHỚP với lý do: cộng đúng các bước được cho điểm trong reason (đã nói bước nào đạt thì phải được điểm bước đó).'
+  );
 
-  // promptBody: toàn bộ ngữ cảnh + luật chấm (dùng chung cho cả 3 lần). jsonFormatBlock tách riêng
-  // để có thể chèn thêm reviewBlock (kết quả 2 lần đầu) vào GIỮA cho lần chấm thứ 3.
-  const promptBody = `Bạn là giáo viên chấm bài. Hãy chấm điểm bài làm của học sinh dựa trên đáp án, trên thang ${maxScore} điểm.
-${docBlock}${scopeBlock}${answerKeyBlock}${studentBlock}${noteBlock}${objectiveRules}${imageScanNote}
-CÁCH ĐỌC BÀI LÀM (ảnh, nếu có):
-- Thứ tự các ảnh bài làm gửi lên CÓ THỂ KHÔNG đúng thứ tự thực tế (học sinh chụp có thể lộn trang). Hãy tự xác định thứ tự đọc hợp lý dựa vào số thứ tự câu/trang và tính liên tục của lời giải — KHÔNG mặc định thứ tự ảnh là đúng.
-- Bài làm là ảnh chụp/scan CHỮ VIẾT TAY, có thể xấu, mờ, nghiêng, tẩy xóa. Đọc thật kỹ TỪNG dòng; dựa vào ngữ cảnh toán học để nhận diện đúng con số, ký hiệu, biến, phân số, lũy thừa, dấu.
-- Nếu chữ quá khó đọc, hãy suy luận hợp lý nhất thay vì bỏ qua; chỉ coi là sai khi thực sự sai.
+  // ── Prompt chia 2 phần để Gemini tự CACHE phần đầu (giảm giá token đầu vào lặp lại):
+  //    phần ĐẦU giống nhau cho mọi bài nộp của cùng một bài tập (luật chấm + đáp án + file đáp án),
+  //    phần SAU là riêng từng học sinh (đáp án đã điền, các trang ảnh, nhiệm vụ của lần gọi).
+  const intro = `Bạn là giáo viên Toán chấm bài cực kỳ cẩn thận. Chấm bài làm của học sinh trên thang ${maxScore} điểm cho phần được giao.
+${scopeBlock}${answerKeyBlock}${noteBlock}
+LUẬT CHẤM MẶC ĐỊNH:
+${ruleLines.join('\n')}
 
-CÁCH CHẤM CHUNG:
-- CHỈ chấm các phần được giao ở trên. Tổng điểm các phần = điểm trả về, KHÔNG vượt quá ${maxScore}.
-- Phân chia điểm giữa các phần: theo HƯỚNG DẪN của giáo viên ở trên; nếu không nói rõ, hãy chia hợp lý.
-- Chấm NGHIÊM TÚC, CHẶT CHẼ như giáo viên chấm thi thật: không ưu ái, không "du di" cho điểm khi không chắc chắn hay chữ viết khó đọc, không cho điểm tối đa nếu lập luận thiếu căn cứ hoặc trình bày sơ sài. Nghi ngờ đúng/sai thì đọc lại kỹ trước khi kết luận thay vì đoán có lợi cho học sinh.
-- Với MỖI câu, xác định trạng thái: "correct" (đúng), "wrong" (sai), hoặc "partial" (đúng một phần) kèm giải thích NGẮN GỌN bằng tiếng Việt — nêu RÕ lý do trừ điểm nếu không cho điểm tối đa (thiếu bước nào, sai đâu, thiếu lời giải chi tiết...).
-- Viết nhận xét tổng quan bằng tiếng Việt.`;
+THỨ TỰ ƯU TIÊN KHI CHẤM (để các quy định không xung đột):
+1. ${hasNote ? 'GHI CHÚ CHẤM CỦA GIÁO VIÊN ở trên là cao nhất: cách chia điểm từng câu/từng ý, mức trừ điểm cho từng loại lỗi, yêu cầu khoanh/chú thích... trong ghi chú LUÔN được áp dụng, kể cả khi khác biểu điểm trong file đáp án hay luật mặc định.' : '(Giáo viên không có ghi chú riêng.)'}
+2. Biểu điểm / hướng dẫn chấm trong FILE ĐÁP ÁN: dùng cho mọi điều ghi chú của giáo viên không nói tới (vd điểm từng bước nhỏ bên trong 1 ý).
+3. Luật chấm mặc định ở trên: CHỈ dùng để lấp chỗ mà cả ghi chú lẫn biểu điểm đều không quy định.
+Kết hợp: (a) điểm tối đa từng ý lấy theo mức ưu tiên cao nhất có quy định; (b) MỘT lỗi chỉ bị trừ MỘT lần — ghi chú giáo viên đã có mức trừ cho loại lỗi đó (vd "thiếu kết luận trừ 0,25đ") thì dùng đúng mức đó, KHÔNG trừ thêm theo luật mặc định cho cùng lỗi; (c) các lỗi KHÁC NHAU trong cùng 1 ý thì cộng dồn mức trừ, nhưng điểm ý không xuống dưới 0 và không vượt điểm tối đa của ý; (d) trong reason ghi rõ từng khoản trừ và căn cứ, vd "−0,25 thiếu điều kiện x ≠ 2 (theo ghi chú GV)".
 
-  const jsonFormatBlock = `
+CÁCH CHẤM BẮT BUỘC (để không cho điểm sai):
+1. Lập DANH SÁCH TẤT CẢ CÁC Ý NHỎ NHẤT có điểm riêng theo biểu điểm (vd Bài 1 có a, b, c, d → 4 ý riêng; Bài I có 1), 2), 3) → 3 ý riêng; trắc nghiệm mỗi câu 1 ý). max_points của từng ý LẤY theo THỨ TỰ ƯU TIÊN ở trên (ghi chú giáo viên → biểu điểm file đáp án → chia hợp lý). max_points ghi đúng ĐIỂM GỐC trong biểu điểm (vd ý được 0,5đ thì ghi 0.5), KHÔNG tự quy đổi; rubric_total = tổng điểm gốc các ý trong phạm vi chấm — nếu khác thang ${maxScore} thì hệ thống tự quy đổi. Liệt kê ĐỦ mọi ý của đề trong phạm vi chấm — kể cả ý học sinh KHÔNG làm.
+2. Với TỪNG ý: tìm bài làm của ý đó trong các trang ảnh, chép lại ngắn gọn (student_work). Nếu KHÔNG tìm thấy bài làm cho ý đó → attempted=false, status "missing", points = 0. TUYỆT ĐỐI không cho điểm ý mà học sinh không viết gì; không suy ra "chắc học sinh biết làm".
+3. So với đáp án từng bước, ghi reason: đúng ở đâu, SAI Ở BƯỚC NÀO, sai thế nào (vd "dòng 3 tính 15/24 - 22/24 = 7/24, sai dấu, đúng là -7/24"), thiếu gì, vì sao trừ điểm. Rồi mới cho points (0..max_points).
+4. Với mỗi chỗ sai, ghi vào errors: trang, box_2d bao đúng chỗ viết sai (dòng/biểu thức sai), note ngắn. Ghi error_types cho ý bị trừ điểm: TT tính toán sai; TB trình bày/lập luận chưa chặt chẽ, thiếu bước, thiếu điều kiện; DD đọc đề sai/sót yêu cầu; KT sai kiến thức/công thức/phương pháp; KL thiếu/sai kết luận, kí hiệu, đơn vị (có thể nhiều loại).
+   short = nhãn ngắn theo đúng số câu/ý của đề, dạng "5a", "6b", "I.2", "TN3" (không thêm chữ "Câu").
+5. page và box_2d của ý: vùng bài làm của ý đó. box_2d = [ymin, xmin, ymax, xmax] thang 0–1000 theo chiều cao/chiều rộng của CHÍNH trang đó.
+6. page_order: các trang có thể bị chụp/ghép LỘN THỨ TỰ — xác định thứ tự đọc đúng dựa vào số bài/số câu và mạch lời giải.
 
-Trả về JSON đúng định dạng sau (chỉ JSON, không kèm chữ nào khác):
-{
-  "score": <số từ 0 đến ${maxScore}>,
-  "feedback": "<nhận xét tổng quan>",
-  "details": [
-    {"question": "<tên câu, vd: TN câu 1 / Đúng-Sai câu 2 / TLN câu 1 / Tự luận câu 1>", "status": "correct|wrong|partial", "comment": "<giải thích ngắn gọn>"}
-  ]
-}`;
+CÁCH ĐỌC ẢNH: chữ viết tay có thể xấu, mờ, nghiêng, tẩy xóa — đọc thật kỹ từng dòng, dùng ngữ cảnh toán học để nhận đúng số, dấu, phân số, lũy thừa. Phần bị gạch xóa không tính. Bỏ qua mọi dấu chấm/điểm bằng mực đỏ của người khác nếu có trên ảnh — tự chấm độc lập. Không ưu ái, không "du di" khi không chắc: nghi ngờ thì đọc lại kỹ trước khi kết luận.
+${hasAnswerFile ? '\nTài liệu đính kèm ngay sau đây là FILE ĐÁP ÁN / HƯỚNG DẪN CHẤM chính thức (lấy đáp án và biểu điểm từng ý ở đây).' : ''}`;
 
-  const buildParts = (promptText) => [
-    promptText,
-    ...(hasAnswerFile ? [buildInlinePart(answerFilePath)] : []),
-    ...subPaths.map(buildInlinePart),
-  ];
+  const studentIntro = `${studentBlock}${N ? `\nBÀI LÀM CỦA HỌC SINH GỒM ${N} TRANG ẢNH, mỗi ảnh có nhãn "TRANG k" đứng ngay trước:` : '\n(Không có ảnh bài làm — chỉ chấm theo đáp án học sinh đã điền.)'}`;
 
-  // Mô tả 1 kết quả chấm trước đó để đưa vào prompt rà soát lần 3.
-  const describeResult = (label, r) => `${label} — điểm: ${r.score}/${maxScore}\nNhận xét: ${r.feedback}\nChi tiết từng câu:\n${r.details.map((d) => `  • ${d.question}: ${d.status} — ${d.comment}`).join('\n') || '  (không có)'}`;
+  const sharedParts = [{ text: intro }];
+  if (hasAnswerFile) sharedParts.push({ text: 'FILE ĐÁP ÁN / HƯỚNG DẪN CHẤM:' }, buildInlinePart(answerFilePath));
+  sharedParts.push({ text: studentIntro });
+  pages.forEach((p) => {
+    sharedParts.push({ text: `TRANG ${p.index}${pages.length > 1 ? ` (file ${p.file}${p.filePage > 1 || /\.pdf$/i.test(p.file) ? `, trang ${p.filePage}` : ''})` : ''}:` });
+    sharedParts.push({ inlineData: { mimeType: 'image/jpeg', data: p.jpeg.toString('base64') } });
+  });
 
-  // ── QUY TRÌNH CHẤM 3 LẦN ─────────────────────────────────────────────
-  // Lần 1: chấm ĐỘC LẬP bằng model mạnh nhất.
-  // Lần 2: chấm ĐỘC LẬP thêm 1 lần nữa bằng model nhẹ hơn (không thấy kết quả lần 1).
-  // Lần 3: KHÔNG chấm lại từ đầu mà RÀ SOÁT kết quả lần 1 và 2 (kèm xem lại bài làm gốc),
-  //        ưu tiên nghiêng theo lần 1 khi có bất đồng, đảm bảo tuân đủ luật chấm ở trên,
-  //        rồi CHỐT điểm cuối cùng chính thức trả cho học sinh. Không còn lấy max/trung bình trọng số.
-  const basePrompt = promptBody + jsonFormatBlock;
-  const baseParts = buildParts(basePrompt);
+  const gradeTask = (variant) => ({
+    text: variant === 1
+      ? `NHIỆM VỤ: Chấm độc lập bài làm trên theo đúng CÁCH CHẤM BẮT BUỘC. feedback: nhận xét tổng quan ngắn bằng tiếng Việt. Trả về JSON theo schema.`
+      : `NHIỆM VỤ: Chấm độc lập bài làm trên. Làm theo trình tự: (a) trước hết đọc và CHÉP LẠI toàn bộ bài làm từng ý thật chính xác vào student_work, (b) sau đó mới đối chiếu với đáp án/biểu điểm từng bước để cho điểm. Áp dụng đúng CÁCH CHẤM BẮT BUỘC. feedback: nhận xét tổng quan ngắn bằng tiếng Việt. Trả về JSON theo schema.`,
+  });
 
-  let result1 = null;
-  let result2 = null;
-  try {
-    result1 = await callModelOnce(baseParts, maxScore, STRONG_MODELS);
-  } catch (err) {
-    console.error(`[AI grading] lần 1 (model mạnh) lỗi: ${err.message}`);
-  }
-  try {
-    result2 = await callModelOnce(baseParts, maxScore, LITE_MODELS);
-  } catch (err) {
-    console.error(`[AI grading] lần 2 (model nhẹ) lỗi: ${err.message}`);
-  }
+  const all = modelsOverride || gradingModels();
+  const usage = [];
+  const genOpts = { thinkingLevel: 'high', mediaResolution: 'MEDIA_RESOLUTION_HIGH' };
+  // Batch (rẻ 50%) cho chấm nền; giáo viên bấm "chấm lại" đang chờ kết quả → gọi thường (realtime).
+  const useBatch = !realtime;
+  const toResult = (r) => ({ ...normalizeResult(r.json, maxScore, N), model: r.model });
 
-  if (!result1 && !result2) {
-    throw new Error('Chấm bài thất bại (cả 2 lần chấm đầu đều lỗi)');
-  }
-  // Chỉ 1 trong 2 lần đầu thành công → không đủ dữ liệu để rà soát, dùng luôn kết quả đó.
-  if (!result1 || !result2) {
-    const only = result1 || result2;
-    console.log(`[AI grading] chỉ 1/2 lần đầu thành công → dùng điểm ${only.score}, bỏ qua lần rà soát cuối`);
-    return only;
-  }
-
-  const reviewBlock = `
-
-HAI LẦN CHẤM ĐỘC LẬP ĐÃ THỰC HIỆN TRƯỚC ĐÓ (để bạn đối chiếu, KHÔNG được chép nguyên mà không tự kiểm tra lại với bài làm và luật chấm):
-
-${describeResult('LẦN 1 (model mạnh — ƯU TIÊN hơn khi có bất đồng)', result1)}
-
-${describeResult('LẦN 2 (model nhẹ — tham khảo thêm)', result2)}
-
-NHIỆM VỤ CỦA BẠN — ĐÂY LÀ LẦN CHẤM THỨ 3, LÀ LẦN CHỐT ĐIỂM CHÍNH THỨC CUỐI CÙNG CỦA HỌC SINH:
-- Tự mình xem lại bài làm (ảnh/PDF đính kèm) và đáp án, rà soát lại TỪNG câu theo ĐÚNG các luật chấm đã nêu ở trên (đặc biệt: bài hình phải có hình vẽ + lời giải chi tiết mới được điểm tối đa, thiếu hình/thiếu lời giải bị giới hạn trần điểm theo đúng luật; bài đại chỉ ghi đáp số không giải tối đa 50%; không du di khi không chắc chắn).
-- Khi LẦN 1 và LẦN 2 đồng thuận (điểm và nhận xét từng câu khớp nhau) → giữ nguyên kết luận đó, trừ khi bạn tự phát hiện cả hai đều sai so với luật chấm.
-- Khi LẦN 1 và LẦN 2 bất đồng ở câu nào → tự chấm lại câu đó dựa trên bài làm thực tế và luật chấm; ƯU TIÊN nghiêng theo LẦN 1 (model mạnh hơn) nếu cả hai cách chấm đều hợp lý và không rõ ràng bên nào sai; CHỈ chọn theo LẦN 2 khi LẦN 1 thực sự sai hoặc vi phạm luật chấm.
-- Kết quả bạn trả về là điểm CHÍNH THỨC, CUỐI CÙNG gửi cho học sinh — hãy quyết đoán, nhất quán và đúng luật chấm.`;
-
-  const reviewPrompt = promptBody + reviewBlock + jsonFormatBlock;
-  const reviewParts = buildParts(reviewPrompt);
-
-  try {
-    const final = await callModelOnce(reviewParts, maxScore, LITE_MODELS);
-    console.log(`[AI grading] lần 1=${result1.score}, lần 2=${result2.score} → lần 3 (rà soát, chốt điểm cuối) = ${final.score}`);
-    return final;
-  } catch (err) {
-    console.error(`[AI grading] lần 3 (rà soát cuối) lỗi: ${err.message} → dùng kết quả lần 1 (model mạnh) làm điểm cuối`);
-    return result1;
-  }
-}
-
-// Lỗi có nên thử model tiếp theo không: hết quota (429), quá tải (503), hoặc model bị gỡ (404).
-function isRetryableModelError(err) {
-  const msg = String(err && err.message);
-  return /429|quota|RESOURCE_EXHAUSTED|503|overloaded|UNAVAILABLE|404|not found/i.test(msg);
-}
-
-// Gọi AI 1 lần để chấm; tự fallback lần lượt qua danh sách models nếu dính quota/quá tải.
-// Trả về { score, feedback, details } đã chuẩn hóa.
-async function callModelOnce(parts, maxScore, models) {
-  let lastErr;
-  for (const modelName of models) {
+  // ── LẦN 1 + LẦN 2: chấm độc lập (gọi thường: 2 model mạnh khác nhau; batch: cùng 1 lô) ───────
+  const listB = all.length > 1 ? [...all.slice(1), all[0]] : all;
+  const [s1, s2] = await generateJsonMulti([
+    { models: all, parts: [...sharedParts, gradeTask(1)], opts: { ...genOpts, schema: GRADE_SCHEMA } },
+    { models: useBatch ? all : listB, parts: [...sharedParts, gradeTask(2)], opts: { ...genOpts, schema: GRADE_SCHEMA } },
+  ], { batch: useBatch });
+  let r1 = s1.status === 'fulfilled' ? (usage.push({ step: 'run1', model: s1.value.model, usage: s1.value.usage }), toResult(s1.value)) : null;
+  let r2 = s2.status === 'fulfilled' ? (usage.push({ step: 'run2', model: s2.value.model, usage: s2.value.usage }), toResult(s2.value)) : null;
+  // Chỉ 1 lần thành công (lần kia dính quá tải tạm thời) → chấm bù lần còn thiếu, vì đối chiếu cần đủ 2 lần.
+  if (!!r1 !== !!r2) {
+    const v = r1 ? 2 : 1;
     try {
-      const model = genAI.getGenerativeModel({ model: modelName, generationConfig: GENERATION_CONFIG });
-      const result = await model.generateContent(parts);
-      const text = result.response.text().trim();
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error('AI không trả về định dạng JSON hợp lệ');
-      const parsed = JSON.parse(jsonMatch[0]);
-      parsed.score = Math.max(0, Math.min(maxScore, parseFloat(parsed.score) || 0));
-      // Chuẩn hóa details thành mảng hợp lệ
-      if (!Array.isArray(parsed.details)) parsed.details = [];
-      parsed.details = parsed.details
-        .filter(d => d && (d.question || d.comment))
-        .map(d => ({
-          question: String(d.question || '').slice(0, 100),
-          status: ['correct', 'wrong', 'partial'].includes(d.status) ? d.status : 'partial',
-          comment: String(d.comment || '').slice(0, 500),
-        }));
-      console.log(`[AI grading] chấm bằng ${modelName} → ${parsed.score} điểm`);
-      return parsed;
+      const r = await generateJson(v === 1 ? all : listB, [...sharedParts, gradeTask(v)], { ...genOpts, schema: GRADE_SCHEMA });
+      usage.push({ step: `run${v}`, model: r.model, usage: r.usage });
+      if (v === 1) r1 = toResult(r); else r2 = toResult(r);
     } catch (err) {
-      lastErr = err;
-      if (!isRetryableModelError(err)) throw err;
-      console.warn(`[AI grading] ${modelName} không khả dụng (${String(err.message).slice(0, 120)}) → thử model tiếp theo`);
+      console.error(`[AI grading] chấm bù lần ${v} lỗi: ${err.message}`);
     }
   }
-  throw lastErr;
+  if (!r1) console.error(`[AI grading] lần 1 lỗi: ${s1.reason && s1.reason.message}`);
+  if (!r2) console.error(`[AI grading] lần 2 lỗi: ${s2.reason && s2.reason.message}`);
+  if (!r1 && !r2) {
+    const err = new Error(`Chấm bài thất bại (cả 2 lần chấm đều lỗi): ${s1.reason && s1.reason.message}`);
+    err.quota = isQuotaError(s1.reason) && isQuotaError(s2.reason);
+    throw err;
+  }
+
+  // ── ĐỐI CHIẾU 2 lần chấm ─────────────────────────────────────────────────────────────────
+  // Server so từng ý trước. Hai lần KHỚP mọi ý (cùng danh sách ý, cùng điểm tối đa, cùng điểm) → chốt luôn,
+  // không tốn thêm lượt gọi AI. Có ý LỆCH → chỉ gửi các ý lệch cho AI xem lại bài thật, phân tích lần nào
+  // sai và vì sao, chốt điểm các ý đó; các ý đã khớp giữ nguyên.
+  let final = null;
+  let comparison = [];
+  let reviewModel = null;
+  let reviewSkipped = false;
+  if (r1 && r2) {
+    const keyOf = (it) => String(it.short || it.question || '').toLowerCase().replace(/\s+/g, '').replace(/^(tựluận|tl)/, '');
+    const m1 = new Map(r1.items.map((it) => [keyOf(it), it]));
+    const m2 = new Map(r2.items.map((it) => [keyOf(it), it]));
+    const keys = [...new Set([...m1.keys(), ...m2.keys()])];
+    const disputed = keys.filter((k) => {
+      const a = m1.get(k), b = m2.get(k);
+      return !a || !b || Math.abs(a.points - b.points) > 1e-9 || Math.abs(a.max_points - b.max_points) > 1e-9;
+    });
+    comparison = keys.map((k) => ({
+      question: (m1.get(k) || m2.get(k)).question,
+      run1_points: m1.has(k) ? m1.get(k).points : null,
+      run2_points: m2.has(k) ? m2.get(k).points : null,
+      final_points: null,
+      analysis: disputed.includes(k) ? '' : 'Hai lần chấm khớp nhau.',
+    }));
+
+    if (disputed.length === 0) {
+      reviewSkipped = true;
+      final = r1;
+      comparison.forEach((c) => { c.final_points = c.run1_points; });
+    } else {
+      const brief = (it) => it && ({ question: it.question, max_points: it.max_points, points: it.points, student_work: it.student_work, reason: it.reason });
+      const agreed = keys.filter((k) => !disputed.includes(k)).map((k) => `${m1.get(k).question} (${m1.get(k).points}/${m1.get(k).max_points})`);
+      const reviewTask = {
+        text: `HAI LẦN CHẤM ĐỘC LẬP TRƯỚC ĐÓ ĐÃ KHỚP NHAU Ở CÁC Ý (giữ nguyên, KHÔNG cần trả về): ${agreed.join('; ') || '(không có)'}.
+CÁC Ý HAI LẦN CHẤM LỆCH NHAU (cần đối chiếu):
+${disputed.map((k) => `- ${(m1.get(k) || m2.get(k)).question}: LẦN 1 ${JSON.stringify(brief(m1.get(k)) || 'không liệt kê ý này')} | LẦN 2 ${JSON.stringify(brief(m2.get(k)) || 'không liệt kê ý này')}`).join('\n')}
+
+NHIỆM VỤ — ĐỐI CHIẾU VÀ CHỐT ĐIỂM CÁC Ý LỆCH:
+1. comparison: với TỪNG ý lệch, mở lại đúng trang bài làm, đọc lại thật kỹ, đối chiếu biểu điểm và viết analysis: lần nào chấm SAI, VÌ SAO sai (đọc nhầm chữ/số, bỏ sót ý không làm, cho điểm ý học sinh không viết, áp sai biểu điểm, bỏ sót bước sai, trừ lỗi biểu điểm không có...), rồi final_points.
+2. Không "chia trung bình" cho êm — điểm chốt là điểm ĐÚNG theo bài làm thật, theo THỨ TỰ ƯU TIÊN (ghi chú giáo viên trước nhất), mỗi lỗi chỉ trừ một lần, và phải KHỚP với analysis.
+3. items: CHỈ trả về các ý lệch ở trên (đúng tên ý), với points = final_points, max_points là điểm gốc theo biểu điểm, reason nêu rõ lý do, errors khoanh đúng chỗ sai, page + box_2d chính xác. rubric_total = tổng điểm gốc của TẤT CẢ các ý trong phạm vi chấm. page_order: thứ tự đúng của các trang.
+4. feedback: nhận xét tổng quan ngắn bằng tiếng Việt cho cả bài.
+Trả về JSON theo schema.`,
+      };
+      try {
+        const [rv] = await generateJsonMulti([{ models: all, parts: [...sharedParts, reviewTask], opts: { ...genOpts, schema: REVIEW_SCHEMA } }], { batch: useBatch });
+        if (rv.status !== 'fulfilled') throw rv.reason;
+        const r = rv.value;
+        usage.push({ step: 'review', model: r.model, usage: r.usage });
+        reviewModel = r.model;
+        const reviewed = normalizeResult(r.json, maxScore, N);
+        const mr = new Map(reviewed.items.map((it) => [keyOf(it), it]));
+        // Ghép: ý khớp lấy theo lần 1; ý lệch lấy theo lần đối chiếu (AI quên trả ý nào → lấy lần chấm CHẶT hơn)
+        const merged = keys.map((k) => {
+          if (!disputed.includes(k)) return m1.get(k);
+          if (mr.has(k)) return mr.get(k);
+          const a = m1.get(k), b = m2.get(k);
+          return !a ? b : !b ? a : (a.points <= b.points ? a : b);
+        });
+        final = normalizeResult({
+          page_order: reviewed.page_order.length ? reviewed.page_order : r1.page_order,
+          rubric_total: reviewed.rubricTotal || r1.rubricTotal,
+          items: merged,
+          feedback: reviewed.feedback || r1.feedback,
+        }, maxScore, N);
+        const cr = new Map((Array.isArray(r.json.comparison) ? r.json.comparison : []).map((c) => [keyOf({ question: c.question }), c]));
+        comparison.forEach((c) => {
+          const k = keyOf({ question: c.question });
+          const it = final.items.find((x) => keyOf(x) === k || keyOf({ question: x.question }) === k);
+          const fromAi = cr.get(k) || [...cr.values()].find((x) => keyOf({ question: x.question }) === keyOf({ short: it && it.short }));
+          c.final_points = it ? it.points : c.run1_points;
+          if (fromAi && fromAi.analysis) c.analysis = String(fromAi.analysis).slice(0, 600);
+        });
+      } catch (err) {
+        console.error(`[AI grading] đối chiếu lỗi: ${err.message}`);
+      }
+    }
+  }
+  // Đối chiếu lỗi / chỉ 1 lần chấm thành công: 2 lần lệch ≤ 0,25 → lấy lần 1; lệch nhiều → lấy lần CHẤM
+  // CHẶT HƠN (điểm thấp hơn) và gắn cờ để giáo viên xem lại.
+  if (!final) {
+    if (r1 && r2) final = Math.abs(r1.score - r2.score) <= 0.25 ? r1 : (r1.score <= r2.score ? r1 : r2);
+    else final = r1 || r2;
+    comparison.forEach((c) => { if (c.final_points == null) c.final_points = (final.items.find((x) => x.question === c.question) || {}).points ?? null; });
+  }
+
+  const spread = r1 && r2 ? round2(Math.abs(r1.score - r2.score)) : null;
+  const missingItems = final.rubricTotal > 0 && final.sumMax < final.rubricTotal - 0.01;
+  const reviewFailed = r1 && r2 && !reviewSkipped && !reviewModel;
+  const needsTeacher = spread == null || spread > 1 || reviewFailed || missingItems;
+  const review = {
+    run1: r1 ? { score: r1.score, model: r1.model } : null,
+    run2: r2 ? { score: r2.score, model: r2.model } : null,
+    final: { score: final.score, model: reviewModel || (final === r2 ? r2.model : r1 && r1.model) },
+    spread,
+    skipped: reviewSkipped,
+    needs_teacher: needsTeacher,
+    note: spread == null ? 'Chỉ chấm được 1 lần (lần còn lại lỗi) — nên xem lại.'
+      : reviewFailed ? 'Lần đối chiếu không chạy được — điểm lấy theo lần chấm chặt hơn.'
+      : missingItems ? `AI chỉ liệt kê các ý có tổng ${final.sumMax}/${final.rubricTotal} điểm biểu điểm — phần thiếu tính 0 điểm, nên xem lại.`
+      : spread > 1 ? `Hai lần chấm lệch ${spread} điểm — nên xem lại.` : '',
+    comparison,
+    usage,
+  };
+
+  // ── Vẽ kết quả lên ảnh bài làm (đúng thứ tự trang) ──────────────────────────────────────
+  let graded = [];
+  if (annotatePrefix && N) {
+    try {
+      graded = await renderGradedPages(pages, final, { prefix: annotatePrefix, score: final.score, maxScore });
+    } catch (err) {
+      console.error(`[AI grading] vẽ ảnh chấm lỗi: ${err.message}`);
+    }
+  }
+
+  console.log(`[AI grading] lần 1=${r1 ? `${r1.score} (${r1.model})` : 'lỗi'}, lần 2=${r2 ? `${r2.score} (${r2.model})` : 'lỗi'} → chốt ${final.score}/${maxScore}${reviewModel ? ` (đối chiếu ${reviewModel})` : ''}`);
+  return {
+    score: final.score,
+    feedback: final.feedback,
+    details: toDetails(final.items),
+    marks: { pages: graded, review },
+    raw: { run1: r1, run2: r2, final },
+  };
 }
 
 // ── Đọc FILE ĐÁP ÁN để trích đáp án (key) các câu objective giáo viên để trống ──────────
 // cfg: parts_config đã parse. missing: { multiple_choice:[idx], true_false:[idx], short_answer:[idx] }
 // Trả về { multiple_choice:['A',...], true_false:[['T','F','T','F'],...], short_answer:['12',...] }
-// theo thứ tự câu 1..n (chỉ các phần có câu để trống). Lỗi → ném để nơi gọi tự xử lý.
 async function extractAnswerKey(answerFilePath, cfg, missing) {
   if (!answerFilePath || !fs.existsSync(answerFilePath)) throw new Error('Không có file đáp án để AI đọc');
 
@@ -319,32 +496,14 @@ Yêu cầu BẮT BUỘC:
 - Trả lời ngắn: ghi đúng đáp án (số/biểu thức) như trong file.
 - Câu nào THỰC SỰ không tìm thấy đáp án thì để null tại vị trí đó (đừng đoán bừa).`;
 
-  const parts = [prompt, buildInlinePart(answerFilePath)];
-  let lastErr;
-  for (const modelName of EXTRACT_MODELS) {
-    try {
-      const model = genAI.getGenerativeModel({ model: modelName, generationConfig: EXTRACT_CONFIG });
-      const result = await model.generateContent(parts);
-      const text = result.response.text().trim();
-      const m = text.match(/\{[\s\S]*\}/);
-      if (!m) throw new Error('AI không trả về JSON đáp án hợp lệ');
-      const parsed = JSON.parse(m[0]);
-      const out = normalizeExtractedKey(parsed, cfg);
-      const cnt = (a) => (Array.isArray(a) ? a.filter((x) => x != null).length : 0);
-      console.log(`[aiGrading] Trích đáp án từ file (${modelName}): TN=${cnt(out.multiple_choice)} ĐS=${cnt(out.true_false)} TLN=${cnt(out.short_answer)}`);
-      return out;
-    } catch (err) {
-      lastErr = err;
-      if (!isRetryableModelError(err)) throw err;
-    }
-  }
-  throw lastErr;
+  const r = await generateJson(LITE_MODELS, [{ text: prompt }, buildInlinePart(answerFilePath)], { thinkingLevel: 'low', temperature: 0.1, maxOutputTokens: 4096 });
+  const out = normalizeExtractedKey(r.json, cfg);
+  const cnt = (a) => (Array.isArray(a) ? a.filter((x) => x != null).length : 0);
+  console.log(`[aiGrading] Trích đáp án từ file (${r.model}): TN=${cnt(out.multiple_choice)} ĐS=${cnt(out.true_false)} TLN=${cnt(out.short_answer)}`);
+  return out;
 }
 
-// ── Tạo "quy chuẩn nhận xét" (rubric) — ĐỌC FILE ĐÁP ÁN ĐÚNG 1 LẦN khi giáo viên tạo/cập nhật đáp án
-// bài tập (xem routes/homework.js). Chỉ cần 1 câu mô tả khái quát chủ đề/nội dung của đề, lưu lại
-// dưới dạng text (KHÔNG hiển thị trên web) để lúc chấm tự động từng bài nộp KHÔNG cần gọi AI nữa mà
-// vẫn ghép được vào mẫu nhận xét theo thang điểm (xem homeworkScoring.composeAutoFeedback).
+// ── "Quy chuẩn nhận xét" (rubric): 1 câu mô tả chủ đề của đề, tạo 1 lần khi giáo viên lưu đáp án ─────
 async function generateFeedbackRubric(answerFilePath) {
   if (!answerFilePath || !fs.existsSync(answerFilePath)) return null;
 
@@ -353,25 +512,10 @@ NHIỆM VỤ: đọc khái quát toàn bộ tài liệu và cho biết chủ đ�
 
 Chỉ trả về JSON THUẦN (không kèm giải thích, không markdown): {"overview": "<câu mô tả>"}`;
 
-  const parts = [prompt, buildInlinePart(answerFilePath)];
-  let lastErr;
-  for (const modelName of LITE_MODELS) {
-    try {
-      const model = genAI.getGenerativeModel({ model: modelName, generationConfig: EXTRACT_CONFIG });
-      const result = await model.generateContent(parts);
-      const text = result.response.text().trim();
-      const m = text.match(/\{[\s\S]*\}/);
-      if (!m) throw new Error('AI không trả về JSON rubric hợp lệ');
-      const parsed = JSON.parse(m[0]);
-      const overview = String(parsed.overview || '').trim().slice(0, 150);
-      console.log(`[aiGrading] Đã tạo quy chuẩn nhận xét (${modelName}): "${overview}"`);
-      return overview ? { overview } : null;
-    } catch (err) {
-      lastErr = err;
-      if (!isRetryableModelError(err)) throw err;
-    }
-  }
-  throw lastErr;
+  const r = await generateJson(LITE_MODELS, [{ text: prompt }, buildInlinePart(answerFilePath)], { thinkingLevel: 'low', temperature: 0.1, maxOutputTokens: 1024 });
+  const overview = String((r.json && r.json.overview) || '').trim().slice(0, 150);
+  console.log(`[aiGrading] Đã tạo quy chuẩn nhận xét (${r.model}): "${overview}"`);
+  return overview ? { overview } : null;
 }
 
 // Chuẩn hóa kết quả AI trả về → đúng kiểu mong đợi cho từng phần.
@@ -396,4 +540,4 @@ function normalizeExtractedKey(parsed, cfg) {
   return out;
 }
 
-module.exports = { gradeSubmission, extractAnswerKey, generateFeedbackRubric };
+module.exports = { gradeSubmission, extractAnswerKey, generateFeedbackRubric, normalizeResult, gradingModels };

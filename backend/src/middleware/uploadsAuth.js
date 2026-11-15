@@ -6,7 +6,7 @@ const { userFromRequest } = require('../services/security');
 const PUBLIC_DIRS = new Set(['ads', 'courses', 'featured_students', 'staff', 'featured_courses', 'achievements', 'activities', 'avatars']);
 
 // Thư mục cần đăng nhập + đúng quyền: đề bài, đáp án, bài nộp, video và tài liệu bài giảng, ảnh trợ giảng.
-const PROTECTED_DIRS = new Set(['homework', 'submissions', 'videos', 'lessons', 'assistants', 'mock', 'mock_submissions']);
+const PROTECTED_DIRS = new Set(['homework', 'submissions', 'videos', 'lessons', 'assistants', 'mock', 'mock_submissions', 'graded']);
 
 // Chặn ký tự đại diện của LIKE để tên file do người dùng gửi lên không khớp nhầm sang bản ghi khác.
 const likeSafe = (s) => s.replace(/[\\%_]/g, (m) => '\\' + m);
@@ -46,6 +46,23 @@ function checkFileAccess(db, user, dir, file) {
     `).get(file, `%"${likeSafe(file)}"%`);
     if (!sub) return 'notfound';
     if (user.role === 'student') return verdict(sub.student_id === user.id); // chỉ xem bài của chính mình
+    return verdict(canAccessClass(db, user, sub.class_id));
+  }
+
+  // Ảnh bài làm đã chấm (AI sửa): tên dạng <hw|mock>_<id bài nộp>_<thời điểm>_<trang>.jpg.
+  // Giáo viên/admin của lớp xem bất cứ lúc nào; học sinh chỉ xem bài CỦA MÌNH và chỉ từ "Thời gian xem
+  // đáp án" (giống chi tiết chấm) — trước đó học sinh chỉ thấy bài đã nộp (ảnh gốc).
+  if (dir === 'graded') {
+    const m = file.match(/^(hw|mock)_(\d+)_\d+_\d+\.jpg$/);
+    if (!m) return 'notfound';
+    if (m[1] === 'mock') return verdict(user.role === 'admin');
+    const sub = db.prepare(`
+      SELECT s.student_id, h.class_id, h.answer_visible_date FROM submissions s JOIN homework h ON s.homework_id=h.id WHERE s.id=?
+    `).get(Number(m[2]));
+    if (!sub) return 'notfound';
+    if (user.role === 'student') {
+      return verdict(sub.student_id === user.id && !!sub.answer_visible_date && new Date().toISOString() >= sub.answer_visible_date);
+    }
     return verdict(canAccessClass(db, user, sub.class_id));
   }
 

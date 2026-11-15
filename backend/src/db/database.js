@@ -474,6 +474,10 @@ function initSchema() {
   // Thi thử: đề dành cho khối lớp nào (NULL = mọi khối); khối lớp khách chọn khi điền thông tin
   addCol('mock_exams', 'grade', 'INTEGER');
   addCol('mock_attempts', 'grade', 'INTEGER');
+  // Ảnh bài làm đã chấm (AI vẽ đúng/sai lên ảnh, sắp đúng thứ tự trang) + kết quả đối chiếu 2 lần chấm.
+  // JSON { pages: [{ name, page, file, filePage }], review: {...} } — ảnh nằm trong uploads/graded.
+  addCol('submissions', 'graded_pages', 'TEXT');
+  addCol('mock_attempts', 'graded_pages', 'TEXT');
   // Hoạt động: nhiều ảnh cho 1 hoạt động (JSON mảng tên file trong uploads/activities)
   addCol('activities', 'images', 'TEXT');
   // Giáo viên & trợ giảng: cấp dạy (thcs | thpt), môn, mạng xã hội

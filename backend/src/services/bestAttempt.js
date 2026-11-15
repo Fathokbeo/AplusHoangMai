@@ -9,12 +9,13 @@
 // lực = COALESCE(score, best_score) để điểm TB/xếp hạng không bị tụt tạm thời.
 const path = require('path');
 const fs = require('fs');
+const { removeGradedFiles } = require('./gradingPages');
 
 const SUB_DIR = path.join(__dirname, '../../uploads/submissions');
 
 // Các cột thuộc về "kết quả 1 lần nộp" (submitted_at không nằm trong đây: luôn giữ thời điểm nộp mới
 // nhất, vì luồng HSA dùng nó để biết lượt làm hiện tại đã nộp hay chưa).
-const ATTEMPT_COLS = ['score', 'feedback', 'grading_details', 'structured_answers', 'files', 'file_path', 'graded_at', 'graded_by_ai'];
+const ATTEMPT_COLS = ['score', 'feedback', 'grading_details', 'graded_pages', 'structured_answers', 'files', 'file_path', 'graded_at', 'graded_by_ai'];
 
 function filenamesOf(obj) {
   if (obj && obj.files) {
@@ -48,11 +49,12 @@ function archiveBeforeResubmit(existing) {
   const best = parseBest(existing.best_attempt);
   const currentGraded = existing.score !== null && existing.score !== undefined;
   if (currentGraded && (!best || existing.score >= best.score)) {
-    if (best) rmFiles(filenamesOf(best));
+    if (best) { rmFiles(filenamesOf(best)); removeGradedFiles(best.graded_pages); }
     const snap = snapshot(existing);
     return { bestJson: JSON.stringify(snap), bestScore: snap.score };
   }
   rmFiles(filenamesOf(existing));
+  removeGradedFiles(existing.graded_pages);
   return best ? { bestJson: JSON.stringify(best), bestScore: best.score } : { bestJson: null, bestScore: null };
 }
 
@@ -66,11 +68,13 @@ function settleBest(db, submissionId) {
 
   if (best.score > sub.score) {
     rmFiles(filenamesOf(sub).filter((n) => !filenamesOf(best).includes(n)));
+    removeGradedFiles(sub.graded_pages);
     db.prepare(`UPDATE submissions SET ${ATTEMPT_COLS.map((c) => `${c}=?`).join(',')},grading_status='done',best_attempt=NULL,best_score=NULL WHERE id=?`)
       .run(...ATTEMPT_COLS.map((c) => best[c] ?? null), submissionId);
     return 'best';
   }
   rmFiles(filenamesOf(best).filter((n) => !filenamesOf(sub).includes(n)));
+  removeGradedFiles(best.graded_pages);
   db.prepare('UPDATE submissions SET best_attempt=NULL,best_score=NULL WHERE id=?').run(submissionId);
   return 'current';
 }

@@ -343,7 +343,109 @@ function essayIssueNote(essayDetails) {
   return parts.length ? `Phần Tự luận còn ${parts.join(', ')}` : '';
 }
 
+// ── Nhận xét CHI TIẾT mà NGẮN cho bài CÓ tự luận (phụ huynh / giáo viên đọc qua là hiểu) ─────────
+// Ví dụ: "Con làm bài khá tốt. Tự luận: tính toán sai câu 6b, 8d; lập luận chưa chặt chẽ câu 5abc;
+//         chưa làm câu 7. Trắc nghiệm sai câu 3, 7. Con cần cẩn thận khi tính toán và trình bày lời giải
+//         chặt chẽ hơn khi làm các bài về <chủ đề>."
+const ERR_PHRASE = {
+  TT: 'tính toán sai',
+  TB: 'lập luận, trình bày chưa chặt chẽ',
+  DD: 'đọc đề chưa kĩ',
+  KT: 'nhầm kiến thức',
+  KL: 'thiếu hoặc sai kết luận',
+};
+const ERR_ADVICE = {
+  TT: 'cẩn thận khi tính toán, thử lại kết quả',
+  TB: 'trình bày lời giải đủ bước, chặt chẽ hơn',
+  DD: 'đọc kĩ yêu cầu đề',
+  KT: 'ôn lại kiến thức, công thức',
+  KL: 'ghi đủ điều kiện và kết luận',
+};
+const ERR_ORDER = ['TT', 'TB', 'DD', 'KT', 'KL'];
+
+// Nhãn ý: ưu tiên label AI trả về ("5a"), không có thì rút từ tên câu ("Tự luận câu 5a" → "5a")
+function itemLabel(d) {
+  const l = String(d.label || '').replace(/^\s*(câu|bài)\s*/i, '').trim();
+  return l || essayQuestionLabel(d.question);
+}
+
+// Gộp nhãn cùng câu: ["5a","5b","5c","6b"] → "5abc, 6b"; nhãn khác dạng giữ nguyên
+function compressLabels(labels) {
+  const uniq = [...new Set(labels.filter(Boolean))];
+  const groups = new Map();
+  const order = [];
+  uniq.forEach((l) => {
+    const m = l.match(/^(.*?\d)\s*([a-zđ])$/i);
+    const key = m ? m[1] : `\u0000${l}`;
+    if (!groups.has(key)) { groups.set(key, []); order.push(key); }
+    groups.get(key).push(m ? m[2].toLowerCase() : l);
+  });
+  return order.map((k) => (k.startsWith('\u0000') ? groups.get(k)[0] : k + groups.get(k).sort().join(''))).join(', ');
+}
+
+// Phân loại lỗi các ý tự luận chưa đạt: { TT: ['6b'], TB: ['5a',...], notDone: ['7'] }
+function essayErrorGroups(essayDetails) {
+  const groups = { notDone: [] };
+  ERR_ORDER.forEach((k) => { groups[k] = []; });
+  (essayDetails || []).forEach((d) => {
+    if (!d || d.status === 'correct') return;
+    const label = itemLabel(d);
+    const c = String(d.comment || '');
+    if (ESSAY_NOT_DONE_RE.test(c) && !(Array.isArray(d.error_types) && d.error_types.length)) { groups.notDone.push(label); return; }
+    let types = Array.isArray(d.error_types) ? d.error_types.filter((t) => ERR_ORDER.includes(t)) : [];
+    if (!types.length) {
+      // Bài chấm trước đây (chưa có error_types) → đoán theo lời giải thích
+      if (/tính|sai dấu|nhầm dấu|kết quả sai|đáp số sai|biến đổi sai/i.test(c)) types = ['TT'];
+      else if (/đọc đề|hiểu sai đề|sót/i.test(c)) types = ['DD'];
+      else if (/kiến thức|công thức|định lý|định lí|tính chất|phương pháp/i.test(c)) types = ['KT'];
+      else if (/kết luận|kí hiệu|ký hiệu|đơn vị/i.test(c)) types = ['KL'];
+      else types = ['TB'];
+    }
+    types.forEach((t) => groups[t].push(label));
+  });
+  return groups;
+}
+
+function composeEssayFeedback(pct10, partStats, topic, essayDetails, opts = {}) {
+  const groups = opts.essayNotSubmitted ? null : essayErrorGroups(essayDetails);
+  const essayParts = [];
+  if (opts.essayNotSubmitted) essayParts.push('chưa nộp bài làm');
+  else {
+    ERR_ORDER.forEach((k) => { if (groups[k].length) essayParts.push(`${ERR_PHRASE[k]} câu ${compressLabels(groups[k])}`); });
+    if (groups.notDone.length) essayParts.push(`chưa làm câu ${compressLabels(groups.notDone)}`);
+  }
+  // Phần khách quan: nêu số câu sai (máy chấm) — câu AI chấm hộ không có số thứ tự thì nói chung
+  const objParts = [];
+  Object.entries(PART_LABEL_TXT).forEach(([k, name]) => {
+    const st = partStats && partStats[k];
+    if (!st || !st.wrongIdx || !st.wrongIdx.length) return;
+    const idx = st.wrongIdx.filter((i) => i >= 0).map((i) => i + 1);
+    objParts.push(idx.length ? `${name} sai câu ${idx.join(', ')}` : `${name} còn câu sai`);
+  });
+
+  const opener = pct10 >= 9 ? 'Con làm bài tốt.'
+    : pct10 >= 8 ? 'Con làm bài khá tốt.'
+    : pct10 >= 7 ? 'Con làm bài khá ổn.'
+    : pct10 >= 5 ? 'Con đã nắm được kiến thức nhưng còn nhiều sai sót.'
+    : 'Con còn sai sót nhiều, cần học lại kiến thức.';
+  if (!essayParts.length && !objParts.length) return 'Con làm bài tốt, trình bày đầy đủ, cố gắng phát huy.';
+
+  const sentences = [opener];
+  if (essayParts.length) sentences.push(`Tự luận: ${essayParts.join('; ')}.`);
+  if (objParts.length) sentences.push(`${objParts.join('; ')}.`);
+  // Lời khuyên: theo 2 loại lỗi nhiều nhất (nếu có), kèm chủ đề bài
+  const top = groups ? ERR_ORDER.filter((k) => groups[k].length).sort((a, b) => groups[b].length - groups[a].length).slice(0, 2) : [];
+  const topicTxt = topic ? ` khi làm các bài về ${topic}` : '';
+  if (top.length) sentences.push(`Con cần ${top.map((k) => ERR_ADVICE[k]).join(' và ')}${topicTxt}.`);
+  else if (groups && groups.notDone.length) sentences.push(`Con cần hoàn thành đủ các câu${topicTxt}.`);
+  else if (objParts.length) sentences.push(`Con cần cẩn thận hơn${topicTxt}.`);
+  return sentences.join(' ');
+}
+
 module.exports = {
+  composeEssayFeedback,
+  compressLabels,
+  essayErrorGroups,
   TF_LADDER,
   TF_LADDER_EVEN,
   tfLadder,

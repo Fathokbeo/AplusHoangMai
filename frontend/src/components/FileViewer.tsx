@@ -1,12 +1,17 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, Download, FileText } from 'lucide-react';
 
 const isPdf = (url: string) => url.split('?')[0].toLowerCase().endsWith('.pdf');
 
 // Xem 1 hoặc nhiều tài liệu (ảnh / PDF). Có điều hướng + dải thumbnail khi nhiều file.
-export default function FileViewer({ files, onClose }: { files: string[]; onClose: () => void }) {
+// title: tiêu đề (mặc định "Xem tài liệu"). aside: nội dung cột bên phải (vd chi tiết chấm từng câu) —
+// màn hình hẹp thì xếp xuống dưới ảnh. headerExtra: nút thêm ở thanh tiêu đề.
+export default function FileViewer({ files, onClose, title, aside, headerExtra }: {
+  files: string[]; onClose: () => void; title?: string; aside?: ReactNode; headerExtra?: ReactNode;
+}) {
   const [idx, setIdx] = useState(0);
   if (!files || files.length === 0) return null;
+  const wide = typeof window !== 'undefined' && window.innerWidth >= 900;
 
   const i = Math.min(idx, files.length - 1);
   const url = files[i];
@@ -18,14 +23,16 @@ export default function FileViewer({ files, onClose }: { files: string[]; onClos
       <div style={{ background: 'white', borderRadius: 12, width: '90vw', height: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
         onClick={(e) => e.stopPropagation()}>
         <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #EEE', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontWeight: 600 }}>Xem tài liệu {multi && <span style={{ color: '#888', fontWeight: 400 }}>({i + 1}/{files.length})</span>}</span>
+          <span style={{ fontWeight: 600 }}>{title || 'Xem tài liệu'} {multi && <span style={{ color: '#888', fontWeight: 400 }}>({i + 1}/{files.length})</span>}</span>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {headerExtra}
             <a className="btn btn-ghost btn-sm" href={url} target="_blank" rel="noreferrer"><Download size={13} /> Tải về</a>
             <button className="btn btn-ghost btn-sm" onClick={onClose}>Đóng</button>
           </div>
         </div>
 
-        <div style={{ flex: 1, position: 'relative', overflow: 'auto', background: '#2A2A35', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: wide ? 'row' : 'column' }}>
+        <div style={{ flex: 1, minHeight: wide ? 0 : '55%', position: 'relative', overflow: 'auto', background: '#2A2A35', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {isPdf(url)
             ? <iframe src={url} style={{ width: '100%', height: '100%', border: 'none', background: 'white' }} title="PDF" />
             : <img src={url} alt={`Trang ${i + 1}`} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />}
@@ -36,6 +43,15 @@ export default function FileViewer({ files, onClose }: { files: string[]; onClos
               <button onClick={() => go(1)} aria-label="Sau" style={navBtnStyle('right')}><ChevronRight size={22} /></button>
             </>
           )}
+        </div>
+        {aside && (
+          <div style={{
+            width: wide ? 380 : '100%', flexShrink: 0, overflowY: 'auto', padding: '0.75rem 1rem',
+            borderLeft: wide ? '1px solid #EEE' : 'none', borderTop: wide ? 'none' : '1px solid #EEE', maxHeight: wide ? 'none' : '45%',
+          }}>
+            {aside}
+          </div>
+        )}
         </div>
 
         {multi && (

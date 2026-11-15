@@ -6,6 +6,7 @@ import VideoPlayer from '../../components/VideoPlayer';
 import Modal from '../../components/Modal';
 import GradingDetails from '../../components/GradingDetails';
 import FileViewer from '../../components/FileViewer';
+import { gradedPageUrls } from '../../lib/gradedPages';
 import SubmitHomeworkView from '../../components/SubmitHomeworkView';
 import { type StudentAnswers } from '../../components/PartsSolver';
 import useIsMobile from '../../lib/useIsMobile';
@@ -63,6 +64,7 @@ export default function StudentClassDetail() {
   const [examDeadline, setExamDeadline] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [viewFiles, setViewFiles] = useState<string[] | null>(null);
+  const [viewTitle, setViewTitle] = useState('');
   // Bài tập nào đang mở "Chi tiết" điểm (nhận xét + kết quả từng câu); mặc định ẩn hết
   const [openGradeDetails, setOpenGradeDetails] = useState<Set<number>>(new Set());
   // Đồng hồ dùng để đếm ngược thời gian còn lại NGOÀI danh sách bài tập (lượt làm HSA đang dở, chưa nộp,
@@ -449,8 +451,15 @@ export default function StudentClassDetail() {
                 <FileText size={13} /> Xem đề
               </button>
             )}
-            {isSubmitted && submittedFileUrls(hw).length > 0 && (
-              <button className="btn btn-ghost btn-sm" onClick={() => setViewFiles(submittedFileUrls(hw))}>
+            {/* Đã tới "Thời gian xem đáp án" và có ảnh bài đã chấm → "Xem bài chấm" (ảnh thầy cô/AI đã sửa);
+                trước đó vẫn là "Bài đã nộp" (ảnh gốc). Server chỉ gửi graded_pages khi đã được xem đáp án. */}
+            {isSubmitted && !!hw.can_see_answer && gradedPageUrls(hw.graded_pages).length > 0 ? (
+              <button className="btn btn-ghost btn-sm" style={{ color: '#C62828' }}
+                onClick={() => { setViewTitle('Bài chấm'); setViewFiles(gradedPageUrls(hw.graded_pages)); }}>
+                <Eye size={13} /> Xem bài chấm
+              </button>
+            ) : isSubmitted && submittedFileUrls(hw).length > 0 && (
+              <button className="btn btn-ghost btn-sm" onClick={() => { setViewTitle(''); setViewFiles(submittedFileUrls(hw)); }}>
                 <Eye size={13} /> Bài đã nộp ({submittedFileUrls(hw).length})
               </button>
             )}
@@ -779,7 +788,7 @@ export default function StudentClassDetail() {
       />
 
       {/* File Viewer */}
-      {viewFiles && <FileViewer files={viewFiles} onClose={() => setViewFiles(null)} />}
+      {viewFiles && <FileViewer files={viewFiles} title={viewTitle || undefined} onClose={() => { setViewFiles(null); setViewTitle(''); }} />}
 
       <AssistantScheduleModal
         open={scheduleAssistantId !== null}

@@ -5,6 +5,7 @@ const { authMiddleware, requireRole } = require('../middleware/auth');
 const { stripAnswers, stripHsaAnswers } = require('../services/homeworkParts');
 const { classRanking, classRankingReport, studentOverallAverage, prevYm, ymOf } = require('../services/classRanking');
 const { parseBest } = require('../services/bestAttempt');
+const { gradedPagesForStudent } = require('../services/gradingPages');
 
 router.use(authMiddleware, requireRole('student'));
 
@@ -51,7 +52,7 @@ router.get('/my-classes/:id', (req, res) => {
   );
   const homework = db.prepare(`
     SELECT h.id,h.class_id,h.chapter_id,h.title,h.description,h.pdf_file,h.answer_file,h.solution_video_url,h.due_date,h.answer_visible_date,h.max_score,h.created_at,h.parts_config,h.max_attempts,h.exam_type,h.hsa_config,h.time_limit_minutes,
-           s.id submission_id,s.score,s.feedback,s.grading_details,s.submitted_at,s.graded_at,s.file_path submitted_file,s.files submitted_files,s.structured_answers,s.graded_by_ai,s.grading_status,s.submit_count,s.best_attempt
+           s.id submission_id,s.score,s.feedback,s.grading_details,s.graded_pages,s.submitted_at,s.graded_at,s.file_path submitted_file,s.files submitted_files,s.structured_answers,s.graded_by_ai,s.grading_status,s.submit_count,s.best_attempt
     FROM homework h LEFT JOIN submissions s ON h.id=s.homework_id AND s.student_id=?
     WHERE h.class_id=? ORDER BY h.hw_order,h.created_at
   `).all(req.user.id, req.params.id).map(hw => {
@@ -63,7 +64,7 @@ router.get('/my-classes/:id', (req, res) => {
     const attemptInProgress = attemptStartedAt && (!hw.submitted_at || attemptStartedAt > hw.submitted_at);
     // Nộp nhiều lần lấy điểm CAO NHẤT: lần mới đang chờ chấm → tạm hiện kết quả lần trước có điểm
     const best = hw.score === null ? parseBest(hw.best_attempt) : null;
-    if (best) Object.assign(hw, { score: best.score, feedback: best.feedback, grading_details: best.grading_details, graded_at: best.graded_at, graded_by_ai: best.graded_by_ai, showing_best: true });
+    if (best) Object.assign(hw, { score: best.score, feedback: best.feedback, grading_details: best.grading_details, graded_pages: best.graded_pages ?? null, graded_at: best.graded_at, graded_by_ai: best.graded_by_ai, showing_best: true });
     delete hw.best_attempt;
     return {
       ...hw,
@@ -77,6 +78,8 @@ router.get('/my-classes/:id', (req, res) => {
       // Nhận xét + chi tiết từng câu (sai câu nào) chỉ hiện cùng lúc với đáp án (theo "Thời gian xem đáp án").
       feedback: canSeeAnswer ? hw.feedback : null,
       grading_details: canSeeAnswer ? hw.grading_details : null,
+      // Ảnh bài đã chấm (AI sửa) — chỉ danh sách ảnh, chỉ từ "Thời gian xem đáp án"
+      graded_pages: canSeeAnswer ? gradedPagesForStudent(hw.graded_pages) : null,
       attempt_started_at: attemptInProgress ? attemptStartedAt : null,
     };
   });

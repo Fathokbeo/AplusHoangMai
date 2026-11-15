@@ -1,6 +1,6 @@
 import { CheckCircle2, XCircle, MinusCircle } from 'lucide-react';
 
-interface Detail { question: string; status: 'correct' | 'wrong' | 'partial'; comment: string; }
+interface Detail { question: string; status: 'correct' | 'wrong' | 'partial'; comment: string; points?: number; max_points?: number; }
 
 const STYLE: Record<string, { bg: string; color: string; label: string; Icon: any }> = {
   correct: { bg: '#E8F5E9', color: '#2E7D32', label: 'Đúng', Icon: CheckCircle2 },
@@ -37,6 +37,11 @@ export default function GradingDetails({ details }: { details: string | Detail[]
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ fontWeight: 700, fontSize: '0.82rem', color: '#1A1A2E' }}>{d.question || `Câu ${i + 1}`}</span>
                   <span style={{ fontSize: '0.68rem', fontWeight: 700, color: st.color, background: 'white', padding: '1px 7px', borderRadius: 99 }}>{st.label}</span>
+                  {typeof d.points === 'number' && typeof d.max_points === 'number' && (
+                    <span style={{ marginLeft: 'auto', fontSize: '0.74rem', fontWeight: 700, color: st.color, whiteSpace: 'nowrap' }}>
+                      {String(d.points).replace('.', ',')}/{String(d.max_points).replace('.', ',')}đ
+                    </span>
+                  )}
                 </div>
                 {d.comment && <div style={{ fontSize: '0.8rem', color: '#555', lineHeight: 1.5, marginTop: 2 }}>{d.comment}</div>}
               </div>
