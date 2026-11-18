@@ -43,14 +43,22 @@ function allKeys() {
 }
 
 // Key dùng được cho model này ngay bây giờ (bỏ key hỏng / key đang hết lượt model này)
-function keysFor(model) {
+// Lần lượt xoay vòng điểm bắt đầu: các lượt gọi chạy song song (nhiều nhóm học sinh cùng lúc) được chia
+// đều cho các key khác nhau → mỗi key chịu ít token/phút (TPM) và lượt/phút (RPM) hơn.
+const rr = new Map();
+function keysFor(model, { rotate = true } = {}) {
   const now = Date.now();
-  return allKeys().map((k) => k.key).filter((key) => {
+  const list = allKeys().map((k) => k.key).filter((key) => {
     const st = state(key);
     if (st.bad && st.bad.until > now) return false;
     const m = st.models.get(model);
     return !(m && m.until > now);
   });
+  if (!rotate || list.length < 2) return list;
+  const n = rr.get(model) || 0;
+  rr.set(model, n + 1);
+  const off = n % list.length;
+  return [...list.slice(off), ...list.slice(0, off)];
 }
 
 // Thời điểm reset quota NGÀY của Google: nửa đêm giờ Thái Bình Dương (≈ 15h giờ Việt Nam).

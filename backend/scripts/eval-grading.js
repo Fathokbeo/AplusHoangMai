@@ -18,7 +18,7 @@ require('dotenv').config({ quiet: true });
 const fs = require('fs');
 const path = require('path');
 const { PDFParse } = require('pdf-parse');
-const { gradeSubmission, gradingModels } = require('../src/services/aiGrading');
+const { gradeGroup, gradingModels } = require('../src/services/aiGrading');
 const { GRADED_DIR } = require('../src/services/gradingPages');
 
 const args = process.argv.slice(2);
@@ -31,6 +31,7 @@ const rel = (p) => (path.isAbsolute(p) ? p : path.join(baseDir, p));
 const outDir = path.resolve(opt('--out', path.join(baseDir, 'eval-out')));
 const models = opt('--models') ? opt('--models').split(',') : null;
 const only = opt('--only') ? opt('--only').split(',').map((s) => s.trim()) : null;
+const group = Math.max(1, Number(opt('--group', '1')) || 1); // số học sinh chấm chung 1 lượt gọi
 fs.mkdirSync(path.join(outDir, 'pages'), { recursive: true });
 fs.mkdirSync(path.join(outDir, 'graded'), { recursive: true });
 
@@ -82,18 +83,35 @@ function stats(rows, key) {
 (async () => {
   const maxScore = manifest.maxScore || 10;
   console.log(`Model chấm: ${(models || gradingModels()).join(' → ')}`);
-  for (const st of manifest.students) {
-    if (only && !only.includes(st.name)) continue;
-    if (results[st.name] && results[st.name].final != null) { console.log(`✓ (đã có) ${st.name}`); continue; }
-    const files = await studentFiles(st);
+  const todo = manifest.students.filter((st) => (!only || only.includes(st.name)) && !(results[st.name] && results[st.name].final != null));
+  manifest.students.filter((st) => results[st.name] && results[st.name].final != null).forEach((st) => console.log(`✓ (đã có) ${st.name}`));
+  let stop = false;
+  for (let g = 0; g < todo.length && !stop; g += group) {
+    const chunk = todo.slice(g, g + group);
+    const inputs = [];
+    for (const st of chunk) inputs.push({ files: await studentFiles(st), annotatePrefix: `eval_${slug(st.name)}_${Date.now()}` });
     const t0 = Date.now();
-    console.log(`… chấm ${st.name} (${files.length} trang)`);
+    console.log(`… chấm ${chunk.map((st, i) => `${st.name} (${inputs[i].files.length} trang)`).join(', ')}${chunk.length > 1 ? ` — chung 1 lượt gọi` : ''}`);
+    let res;
     try {
-      const r = await gradeSubmission(rel(manifest.answer), files, maxScore, manifest.gradingNote || '', {
+      res = await gradeGroup({
+        answerFilePath: rel(manifest.answer), maxScore, gradingNote: manifest.gradingNote || '',
         partsConfig: manifest.partsConfig || null, // null = chấm toàn bộ bài theo file đáp án (như bài cũ)
-        annotatePrefix: `eval_${slug(st.name)}_${Date.now()}`,
         models,
-      });
+      }, inputs);
+    } catch (err) {
+      res = chunk.map(() => ({ ok: false, error: err }));
+    }
+    const secs = Math.round((Date.now() - t0) / 1000);
+    chunk.forEach((st, i) => {
+      const r = res[i];
+      if (!r || !r.ok) {
+        const err = (r && r.error) || new Error('không có kết quả');
+        console.error(`  ✗ ${st.name}: ${err.message}`);
+        results[st.name] = { teacher: st.teacher, error: err.message };
+        if (err.quota) stop = true;
+        return;
+      }
       const rv = r.marks.review;
       for (const p of r.marks.pages) fs.copyFileSync(path.join(GRADED_DIR, p.name), path.join(outDir, 'graded', `${slug(st.name)}_${p.name.split('_').pop()}`));
       results[st.name] = {
@@ -101,19 +119,15 @@ function stats(rows, key) {
         run1: rv.run1 && rv.run1.score, run1Model: rv.run1 && rv.run1.model,
         run2: rv.run2 && rv.run2.score, run2Model: rv.run2 && rv.run2.model,
         final: r.score, finalModel: rv.final.model,
-        spread: rv.spread, needsTeacher: rv.needs_teacher,
-        seconds: Math.round((Date.now() - t0) / 1000),
-        usage: rv.usage,
+        spread: rv.spread, needsTeacher: rv.needs_teacher, group: chunk.length,
+        seconds: secs,
+        usage: i === 0 ? rv.usage : [], // lượt gọi dùng chung cả nhóm → chỉ tính 1 lần
         details: r.details, comparison: rv.comparison, pageOrder: r.raw.final.page_order,
       };
-      save();
-      console.log(`  GV ${st.teacher} | lần1 ${results[st.name].run1} (${results[st.name].run1Model}) | lần2 ${results[st.name].run2} (${results[st.name].run2Model}) | CHỐT ${r.score} | lệch ${(r.score - st.teacher).toFixed(2)} | ${results[st.name].seconds}s`);
-    } catch (err) {
-      console.error(`  ✗ ${st.name}: ${err.message}`);
-      results[st.name] = { teacher: st.teacher, error: err.message };
-      save();
-      if (err.quota) { console.error('Hết quota — dừng, chạy lại sau sẽ tiếp tục từ học sinh này.'); break; }
-    }
+      console.log(`  GV ${st.teacher} | lần1 ${results[st.name].run1} | lần2 ${results[st.name].run2} | CHỐT ${r.score} | lệch ${(r.score - st.teacher).toFixed(2)} | ${secs}s (${rv.final.model})`);
+    });
+    save();
+    if (stop) console.error('Hết quota — dừng, chạy lại sau sẽ tiếp tục từ học sinh chưa chấm.');
   }
 
   // ── Thống kê ─────────────────────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@ const fs = require('fs');
 const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { uploadHomework, uploadSubmission } = require('../middleware/upload');
-const { enqueue, gradeOne } = require('../services/gradingQueue');
+const { enqueue, gradeOne, runScheduledGrading, nextGradingAt, scheduleMode } = require('../services/gradingQueue');
 const { needsAiGrading, stripAnswers, stripHsaAnswers } = require('../services/homeworkParts');
 const { computeMaxScore } = require('../services/homeworkScoring');
 const { compareVietnameseName } = require('../services/vietnameseName');
@@ -259,6 +259,8 @@ router.get('/homework/:id', (req, res) => {
       can_submit: (!hw.due_date || now <= hw.due_date) && (attemptsLeft === null || attemptsLeft > 0),
       can_see_answer: canSeeAnswer,
       attempts_left: attemptsLeft,
+      // Bài đang chờ đợt chấm gom → giờ chấm dự kiến (21:30 hoặc trước hạn nộp)
+      next_grading_at: submission && submission.grading_status === 'scheduled' ? new Date(nextGradingAt(hw.due_date)).toISOString() : null,
     });
   }
 
@@ -287,7 +289,11 @@ router.get('/homework/:id', (req, res) => {
   roster.sort((a, b) => (hw.custom_student_order ? (a.sort_order - b.sort_order) : 0) || compareVietnameseName(a.full_name, b.full_name));
   roster.forEach((s) => { delete s.sort_order; });
 
-  res.json({ ...hw, submissions, roster, is_overdue: hw.due_date ? now > hw.due_date : false });
+  res.json({
+    ...hw, submissions, roster, is_overdue: hw.due_date ? now > hw.due_date : false,
+    grading_schedule: scheduleMode(),
+    next_grading_at: new Date(nextGradingAt(hw.due_date)).toISOString(),
+  });
 });
 
 // ── Bắt đầu làm bài (student) — chỉ dùng cho bài HSA có/không giới hạn thời gian ────────
@@ -519,6 +525,20 @@ router.put('/submissions/:id/grade', requireRole('teacher', 'admin'), (req, res)
   // Học sinh nộp nhiều lần → giữ lần có điểm cao nhất
   const kept = settleBest(db, req.params.id);
   res.json({ message: kept === 'best' ? 'Đã chấm điểm — lần nộp trước có điểm cao hơn nên được giữ làm điểm chính thức' : 'Đã chấm điểm' });
+});
+
+// ── Chấm ngay các bài đang chờ đợt chấm gom của 1 bài tập (vẫn gom nhiều học sinh / lượt gọi) ───
+router.post('/homework/:id/grade-now', requireRole('teacher', 'admin'), (req, res) => {
+  const db = getDb();
+  const hw = db.prepare("SELECT h.id FROM homework h JOIN classes c ON h.class_id=c.id WHERE h.id=? AND (c.teacher_id=? OR ?='admin')").get(req.params.id, req.user.id, req.user.role);
+  if (!hw) return res.status(404).json({ message: 'Không tìm thấy bài tập' });
+  const count = db.prepare("SELECT COUNT(*) c FROM submissions WHERE homework_id=? AND grading_status='scheduled'").get(hw.id).c;
+  if (!count) return res.json({ count: 0, message: 'Không có bài nào đang chờ chấm' });
+  // Chạy nền — có thể mất vài phút; giao diện tự làm mới để cập nhật điểm
+  runScheduledGrading({ homeworkId: hw.id, reason: 'giáo viên bấm Chấm ngay' })
+    .then((r) => { if (r && r.skipped) setTimeout(() => runScheduledGrading({ homeworkId: hw.id, reason: 'giáo viên bấm Chấm ngay' }).catch(() => {}), 60_000); })
+    .catch((e) => console.error('[grade-now]', e.message));
+  res.json({ count, message: `Đang chấm ${count} bài — điểm sẽ cập nhật trong vài phút` });
 });
 
 // ── Re-grade with AI (giáo viên bấm chấm lại — chờ kết quả ngay) ─────────

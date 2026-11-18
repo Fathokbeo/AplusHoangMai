@@ -100,6 +100,21 @@ export default function HomeworkDetail() {
     }
   };
 
+  // Chấm ngay các bài đang chờ đợt chấm gom (chạy nền, điểm cập nhật dần)
+  const [gradingNow, setGradingNow] = useState(false);
+  const gradeNow = async () => {
+    setGradingNow(true);
+    try {
+      const { data } = await api.post(`/homework/${id}/grade-now`);
+      toast.success(data.message);
+      setTimeout(fetchHw, 3000);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Không gửi được yêu cầu chấm');
+    } finally {
+      setGradingNow(false);
+    }
+  };
+
   const regrade = async (subId: number) => {
     setRegrading(subId);
     try {
@@ -174,6 +189,7 @@ export default function HomeworkDetail() {
   const isOverdue = hw.due_date ? new Date() > new Date(hw.due_date) : false;
   const submittedCount = roster.filter((s: any) => s.submission_id).length;
   const missingCount = roster.length - submittedCount;
+  const scheduledCount = roster.filter((s: any) => s.grading_status === 'scheduled').length;
   const graded = hw.submissions?.filter((s: any) => s.score !== null).length || 0;
   const visibleRoster = roster.filter((s: any) =>
     filter === 'all' ? true : filter === 'submitted' ? !!s.submission_id : !s.submission_id);
@@ -271,6 +287,12 @@ export default function HomeworkDetail() {
               </button>
             ))}
           </div>
+          {scheduledCount > 0 && (
+            <button className="btn btn-secondary btn-sm" onClick={gradeNow} disabled={gradingNow}
+              title={`AI sẽ tự chấm gom lúc ${hw.next_grading_at ? new Date(hw.next_grading_at).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '21:30'}. Bấm để chấm luôn (vẫn chấm gom nhiều bài/lượt để tiết kiệm).`}>
+              <Bot size={14} /> {gradingNow ? 'Đang gửi...' : `Chấm ngay (${scheduledCount} bài chờ)`}
+            </button>
+          )}
           <button className="btn btn-success btn-sm" onClick={exportExcel} disabled={roster.length === 0} title="Xuất bảng điểm cả lớp ra Excel">
             <Download size={14} /> Xuất Excel
           </button>
@@ -346,6 +368,10 @@ export default function HomeworkDetail() {
                           {s.graded_by_ai
                             ? <span title="AI chấm" style={{ color: '#6A1B9A', display: 'inline-flex' }}><Bot size={14} /></span>
                             : <span title="Giáo viên chấm" style={{ fontSize: '0.68rem', color: '#1565C0', fontWeight: 700 }}>GV</span>}
+                        </span>
+                      ) : s.grading_status === 'scheduled' ? (
+                        <span title="Chờ đợt chấm gom (tối 21h30 / trước hạn nộp / giáo viên bấm Chấm ngay)" style={{ color: '#6A1B9A', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+                          <Clock size={12} /> Chờ chấm {hw.next_grading_at ? new Date(hw.next_grading_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : ''}
                         </span>
                       ) : (s.grading_status === 'pending' || s.grading_status === 'grading') ? (
                         <span style={{ color: '#1565C0', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}>

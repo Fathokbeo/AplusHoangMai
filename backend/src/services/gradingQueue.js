@@ -2,11 +2,12 @@
 // việc chấm AI chạy nền tuần tự, có thử lại khi lỗi và tự phục hồi sau khi server khởi động lại.
 const path = require('path');
 const { getDb } = require('../db/database');
-const { gradeSubmission, extractAnswerKey } = require('./aiGrading');
+const { gradeSubmission, gradeGroup, extractAnswerKey } = require('./aiGrading');
 const { needsAiGrading, hasAnswerKey, parsePartsConfig, partEnabled, missingKeyIndices, applyExtractedKeys, PART_LABELS, parseHsaConfig, hasHsaAnswerKey } = require('./homeworkParts');
 const { settleBest } = require('./bestAttempt');
 const { removeGradedFiles } = require('./gradingPages');
 const { batchEnabled } = require('./geminiClient');
+const aiKeys = require('./aiKeys');
 const { scoreStructured, scoreHsa, partMax, round2, rawMaxScore, scaleToTarget, composeAutoFeedback, composeEssayFeedback, essayDetailsOf } = require('./homeworkScoring');
 
 const MAX_ATTEMPTS = 5;            // số lần thử chấm tối đa trước khi đánh dấu thất bại
@@ -140,195 +141,393 @@ function gradeHsaSubmission(db, K, sub, submissionId) {
   return { score: total, feedback, details: det.details };
 }
 
+// ── LỊCH CHẤM GOM (tiết kiệm lượt gọi/ngày) ────────────────────────────────────────────────
+// GRADING_SCHEDULE=daily (mặc định): bài nộp cần AI KHÔNG chấm ngay mà chờ ('scheduled'), rồi được gom
+// theo bài tập, mỗi lượt gọi chấm GRADING_GROUP_SIZE học sinh (mặc định 3), vào:
+//   • mỗi tối GRADING_DAILY_TIME (mặc định 21:30, giờ Việt Nam) — chấm mọi bài đang chờ;
+//   • GRADING_PREDUE_MINUTES (mặc định 60) phút trước hạn nộp của từng bài tập — để học sinh nộp sớm biết
+//     điểm và còn kịp nộp lại.
+// Server ngủ đúng giờ (Render gói free) → lúc thức dậy chấm bù ngay. GRADING_SCHEDULE=immediate: chấm ngay
+// từng bài như trước. Ngoại lệ luôn chấm ngay: giáo viên bấm "chấm lại", bài thi thử của khách, bài chỉ có
+// phần máy tự chấm (không cần AI).
+const VN_TZ = 'Asia/Ho_Chi_Minh';
+const scheduleMode = () => (String(process.env.GRADING_SCHEDULE || 'daily').toLowerCase() === 'immediate' ? 'immediate' : 'daily');
+const groupSize = () => Math.max(1, Math.min(5, Number(process.env.GRADING_GROUP_SIZE) || 3));
+const predueMinutes = () => (Number(process.env.GRADING_PREDUE_MINUTES) >= 0 ? Number(process.env.GRADING_PREDUE_MINUTES) : 60);
+function dailyTime() {
+  const m = String(process.env.GRADING_DAILY_TIME || '21:30').match(/^(\d{1,2}):(\d{2})$/);
+  return m ? { h: Number(m[1]), m: Number(m[2]) } : { h: 21, m: 30 };
+}
+// Giờ Việt Nam hiện tại: { date: 'YYYY-MM-DD', minutes: phút trong ngày }
+function vnNow(t = Date.now()) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: VN_TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    .formatToParts(new Date(t)).map((p) => [p.type, p.value]));
+  return { date: `${parts.year}-${parts.month}-${parts.day}`, minutes: Number(parts.hour) * 60 + Number(parts.minute) };
+}
+// Thời điểm (ms) của lần chấm 21:30 sắp tới
+function nextDailyRunAt(t = Date.now()) {
+  const { h, m } = dailyTime();
+  const now = vnNow(t);
+  const offset = (h * 60 + m - now.minutes) * 60_000;
+  const base = t - (new Date(t).getSeconds() * 1000 + new Date(t).getMilliseconds());
+  return offset > 0 ? base + offset : base + offset + 24 * 3600_000;
+}
+// Lần chấm gom sắp tới của 1 bài tập (để hiện "Chờ chấm lúc ..."): sớm hơn giữa 21:30 và (hạn nộp − 60 phút)
+function nextGradingAt(dueDate) {
+  const daily = nextDailyRunAt();
+  const due = dueDate ? Date.parse(dueDate) : NaN;
+  const pre = Number.isFinite(due) ? due - predueMinutes() * 60_000 : NaN;
+  return Number.isFinite(pre) && pre > Date.now() && pre < daily ? pre : daily;
+}
+
+// Giáo viên NỘP HỘ (thường cả lớp 1 lúc, cần điểm sớm để gửi nhận xét) → không chờ 21:30: đợi vài phút
+// sau lần nộp hộ cuối của bài tập đó (gom đủ cả loạt) rồi chấm gom luôn.
+const teacherDelayMs = () => (Number(process.env.GRADING_TEACHER_DELAY_MIN) >= 0 ? Number(process.env.GRADING_TEACHER_DELAY_MIN) : 2) * 60_000;
+const soonRuns = new Map(); // id bài tập → thời điểm chấm
+
+function ranBefore(db, key) {
+  return !!db.prepare('SELECT 1 FROM grading_runs WHERE run_key=?').get(key);
+}
+function markRan(db, key) {
+  db.prepare('INSERT OR IGNORE INTO grading_runs (run_key, ran_at) VALUES (?, ?)').run(key, new Date().toISOString());
+}
+
+// ── Phân tích 1 bài nộp: phần nào máy tự chấm, phần nào cần AI ───────────────────────────────
+async function analyze(kind, K, sub, submissionId) {
+  const subFiles = submissionFilenames(sub);
+  const answerPath = sub.answer_file ? path.join(__dirname, '../../uploads', K.answerDir, sub.answer_file) : null;
+  const subPaths = subFiles.map((name) => path.join(__dirname, '../../uploads', K.filesDir, name));
+  const hasImages = subPaths.length > 0;
+  let cfg = parsePartsConfig(sub.parts_config);
+
+  // 0) Câu objective giáo viên ĐỂ TRỐNG đáp án → nhờ AI đọc từ FILE ĐÁP ÁN rồi ghép vào cfg.
+  //    (đáp án giáo viên nhập tay luôn được ưu tiên; chỉ điền vào câu còn trống; đọc 1 lần cho cả bài tập)
+  if (cfg && answerPath) {
+    const missing = {
+      multiple_choice: missingKeyIndices(cfg, 'multiple_choice'),
+      true_false: missingKeyIndices(cfg, 'true_false'),
+      short_answer: missingKeyIndices(cfg, 'short_answer'),
+    };
+    if (missing.multiple_choice.length || missing.true_false.length || missing.short_answer.length) {
+      const cacheKey = `${kind}:${sub.hw_id}:${sub.answer_file}`;
+      let extracted = answerKeyCache.get(cacheKey);
+      if (extracted === undefined) {
+        try {
+          extracted = await extractAnswerKey(answerPath, cfg, missing);
+          answerKeyCache.set(cacheKey, extracted);
+          console.log(`[grading-queue] 📖 Đã đọc đáp án từ file cho bài #${sub.hw_id}`);
+        } catch (e) {
+          console.error(`[grading-queue] đọc đáp án từ file lỗi (#${submissionId}): ${e.message}`);
+          extracted = null; // không cache lỗi để lần sau thử lại
+        }
+      }
+      if (extracted) cfg = applyExtractedKeys(cfg, extracted);
+    }
+  }
+
+  // 1) Chấm tự động (deterministic) các phần khách quan học sinh đã điền (cfg đã ghép đáp án)
+  const det = scoreStructured(cfg || sub.parts_config, sub.structured_answers);
+
+  // 2) Phần cần AI: pendingAi (HS không điền giao diện → AI dò trong ẢNH), aiKeyless (HS có điền nhưng cả
+  //    phần chưa có đáp án → AI đọc FILE ĐÁP ÁN), tự luận (có ảnh); bài cũ (không cfg) → AI chấm toàn bộ.
+  const aiFromImages = hasImages ? (det.pendingAi || []) : [];
+  const aiFromAnswers = answerPath ? (det.aiKeyless || []) : [];
+  const aiObjective = [...new Set([...aiFromImages, ...aiFromAnswers])];
+  const essayEnabled = cfg ? partEnabled(cfg, 'essay') : !!sub.answer_file;
+  const aiEssay = hasImages && essayEnabled;
+  const needAi = aiObjective.length > 0 || aiEssay;
+  // Phần chưa có đáp án mà KHÔNG có file đáp án (và không có ảnh) → không thể chấm tự động/AI
+  const cannotGrade = (cfg ? (det.aiKeyless || []) : []).filter((k) => !aiObjective.includes(k));
+
+  // Thang điểm THÔ phần AI phụ trách + phạm vi chấm
+  let aiMax = sub.max_score;
+  if (cfg) {
+    aiMax = 0;
+    aiObjective.forEach((k) => { aiMax += partMax(cfg, k); });
+    if (aiEssay) aiMax += partMax(cfg, 'essay');
+    aiMax = round2(aiMax);
+  }
+  const scope = cfg ? {
+    multiple_choice: aiObjective.includes('multiple_choice'),
+    true_false: aiObjective.includes('true_false'),
+    short_answer: aiObjective.includes('short_answer'),
+    essay: aiEssay,
+  } : null;
+  return { cfg, det, aiObjective, aiEssay, needAi, cannotGrade, aiMax: aiMax || sub.max_score, scope, answerPath, subPaths };
+}
+
+// ── Lưu kết quả (phần máy chấm + phần AI chấm) ─────────────────────────────────────────────
+function finalize(kind, K, sub, submissionId, ctx, aiResult) {
+  const db = getDb();
+  const { cfg, det, aiEssay, needAi, cannotGrade } = ctx;
+  const aiScore = aiResult ? aiResult.score || 0 : 0;
+  const aiDetails = aiResult ? (aiResult.details || []).slice() : [];
+  const aiFeedback = aiResult ? aiResult.feedback || '' : '';
+  const aiMarks = aiResult ? aiResult.marks || null : null; // ảnh bài làm đã chấm + kết quả đối chiếu
+  // Chi tiết AI vừa chấm (trước khi thêm các ghi chú "chưa có đáp án" bên dưới)
+  const aiGradedDetails = aiDetails.slice();
+  // Phần không thể chấm (chưa có đáp án & không có file đáp án) → ghi chú để giáo viên xử lý
+  cannotGrade.forEach((k) => aiDetails.push({
+    question: PART_LABELS[k] || k, status: 'partial',
+    comment: 'Chưa có đáp án để chấm — hãy nhập đáp án các câu này hoặc tải File đáp án (PDF) để AI tự đọc.',
+  }));
+
+  // Gộp điểm THÔ (tổng các câu) rồi QUY ĐỔI về thang giáo viên chọn (sub.max_score)
+  const rawEarned = round2(det.score + aiScore);
+  let total = cfg ? scaleToTarget(rawEarned, rawMaxScore(cfg), sub.max_score) : rawEarned;
+  if (sub.max_score != null) total = Math.max(0, Math.min(sub.max_score, total));
+  const details = [...det.details, ...aiDetails];
+  // Nhận xét theo MẪU (KHÔNG dùng AI), mức theo điểm cả bài + chủ đề bài (overview soạn sẵn 1 lần).
+  let rubric = null;
+  try { rubric = sub.feedback_rubric ? JSON.parse(sub.feedback_rubric) : null; } catch { rubric = null; }
+  const topic = rubric && rubric.overview;
+  const objMaxPts = ['multiple_choice', 'true_false', 'short_answer']
+    .reduce((s, k) => s + (det.gradedParts[k] ? partMax(cfg, k) : 0), 0);
+  let feedback;
+  if (cfg ? partEnabled(cfg, 'essay') : aiEssay) {
+    // Câu sai theo LOẠI LỖI (tính toán / lập luận / đọc đề / kiến thức / kết luận), gộp nhãn "5abc, 6b"
+    const pct10 = sub.max_score > 0 ? (total / sub.max_score) * 10 : 0;
+    feedback = composeEssayFeedback(pct10, mergeAiObjectiveStats(det.partStats, aiGradedDetails), topic,
+      essayDetailsOf(aiGradedDetails), { essayNotSubmitted: !aiEssay });
+  } else {
+    const detFeedback = objMaxPts > 0 ? composeAutoFeedback((det.score / objMaxPts) * 10, det.partStats, topic) : '';
+    feedback = [detFeedback, aiFeedback].filter(Boolean).join(' ') || `Tổng điểm: ${total}/${sub.max_score}.`;
+  }
+
+  removeGradedFiles(sub.graded_pages); // ảnh chấm của lần chấm trước (chấm lại) không còn dùng
+  db.prepare(`UPDATE ${K.table} SET score=?,feedback=?,grading_details=?,graded_pages=?,graded_at=?,graded_by_ai=?,grading_status='done' WHERE id=?`)
+    .run(total, feedback, JSON.stringify(details), aiMarks ? JSON.stringify(aiMarks) : null, new Date().toISOString(), needAi ? 1 : 0, submissionId);
+  if (K.settle) K.settle(db, submissionId); // nộp nhiều lần → giữ lần có điểm cao nhất
+  console.log(`[grading-queue] ✅ Đã chấm ${kind} #${submissionId}: ${total}/${sub.max_score}${needAi ? ' (auto+AI)' : ' (auto)'}`);
+  return { score: total, feedback, details };
+}
+
+// ── Chấm lỗi: hết lượt mọi key → không tính lần thử, hẹn lại; lỗi khác → thử lại / đánh dấu thất bại ──
+let scheduledRetryAt = 0; // chấm gom gặp hết lượt → chạy lại các bài đang chờ vào lúc này
+function handleFail(kind, K, sub, submissionId, err, { scheduled = false } = {}) {
+  const db = getDb();
+  const waitStatus = scheduled ? 'scheduled' : 'pending';
+  if (err.quota) {
+    db.prepare(`UPDATE ${K.table} SET grading_status=?, grading_attempts=MAX(0,COALESCE(grading_attempts,1)-1) WHERE id=?`).run(waitStatus, submissionId);
+    // Hẹn đúng lúc sớm nhất có key × model dùng lại được (tối thiểu 1 phút, tối đa 6 giờ)
+    const delay = Math.min(6 * 3600_000, Math.max(60_000, (err.retryAt || 0) - Date.now() || QUOTA_RETRY_MS));
+    if (scheduled) {
+      scheduledRetryAt = scheduledRetryAt ? Math.min(scheduledRetryAt, Date.now() + delay) : Date.now() + delay;
+    } else {
+      quotaBlockedUntil = Date.now() + delay;
+      setTimeout(() => enqueue(submissionId, kind), delay);
+    }
+    console.warn(`[grading-queue] Mọi API key đã hết lượt model chấm → chấm lại ${kind} #${submissionId} sau ${Math.round(delay / 60000)} phút`);
+    return;
+  }
+  const attempts = (sub.grading_attempts || 0) + 1;
+  const status = attempts >= MAX_ATTEMPTS ? 'failed' : waitStatus;
+  db.prepare(`UPDATE ${K.table} SET grading_status=? WHERE id=?`).run(status, submissionId);
+  if (status === 'failed') console.error(`[grading-queue] ❌ Bài ${kind} #${submissionId} thất bại sau ${attempts} lần thử.`);
+  else if (scheduled) scheduledRetryAt = scheduledRetryAt || Date.now() + 10 * 60_000;
+  else setTimeout(() => enqueue(submissionId, kind), RETRY_DELAY_MS); // thử lại sau một lúc (không chặn hàng đợi)
+}
+
+// Kiểm tra chung trước khi chấm. Trả về { sub } nếu chấm được, hoặc { result } nếu đã xử lý xong.
+function precheck(K, kind, submissionId, force) {
+  const db = getDb();
+  const sub = K.load(db, submissionId);
+  if (!sub) return { result: null };
+  // Không có đáp án nào (file tự luận lẫn key objective/HSA) → không chấm tự động được, để giáo viên chấm tay
+  if (!needsAiGrading(sub)) {
+    db.prepare(`UPDATE ${K.table} SET grading_status=NULL WHERE id=?`).run(submissionId);
+    return { result: null };
+  }
+  // HSA: chấm hoàn toàn tự động (không AI, không quy đổi thang điểm)
+  if (sub.exam_type === 'hsa') return { result: gradeHsaSubmission(db, K, sub, submissionId) };
+  // Phải có ít nhất bài làm: file ảnh/PDF HOẶC đáp án có cấu trúc đã điền
+  if (submissionFilenames(sub).length === 0 && !sub.structured_answers) {
+    db.prepare(`UPDATE ${K.table} SET grading_status=NULL WHERE id=?`).run(submissionId);
+    return { result: null };
+  }
+  if (!force && (sub.grading_attempts || 0) >= MAX_ATTEMPTS) {
+    db.prepare(`UPDATE ${K.table} SET grading_status='failed' WHERE id=?`).run(submissionId);
+    return { result: null };
+  }
+  return { sub };
+}
+
 // Chấm 1 bài nộp rồi lưu kết quả.
-// force=true (giáo viên chấm lại): bỏ qua giới hạn số lần thử.
-// Trả về kết quả chấm; ném lỗi nếu chấm thất bại (để nơi gọi xử lý/thử lại).
+// force=true (giáo viên chấm lại): bỏ qua giới hạn số lần thử, chấm NGAY (không chờ lịch chấm gom).
+// Trả về kết quả chấm (null nếu bài được xếp chờ chấm gom); ném lỗi nếu chấm thất bại.
 async function gradeRecord(kind, submissionId, { force = false } = {}) {
   const K = KINDS[kind];
   if (!K) return null;
   const db = getDb();
-  const sub = K.load(db, submissionId);
+  const pre = precheck(K, kind, submissionId, force);
+  if (!pre.sub) return pre.result;
+  const sub = pre.sub;
 
-  if (!sub) return null;
-
-  // Không có đáp án nào (file tự luận lẫn key objective/HSA) → không chấm tự động được, để giáo viên chấm tay
-  if (!needsAiGrading(sub)) {
-    db.prepare(`UPDATE ${K.table} SET grading_status=NULL WHERE id=?`).run(submissionId);
-    return null;
+  let ctx;
+  try {
+    ctx = await analyze(kind, K, sub, submissionId);
+  } catch (err) {
+    handleFail(kind, K, sub, submissionId, err);
+    throw err;
   }
+  console.log(`[grading-queue] #${submissionId} det=${ctx.det.score} pendingAi=[${ctx.det.pendingAi}] aiKeyless=[${ctx.det.aiKeyless}] needAi=${ctx.needAi}`);
 
-  // HSA: chấm hoàn toàn tự động (không AI, không quy đổi thang điểm) — tách riêng khỏi luồng THPT bên dưới.
-  if (sub.exam_type === 'hsa') {
-    return gradeHsaSubmission(db, K, sub, submissionId);
-  }
-
-  const subFiles = submissionFilenames(sub);
-  // Phải có ít nhất bài làm: file ảnh/PDF HOẶC đáp án có cấu trúc đã điền
-  if (subFiles.length === 0 && !sub.structured_answers) {
-    db.prepare(`UPDATE ${K.table} SET grading_status=NULL WHERE id=?`).run(submissionId);
-    return null;
-  }
-
-  if (!force && (sub.grading_attempts || 0) >= MAX_ATTEMPTS) {
-    db.prepare(`UPDATE ${K.table} SET grading_status='failed' WHERE id=?`).run(submissionId);
+  // Cần AI + đang chạy lịch chấm gom → chờ tới đợt chấm (21:30 / trước hạn nộp), không tốn lượt gọi ngay
+  if (ctx.needAi && kind === 'hw' && !force && scheduleMode() === 'daily') {
+    db.prepare(`UPDATE ${K.table} SET grading_status='scheduled' WHERE id=?`).run(submissionId);
+    if (sub.submitted_by) {
+      soonRuns.set(sub.hw_id, Date.now() + teacherDelayMs()); // nộp hộ: lùi mốc mỗi lần có bài mới để gom đủ loạt
+      console.log(`[grading-queue] ⏳ Bài nộp hộ #${submissionId} → chấm gom sau ${Math.round(teacherDelayMs() / 60000)} phút`);
+    } else {
+      console.log(`[grading-queue] ⏳ Bài nộp #${submissionId} chờ đợt chấm gom (${new Date(nextGradingAt(sub.due_date)).toLocaleString('vi-VN', { timeZone: VN_TZ })})`);
+    }
     return null;
   }
 
   // Đánh dấu đang chấm + tăng số lần thử
-  db.prepare(`UPDATE ${K.table} SET grading_status='grading', grading_attempts=COALESCE(grading_attempts,0)+1 WHERE id=?`)
-    .run(submissionId);
-
-  const answerPath = sub.answer_file ? path.join(__dirname, '../../uploads', K.answerDir, sub.answer_file) : null;
-  const subPaths = subFiles.map(name => path.join(__dirname, '../../uploads', K.filesDir, name));
-  const hasImages = subPaths.length > 0;
-
+  db.prepare(`UPDATE ${K.table} SET grading_status='grading', grading_attempts=COALESCE(grading_attempts,0)+1 WHERE id=?`).run(submissionId);
   try {
-    let cfg = parsePartsConfig(sub.parts_config);
-
-    // 0) Câu objective giáo viên ĐỂ TRỐNG đáp án → nhờ AI đọc từ FILE ĐÁP ÁN rồi ghép vào cfg.
-    //    (đáp án giáo viên nhập tay luôn được ưu tiên; chỉ điền vào câu còn trống)
-    if (cfg && answerPath) {
-      const missing = {
-        multiple_choice: missingKeyIndices(cfg, 'multiple_choice'),
-        true_false: missingKeyIndices(cfg, 'true_false'),
-        short_answer: missingKeyIndices(cfg, 'short_answer'),
-      };
-      if (missing.multiple_choice.length || missing.true_false.length || missing.short_answer.length) {
-        const cacheKey = `${kind}:${sub.hw_id}:${sub.answer_file}`;
-        let extracted = answerKeyCache.get(cacheKey);
-        if (extracted === undefined) {
-          try {
-            extracted = await extractAnswerKey(answerPath, cfg, missing);
-            answerKeyCache.set(cacheKey, extracted);
-            console.log(`[grading-queue] 📖 Đã đọc đáp án từ file cho bài #${sub.hw_id}`);
-          } catch (e) {
-            console.error(`[grading-queue] đọc đáp án từ file lỗi (#${submissionId}): ${e.message}`);
-            extracted = null; // không cache lỗi để lần sau thử lại
-          }
-        }
-        if (extracted) cfg = applyExtractedKeys(cfg, extracted);
-      }
-    }
-
-    // 1) Chấm tự động (deterministic) các phần khách quan học sinh đã điền (cfg đã ghép đáp án)
-    const det = scoreStructured(cfg || sub.parts_config, sub.structured_answers);
-
-    // 2) Xác định phần cần AI chấm:
-    //    - pendingAi: HS KHÔNG điền giao diện → AI dò trong ẢNH (cần có ảnh)
-    //    - aiKeyless: HS CÓ điền nhưng cả phần chưa có đáp án → AI đọc FILE ĐÁP ÁN + đáp án HS điền (cần file đáp án)
-    //    - tự luận (nếu bật, và có ảnh bài làm); bài cũ (không cfg) có file đáp án → AI chấm toàn bộ từ ảnh
-    const aiFromImages = hasImages ? (det.pendingAi || []) : [];
-    const aiFromAnswers = answerPath ? (det.aiKeyless || []) : [];
-    const aiObjective = [...new Set([...aiFromImages, ...aiFromAnswers])];
-    const essayEnabled = cfg ? partEnabled(cfg, 'essay') : !!sub.answer_file;
-    const aiEssay = hasImages && essayEnabled;
-    const needAi = aiObjective.length > 0 || aiEssay;
-
-    // Phần chưa có đáp án mà KHÔNG có file đáp án (và không có ảnh) → không thể chấm tự động/AI
-    const cannotGrade = (cfg ? (det.aiKeyless || []) : []).filter((k) => !aiObjective.includes(k));
-
-    console.log(`[grading-queue] #${submissionId} det=${det.score} pendingAi=[${det.pendingAi}] aiKeyless=[${det.aiKeyless}] unresolved=${(det.unresolved || []).length} hasImages=${hasImages} answerFile=${!!answerPath}`);
-
-    let aiScore = 0;
-    let aiDetails = [];
-    let aiFeedback = '';
-    let aiMarks = null; // ảnh bài làm đã chấm + kết quả đối chiếu 2 lần chấm
-    if (needAi) {
-      // Thang điểm THÔ phần AI phụ trách
-      let aiMax;
-      if (!cfg) {
-        aiMax = sub.max_score; // bài cũ: AI chấm toàn bộ trên thang điểm bài
-      } else {
-        aiMax = 0;
-        aiObjective.forEach(k => { aiMax += partMax(cfg, k); });
-        if (aiEssay) aiMax += partMax(cfg, 'essay');
-        aiMax = round2(aiMax);
-      }
-      const scope = cfg ? {
-        multiple_choice: aiObjective.includes('multiple_choice'),
-        true_false: aiObjective.includes('true_false'),
-        short_answer: aiObjective.includes('short_answer'),
-        essay: aiEssay,
-      } : null;
-
-      const aiResult = await gradeSubmission(answerPath, subPaths, aiMax || sub.max_score, sub.grading_note, {
-        partsConfig: cfg || sub.parts_config, // cfg đã ghép đáp án để AI có sẵn key
-        scope,
-        studentAnswers: sub.structured_answers, // để AI chấm phần khách quan từ đáp án HS điền (không cần ảnh)
+    let aiResult = null;
+    if (ctx.needAi) {
+      aiResult = await gradeSubmission(ctx.answerPath, ctx.subPaths, ctx.aiMax, sub.grading_note, {
+        partsConfig: ctx.cfg || sub.parts_config, // cfg đã ghép đáp án để AI có sẵn key
+        scope: ctx.scope,
+        studentAnswers: sub.structured_answers,
         annotatePrefix: `${kind}_${submissionId}_${Date.now()}`, // vẽ đúng/sai lên ảnh bài làm
         realtime: force, // giáo viên bấm "chấm lại" đang chờ → gọi thường; chấm nền → Batch (rẻ 50%)
       });
-      aiMarks = aiResult.marks || null;
-      aiScore = aiResult.score || 0;
-      aiDetails = aiResult.details || [];
-      aiFeedback = aiResult.feedback || '';
     }
-
-    // Chi tiết AI vừa chấm (trước khi thêm các ghi chú "chưa có đáp án" bên dưới)
-    const aiGradedDetails = aiDetails.slice();
-
-    // Phần không thể chấm (chưa có đáp án & không có file đáp án) → ghi chú để giáo viên xử lý
-    cannotGrade.forEach((k) => aiDetails.push({
-      question: PART_LABELS[k] || k, status: 'partial',
-      comment: 'Chưa có đáp án để chấm — hãy nhập đáp án các câu này hoặc tải File đáp án (PDF) để AI tự đọc.',
-    }));
-
-    // 3) Gộp điểm THÔ (tổng các câu) rồi QUY ĐỔI về thang giáo viên chọn (sub.max_score)
-    const rawEarned = round2(det.score + aiScore);
-    let total = cfg ? scaleToTarget(rawEarned, rawMaxScore(cfg), sub.max_score) : rawEarned;
-    if (sub.max_score != null) total = Math.max(0, Math.min(sub.max_score, total));
-    const details = [...det.details, ...aiDetails];
-    // Nhận xét khái quát theo MẪU (KHÔNG dùng AI) — chọn mẫu theo thang điểm (quy đổi thang 10) + chủ đề
-    // bài (overview đã soạn sẵn 1 lần, xem homework.js).
-    //  - Bài CÓ tự luận: KHÔNG dùng đoạn nhận xét dài của AI. Phần Tự luận chỉ nhận xét ngắn theo từng câu
-    //    (trình bày thiếu / cần cẩn thận hơn / không làm), ghép chung 1 câu với phần khách quan; đúng hết
-    //    hoặc điểm cả bài ≥ 9 thì không nhắc tự luận. Mức điểm tính theo điểm CẢ BÀI.
-    //  - Bài KHÔNG có tự luận: giữ như cũ (mẫu theo điểm phần khách quan, ghép nhận xét AI nếu AI chấm hộ).
-    let rubric = null;
-    try { rubric = sub.feedback_rubric ? JSON.parse(sub.feedback_rubric) : null; } catch { rubric = null; }
-    const topic = rubric && rubric.overview;
-    const objMaxPts = ['multiple_choice', 'true_false', 'short_answer']
-      .reduce((s, k) => s + (det.gradedParts[k] ? partMax(cfg, k) : 0), 0);
-    let feedback;
-    if (cfg ? partEnabled(cfg, 'essay') : aiEssay) {
-      // Nhận xét chi tiết mà ngắn: câu sai theo LOẠI LỖI (tính toán / lập luận / đọc đề / kiến thức /
-      // kết luận), gộp nhãn "5abc, 6b"; câu chưa làm; câu khách quan sai; lời khuyên theo lỗi chính.
-      const pct10 = sub.max_score > 0 ? (total / sub.max_score) * 10 : 0;
-      feedback = composeEssayFeedback(pct10, mergeAiObjectiveStats(det.partStats, aiGradedDetails), topic,
-        essayDetailsOf(aiGradedDetails), { essayNotSubmitted: !aiEssay });
-    } else {
-      const detFeedback = objMaxPts > 0 ? composeAutoFeedback((det.score / objMaxPts) * 10, det.partStats, topic) : '';
-      feedback = [detFeedback, aiFeedback].filter(Boolean).join(' ') || `Tổng điểm: ${total}/${sub.max_score}.`;
-    }
-
-    removeGradedFiles(sub.graded_pages); // ảnh chấm của lần chấm trước (chấm lại) không còn dùng
-    db.prepare(`UPDATE ${K.table} SET score=?,feedback=?,grading_details=?,graded_pages=?,graded_at=?,graded_by_ai=?,grading_status='done' WHERE id=?`)
-      .run(total, feedback, JSON.stringify(details), aiMarks ? JSON.stringify(aiMarks) : null, new Date().toISOString(), needAi ? 1 : 0, submissionId);
-    if (K.settle) K.settle(db, submissionId); // nộp nhiều lần → giữ lần có điểm cao nhất
-    console.log(`[grading-queue] ✅ Đã chấm ${kind} #${submissionId}: ${total}/${sub.max_score}${needAi ? ' (auto+AI)' : ' (auto)'}`);
-    return { score: total, feedback, details };
+    return finalize(kind, K, sub, submissionId, ctx, aiResult);
   } catch (err) {
-    if (err.quota) {
-      // Hết quota các model mạnh (free tier giới hạn theo ngày/phút) → không phải lỗi của bài: trả lại lượt
-      // thử, chờ lâu rồi chấm lại, không chấm bằng model yếu hơn.
-      db.prepare(`UPDATE ${K.table} SET grading_status='pending', grading_attempts=MAX(0,COALESCE(grading_attempts,1)-1) WHERE id=?`).run(submissionId);
-      // Hẹn đúng lúc sớm nhất có key × model mạnh dùng lại được (tối thiểu 1 phút, tối đa 6 giờ)
-      const delay = Math.min(6 * 3600_000, Math.max(60_000, (err.retryAt || 0) - Date.now() || QUOTA_RETRY_MS));
-      quotaBlockedUntil = Date.now() + delay;
-      console.warn(`[grading-queue] Mọi API key đã hết lượt model chấm → chấm lại ${kind} #${submissionId} sau ${Math.round(delay / 60000)} phút`);
-      setTimeout(() => enqueue(submissionId, kind), delay);
-      throw err;
-    }
-    const attempts = (sub.grading_attempts || 0) + 1;
-    const status = attempts >= MAX_ATTEMPTS ? 'failed' : 'pending';
-    db.prepare(`UPDATE ${K.table} SET grading_status=? WHERE id=?`).run(status, submissionId);
-    if (status === 'pending') {
-      // Lên lịch thử lại sau một lúc (không chặn hàng đợi)
-      setTimeout(() => enqueue(submissionId, kind), RETRY_DELAY_MS);
-    } else {
-      console.error(`[grading-queue] ❌ Bài ${kind} #${submissionId} thất bại sau ${attempts} lần thử.`);
-    }
+    handleFail(kind, K, sub, submissionId, err);
     throw err;
+  }
+}
+
+// ── Chạy 1 đợt chấm gom: các bài đang chờ (của 1 bài tập hoặc tất cả) → nhóm theo bài tập → chấm ──
+let scheduledRunning = false;
+async function runScheduledGrading({ homeworkId = null, reason = '' } = {}) {
+  if (scheduledRunning) return { skipped: true };
+  scheduledRunning = true;
+  const K = KINDS.hw;
+  const db = getDb();
+  let graded = 0, failed = 0;
+  try {
+    const ids = db.prepare(`SELECT s.id FROM submissions s WHERE s.grading_status='scheduled'${homeworkId ? ' AND s.homework_id=?' : ''} ORDER BY s.submitted_at`)
+      .all(...(homeworkId ? [homeworkId] : [])).map((r) => r.id);
+    if (!ids.length) return { graded: 0 };
+    console.log(`[grading-queue] 🗂️ Đợt chấm gom (${reason || 'thủ công'}): ${ids.length} bài`);
+
+    // Phân tích từng bài; bài nào không còn cần AI thì lưu luôn
+    const items = [];
+    for (const id of ids) {
+      const pre = precheck(K, 'hw', id, false);
+      if (!pre.sub) continue;
+      try {
+        const ctx = await analyze('hw', K, pre.sub, id);
+        if (!ctx.needAi) { finalize('hw', K, pre.sub, id, ctx, null); graded++; continue; }
+        db.prepare(`UPDATE ${K.table} SET grading_status='grading', grading_attempts=COALESCE(grading_attempts,0)+1 WHERE id=?`).run(id);
+        items.push({ id, sub: pre.sub, ctx });
+      } catch (err) {
+        handleFail('hw', K, pre.sub, id, err, { scheduled: true });
+        failed++;
+      }
+    }
+
+    // Nhóm: cùng bài tập + cùng phạm vi chấm + cùng thang điểm phần AI → chia mỗi nhóm tối đa N học sinh
+    const groups = new Map();
+    items.forEach((it) => {
+      const key = [it.sub.hw_id, it.sub.answer_file, it.ctx.aiMax, JSON.stringify(it.ctx.scope)].join('|');
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(it);
+    });
+    const chunks = [];
+    const n = groupSize();
+    groups.forEach((list) => { for (let i = 0; i < list.length; i += n) chunks.push(list.slice(i, i + n)); });
+
+    const runChunk = async (chunk) => {
+      const first = chunk[0];
+      let results;
+      try {
+        results = await gradeGroup({
+          answerFilePath: first.ctx.answerPath,
+          maxScore: first.ctx.aiMax,
+          gradingNote: first.sub.grading_note,
+          partsConfig: first.ctx.cfg || first.sub.parts_config,
+          scope: first.ctx.scope,
+        }, chunk.map((it) => ({ files: it.ctx.subPaths, studentAnswers: it.sub.structured_answers, annotatePrefix: `hw_${it.id}_${Date.now()}` })));
+      } catch (err) {
+        results = chunk.map(() => ({ ok: false, error: err }));
+      }
+      chunk.forEach((it, i) => {
+        const r = results[i];
+        if (r && r.ok) {
+          try { finalize('hw', K, it.sub, it.id, it.ctx, r); graded++; } catch (e) { handleFail('hw', K, it.sub, it.id, e, { scheduled: true }); failed++; }
+        } else {
+          handleFail('hw', K, it.sub, it.id, (r && r.error) || new Error('Không có kết quả'), { scheduled: true });
+          failed++;
+        }
+      });
+    };
+    // Chạy SONG SONG nhiều nhóm để có điểm nhanh: mỗi key gánh tối đa GRADING_PARALLEL_PER_KEY nhóm cùng lúc
+    // (mặc định 2; mỗi nhóm = 2 lượt gọi song song), tổng tối đa GRADING_MAX_PARALLEL (mặc định 6). Các nhóm
+    // được xoay vòng sang key khác nhau (aiKeys.keysFor) để không dồn token/phút (TPM), lượt/phút (RPM) vào
+    // 1 key; chạm giới hạn phút thì tự đổi key hoặc chờ vài chục giây (geminiClient.generateJson).
+    const { gradingModels } = require('./aiGrading');
+    const usable = Math.max(...gradingModels().map((m) => aiKeys.keysFor(m, { rotate: false }).length), 1);
+    const perKey = Math.max(1, Number(process.env.GRADING_PARALLEL_PER_KEY) || 2);
+    const maxPar = Math.max(1, Number(process.env.GRADING_MAX_PARALLEL) || 6);
+    const parallel = Math.max(1, Math.min(maxPar, usable * perKey, chunks.length));
+    const queueChunks = chunks.slice();
+    await Promise.all(Array.from({ length: parallel }, async () => { while (queueChunks.length) await runChunk(queueChunks.shift()); }));
+    console.log(`[grading-queue] 🗂️ Xong đợt chấm gom (${parallel} nhóm chạy song song): ${graded} bài đã chấm, ${failed} bài chưa chấm được (${chunks.length} lượt nhóm)`);
+    return { graded, failed, groups: chunks.length };
+  } finally {
+    scheduledRunning = false;
+  }
+}
+
+// Mỗi phút: tới giờ chấm gom hằng ngày / trước hạn nộp / hết thời gian chờ quota → chạy đợt chấm.
+async function scheduleTick() {
+  if (scheduleMode() !== 'daily' || scheduledRunning) return;
+  try {
+    const db = getDb();
+    const now = Date.now();
+    const vn = vnNow(now);
+    const { h, m } = dailyTime();
+    // 0) Giáo viên nộp hộ: đã đủ vài phút từ lần nộp hộ cuối → chấm gom bài tập đó luôn
+    for (const [hwId, at] of soonRuns) {
+      if (now >= at) {
+        soonRuns.delete(hwId);
+        await runScheduledGrading({ homeworkId: hwId, reason: `giáo viên nộp hộ bài #${hwId}` });
+        return;
+      }
+    }
+    // 1) Mỗi tối 21:30 (chạy bù nếu server ngủ đúng giờ)
+    if (vn.minutes >= h * 60 + m && !ranBefore(db, `daily:${vn.date}`)) {
+      markRan(db, `daily:${vn.date}`);
+      await runScheduledGrading({ reason: `hằng ngày ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}` });
+      return;
+    }
+    // 2) Trước hạn nộp N phút: chấm riêng các bài đang chờ của bài tập đó
+    const dues = db.prepare(`SELECT DISTINCT h.id, h.due_date FROM homework h JOIN submissions s ON s.homework_id=h.id
+      WHERE s.grading_status='scheduled' AND h.due_date IS NOT NULL`).all();
+    for (const d of dues) {
+      const at = Date.parse(d.due_date) - predueMinutes() * 60_000;
+      const key = `predue:${d.id}:${d.due_date}`;
+      if (Number.isFinite(at) && now >= at && !ranBefore(db, key)) {
+        markRan(db, key);
+        await runScheduledGrading({ homeworkId: d.id, reason: `trước hạn nộp bài #${d.id}` });
+        return;
+      }
+    }
+    // 3) Đợt trước gặp hết lượt / lỗi tạm thời → chạy lại khi đã tới giờ hẹn
+    if (scheduledRetryAt && now >= scheduledRetryAt) {
+      scheduledRetryAt = 0;
+      await runScheduledGrading({ reason: 'chấm lại bài còn chờ (hết lượt/lỗi tạm thời)' });
+    }
+  } catch (err) {
+    console.error('[grading-queue] lịch chấm gom lỗi:', err.message);
   }
 }
 
@@ -354,7 +553,10 @@ function startGradingWorker() {
     Object.values(KINDS).forEach((K) => db.prepare(`UPDATE ${K.table} SET grading_status='pending' WHERE grading_status='grading'`).run());
     sweepPending();
     setInterval(sweepPending, SWEEP_INTERVAL_MS);
-    console.log('🤖 Hàng đợi chấm bài AI đã sẵn sàng');
+    // Lịch chấm gom: kiểm tra mỗi phút (và ngay khi khởi động — chạy bù nếu server ngủ đúng giờ chấm)
+    setTimeout(scheduleTick, 15_000);
+    setInterval(scheduleTick, 30_000);
+    console.log(`🤖 Hàng đợi chấm bài AI đã sẵn sàng (${scheduleMode() === 'daily' ? `chấm gom lúc ${process.env.GRADING_DAILY_TIME || '21:30'} + trước hạn nộp ${predueMinutes()} phút, ${groupSize()} bài/lượt` : 'chấm ngay từng bài'})`);
   } catch (err) {
     console.error('[grading-queue] startGradingWorker lỗi:', err.message);
   }
@@ -365,4 +567,4 @@ const gradeOne = (submissionId, opts) => gradeRecord('hw', submissionId, opts);
 // Chấm 1 bài làm thi thử
 const gradeMock = (attemptId, opts) => gradeRecord('mock', attemptId, opts);
 
-module.exports = { enqueue, gradeOne, gradeMock, startGradingWorker };
+module.exports = { enqueue, gradeOne, gradeMock, startGradingWorker, runScheduledGrading, nextGradingAt, scheduleMode };

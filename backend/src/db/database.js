@@ -480,6 +480,8 @@ function initSchema() {
   addCol('mock_attempts', 'graded_pages', 'TEXT');
   // Kho API key Gemini cho AI chấm bài (admin thêm/xoá ở trang "AI chấm bài"; luôn hiển thị dạng che).
   // Tách riêng khỏi site_settings vì site_settings có API công khai.
+  // Đợt chấm gom đã chạy (để không chạy trùng: "daily:YYYY-MM-DD", "predue:<bài tập>:<hạn nộp>")
+  db.exec('CREATE TABLE IF NOT EXISTS grading_runs (run_key TEXT PRIMARY KEY, ran_at TEXT)');
   db.exec(`CREATE TABLE IF NOT EXISTS ai_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     api_key TEXT NOT NULL UNIQUE,

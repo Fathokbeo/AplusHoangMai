@@ -6,6 +6,7 @@ const { stripAnswers, stripHsaAnswers } = require('../services/homeworkParts');
 const { classRanking, classRankingReport, studentOverallAverage, prevYm, ymOf } = require('../services/classRanking');
 const { parseBest } = require('../services/bestAttempt');
 const { gradedPagesForStudent } = require('../services/gradingPages');
+const { nextGradingAt } = require('../services/gradingQueue');
 
 router.use(authMiddleware, requireRole('student'));
 
@@ -81,6 +82,8 @@ router.get('/my-classes/:id', (req, res) => {
       // Ảnh bài đã chấm (AI sửa) — chỉ danh sách ảnh, chỉ từ "Thời gian xem đáp án"
       graded_pages: canSeeAnswer ? gradedPagesForStudent(hw.graded_pages) : null,
       attempt_started_at: attemptInProgress ? attemptStartedAt : null,
+      // Bài đang chờ đợt chấm gom → giờ chấm dự kiến
+      next_grading_at: hw.grading_status === 'scheduled' ? new Date(nextGradingAt(hw.due_date)).toISOString() : null,
     };
   });
 

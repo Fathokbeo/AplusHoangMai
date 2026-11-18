@@ -423,6 +423,12 @@ export default function StudentClassDetail() {
             )}
 
             {/* Đã nộp nhưng chưa có điểm: cho biết hệ thống đang chấm tự động */}
+            {/* Chờ đợt chấm gom (tối 21h30 hoặc trước hạn nộp) */}
+            {isSubmitted && !hasGrade && hw.grading_status === 'scheduled' && (
+              <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem', color: '#6A1B9A', background: '#F3E5F5', borderRadius: 8, padding: '0.6rem 0.8rem' }}>
+                <Clock size={15} /> Đã nhận bài — bài sẽ được chấm{hw.next_grading_at ? ` lúc ${new Date(hw.next_grading_at).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}` : ' trong hôm nay'}.
+              </div>
+            )}
             {isSubmitted && !hasGrade && (hw.grading_status === 'pending' || hw.grading_status === 'grading') && (
               <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem', color: '#1565C0', background: '#E3F2FD', borderRadius: 8, padding: '0.6rem 0.8rem' }}>
                 <Bot size={15} /> Đã nhận bài — hệ thống đang tự động chấm, kết quả sẽ hiển thị sau ít phút.
