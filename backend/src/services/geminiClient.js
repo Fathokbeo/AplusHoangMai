@@ -29,9 +29,7 @@ function postJson(url, key, payload, timeoutMs) {
   });
 }
 
-function apiKey() {
-  return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
-}
+const keys = require('./aiKeys');
 
 // Lỗi có nên thử model tiếp theo không: hết quota (429), quá tải (5xx), model bị gỡ / không có quyền (404/403).
 function isRetryableModelError(err) {
@@ -94,12 +92,13 @@ function parseResponse(model, body) {
   return { json, model, usage: body.usageMetadata || {} };
 }
 
-async function generateOnce(model, parts, opts = {}) {
-  const key = apiKey();
-  if (!key) throw new Error('Chưa cấu hình GEMINI_API_KEY');
+// Gọi 1 lần với 1 key cụ thể.
+async function generateOnce(model, parts, opts = {}, key = null) {
+  const k = key || (keys.allKeys()[0] || {}).key;
+  if (!k) throw new Error('Chưa có API key Gemini nào (thêm ở trang Admin → AI chấm bài, hoặc GEMINI_API_KEY)');
   let res;
   try {
-    res = await postJson(`${API}/${model}:generateContent`, key, JSON.stringify(buildRequest(model, parts, opts)), opts.timeoutMs || REQUEST_TIMEOUT_MS);
+    res = await postJson(`${API}/${model}:generateContent`, k, JSON.stringify(buildRequest(model, parts, opts)), opts.timeoutMs || REQUEST_TIMEOUT_MS);
   } catch (e) {
     const err = new Error(`${model}: ${e.message}`);
     err.retryable = true;
@@ -109,53 +108,86 @@ async function generateOnce(model, parts, opts = {}) {
   return parseResponse(model, res.body);
 }
 
-// Thử lần lượt các model trong danh sách; trả về { json, model, usage }.
+// Key sai / hết hạn / project chưa bật Gemini API → bỏ key đó, dùng key khác (không phải lỗi của model).
+function isKeyError(err) {
+  return (err && (err.status === 401 || err.status === 403)) || /API_KEY_INVALID|API key not valid|API key expired|PERMISSION_DENIED|SERVICE_DISABLED/i.test(String(err && err.message));
+}
+
+// Gọi với xoay vòng: lần lượt từng MODEL (theo thứ tự ưu tiên — chỉ model mạnh), trong mỗi model thử
+// lần lượt từng KEY còn lượt. Key chạm giới hạn → ghi lại thời điểm dùng lại được rồi đổi key ngay; hết
+// key cho model này → sang model tiếp theo. Tất cả đang chờ ngắn (giới hạn/phút) → đợi rồi thử lại.
+// Trả về { json, model, usage, key (đã che) }.
 async function generateJson(models, parts, opts = {}) {
   let lastErr;
   const overloadRetries = opts.overloadRetries ?? 3;
-  for (const model of models) {
-    // Quá tải tạm thời (503 "high demand") → chờ rồi thử lại CÙNG model vài lần (10s, 20s, 40s) trước khi
-    // chuyển model khác. Hết quota (429) / model không có → chuyển ngay.
-    for (let attempt = 0; ; attempt++) {
-      const t0 = Date.now();
-      try {
-        const r = await generateOnce(model, parts, opts);
-        if (process.env.GRADING_DEBUG) console.log(`[gemini] ${model} OK ${Math.round((Date.now() - t0) / 1000)}s`, JSON.stringify(r.usage));
-        return r;
-      } catch (err) {
-        lastErr = err;
-        if (!isRetryableModelError(err)) throw err;
-        const overloaded = /503|overloaded|UNAVAILABLE|high demand/i.test(String(err.message));
-        // Giới hạn theo phút (chờ ≤ 90s) → đợi rồi gọi lại cùng model; hết quota ngày → chuyển model
-        if (err.status === 429 && err.retryDelaySec && err.retryDelaySec <= 90 && attempt < overloadRetries) {
-          console.warn(`[gemini] ${model} chạm giới hạn/phút → chờ ${Math.ceil(err.retryDelaySec)}s`);
-          await new Promise((res) => setTimeout(res, Math.ceil(err.retryDelaySec) * 1000 + 500));
-          continue;
+  if (!keys.allKeys().length) throw new Error('Chưa có API key Gemini nào (thêm ở trang Admin → AI chấm bài, hoặc GEMINI_API_KEY)');
+  for (let round = 0; round < 3; round++) {
+    for (const model of models) {
+      let overloadTries = 0;
+      let modelBroken = false;
+      for (const key of keys.keysFor(model)) {
+        for (;;) {
+          const t0 = Date.now();
+          try {
+            const r = await generateOnce(model, parts, opts, key);
+            keys.markOk(key);
+            if (process.env.GRADING_DEBUG) console.log(`[gemini] ${model} [${keys.mask(key)}] OK ${Math.round((Date.now() - t0) / 1000)}s`, JSON.stringify(r.usage));
+            return { ...r, key: keys.mask(key) };
+          } catch (err) {
+            lastErr = err;
+            if (err.status === 429 || isQuotaError(err)) {
+              keys.markLimited(key, model, err.retryDelaySec, err.message);
+              console.warn(`[gemini] ${model} [${keys.mask(key)}] hết lượt → đổi key`);
+              break; // key tiếp theo
+            }
+            if (isKeyError(err)) {
+              keys.markBad(key, err.message);
+              console.warn(`[gemini] key ${keys.mask(key)} lỗi (${String(err.message).slice(0, 100)}) → bỏ key này 1 giờ`);
+              break;
+            }
+            if (!isRetryableModelError(err)) throw err;
+            const overloaded = /503|overloaded|UNAVAILABLE|high demand/i.test(String(err.message));
+            // Quá tải là của MODEL (đổi key không giúp gì) → chờ 10s, 20s, 40s rồi thử lại; vẫn không được → model khác
+            if (overloaded && overloadTries < overloadRetries) {
+              const wait = 10_000 * 2 ** overloadTries++;
+              console.warn(`[gemini] ${model} quá tải → chờ ${wait / 1000}s thử lại`);
+              await new Promise((res) => setTimeout(res, wait));
+              continue;
+            }
+            console.warn(`[gemini] ${model} không khả dụng sau ${Math.round((Date.now() - t0) / 1000)}s (${String(err.message).slice(0, 140)}) → thử model tiếp theo`);
+            modelBroken = true;
+            break;
+          }
         }
-        if (overloaded && attempt < overloadRetries) {
-          const wait = 10_000 * 2 ** attempt;
-          console.warn(`[gemini] ${model} quá tải → chờ ${wait / 1000}s thử lại (${attempt + 1}/${overloadRetries})`);
-          await new Promise((res) => setTimeout(res, wait));
-          continue;
-        }
-        console.warn(`[gemini] ${model} không khả dụng sau ${Math.round((Date.now() - t0) / 1000)}s (${String(err.message).slice(0, 140)}) → thử model tiếp theo`);
-        break;
+        if (modelBroken) break; // lỗi của model → bỏ qua các key còn lại, sang model khác
       }
     }
+    // Không còn cặp key × model nào dùng được: chỉ chờ nếu sắp có lại (≤ 90s), không thì báo hết lượt
+    const wait = keys.nextAvailableAt(models) - Date.now();
+    if (wait > 90_000) break;
+    if (wait > 0) {
+      console.warn(`[gemini] tất cả key đang chạm giới hạn/phút → chờ ${Math.ceil(wait / 1000)}s`);
+      await new Promise((res) => setTimeout(res, wait + 500));
+    }
   }
-  throw lastErr || new Error('Không có model nào để gọi');
+  const err = lastErr || new Error('Không có model/key nào để gọi');
+  if (isQuotaError(err) || models.every((m) => !keys.keysFor(m).length)) {
+    err.quota = true;
+    err.retryAt = keys.nextAvailableAt(models);
+  }
+  throw err;
 }
 
 // ── BATCH MODE (giảm 50% giá) ─────────────────────────────────────────────────────────────
-// Gửi nhiều request trong 1 "lô"; Google xử lý trong vài phút → tối đa 24 giờ. Chỉ dùng được khi project
-// của API key đã bật thanh toán. Tắt bằng GEMINI_BATCH=0. Lỗi bất kỳ (chưa bật thanh toán, quá lâu,
-// không đọc được kết quả...) → tự quay về gọi thường để bài vẫn được chấm.
+// Gửi nhiều request trong 1 "lô"; Google xử lý trong vài phút → tối đa 24 giờ. Chỉ dùng được với key
+// mà project đã bật thanh toán (ghi riêng từng key). Tắt bằng GEMINI_BATCH=0. Lỗi bất kỳ → gọi thường.
 const BATCH_POLL_MS = 30_000;
 const BATCH_MAX_BYTES = 18 * 1024 * 1024; // giới hạn lô inline của Google: 20MB
-let batchUnavailableUntil = 0;
 
+// Còn key nào có thể chạy batch không (chưa bị đánh dấu "không hỗ trợ batch") — để hàng đợi chọn số bài song song
 function batchEnabled() {
-  return process.env.GEMINI_BATCH !== '0' && Date.now() >= batchUnavailableUntil;
+  if (process.env.GEMINI_BATCH === '0') return false;
+  return keys.allKeys().some((k) => keys.batchUsable(k.key));
 }
 
 async function apiGet(pathName, key) {
@@ -186,9 +218,8 @@ function batchResponses(b) {
   return null;
 }
 
-// Chạy 1 lô trên 1 model. requests: [{ parts, opts }]. Trả về mảng { json, model, usage } | Error theo thứ tự.
-async function runBatch(model, requests, { maxWaitMs, label = 'cham-bai' } = {}) {
-  const key = apiKey();
+// Chạy 1 lô trên 1 model bằng 1 key. requests: [{ parts, opts }]. Trả về mảng { json, model, usage } | Error.
+async function runBatch(model, requests, key, { maxWaitMs, label = 'cham-bai' } = {}) {
   const body = JSON.stringify({
     batch: {
       display_name: `${label}-${Date.now()}`,
@@ -203,17 +234,18 @@ async function runBatch(model, requests, { maxWaitMs, label = 'cham-bai' } = {})
   const created = await postJson(`${API}/${model}:batchGenerateContent`, key, body, 120_000);
   if (!created.ok || created.body.error) {
     const err = apiError(model, created.status, created.body);
-    // Chưa bật thanh toán / tài khoản không hỗ trợ batch → tạm ngừng batch 6 tiếng, gọi thường
+    if (created.status === 429 || isQuotaError(err)) { keys.markLimited(key, model, err.retryDelaySec, err.message); err.nextKey = true; throw err; }
+    // Key chưa bật thanh toán / không hỗ trợ batch → đánh dấu RIÊNG key này 6 tiếng, thử key khác
     if (created.status === 400 || created.status === 403 || /FAILED_PRECONDITION|PERMISSION/i.test(String(err.message))) {
-      batchUnavailableUntil = Date.now() + 6 * 3600_000;
-      console.warn(`[gemini] Batch không dùng được (${String(err.message).slice(0, 120)}) → gọi thường trong 6 giờ tới`);
-      err.fallback = true;
+      keys.markBatchOff(key, 6);
+      console.warn(`[gemini] Batch không dùng được với key ${keys.mask(key)} (${String(err.message).slice(0, 100)})`);
+      err.nextKey = true;
     }
     throw err;
   }
   const name = created.body.name || (created.body.metadata && created.body.metadata.name);
   if (!name) { const e = new Error('không có tên lô'); e.fallback = true; throw e; }
-  console.log(`[gemini] Đã gửi lô ${name} (${model}, ${requests.length} yêu cầu) — chờ kết quả`);
+  console.log(`[gemini] Đã gửi lô ${name} (${model}, key ${keys.mask(key)}, ${requests.length} yêu cầu) — chờ kết quả`);
 
   const t0 = Date.now();
   for (;;) {
@@ -226,11 +258,12 @@ async function runBatch(model, requests, { maxWaitMs, label = 'cham-bai' } = {})
       const list = batchResponses(b);
       if (!list) { const e = new Error(`lô ${name} xong nhưng không đọc được kết quả`); e.fallback = true; throw e; }
       const byKey = new Map(list.map((x, i) => [(x.metadata && x.metadata.key) || `r${i}`, x]));
+      keys.markOk(key);
       console.log(`[gemini] Lô ${name} xong sau ${Math.round((Date.now() - t0) / 1000)}s`);
       return requests.map((_, i) => {
         const x = byKey.get(`r${i}`);
         if (!x || x.error || !x.response) return new Error(`${model}: lô trả lỗi ${JSON.stringify((x && x.error) || 'không có').slice(0, 200)}`);
-        try { return parseResponse(model, x.response); } catch (e) { return e; }
+        try { return { ...parseResponse(model, x.response), key: keys.mask(key) }; } catch (e) { return e; }
       });
     }
     if (/FAILED|CANCELLED|EXPIRED/.test(st)) { const e = new Error(`lô ${name}: ${st}`); e.fallback = true; throw e; }
@@ -243,29 +276,32 @@ async function runBatch(model, requests, { maxWaitMs, label = 'cham-bai' } = {})
   }
 }
 
-// Chạy nhiều request: ưu tiên Batch (rẻ 50%) khi bật, lỗi thì gọi thường từng request.
-// requests: [{ parts, opts, models }] — models riêng từng request khi gọi thường; lô dùng models của request đầu.
-// Trả về mảng kết quả kiểu Promise.allSettled ({ status, value | reason }).
+// Chạy nhiều request: ưu tiên Batch (rẻ 50%) trên key hỗ trợ, lỗi thì gọi thường (vẫn xoay key/model).
+// requests: [{ parts, opts, models }]. Trả về mảng kiểu Promise.allSettled ({ status, value | reason }).
 async function generateJsonMulti(requests, { batch = true, maxWaitMin } = {}) {
   const realtime = () => Promise.allSettled(requests.map((r) => generateJson(r.models, r.parts, r.opts)));
-  if (!batch || !batchEnabled()) return realtime();
+  if (!batch || process.env.GEMINI_BATCH === '0') return realtime();
   const maxWaitMs = (Number(maxWaitMin || process.env.GEMINI_BATCH_MAX_WAIT_MIN) || 180) * 60_000;
   for (const model of requests[0].models) {
-    try {
-      const out = await runBatch(model, requests, { maxWaitMs });
-      // Request nào trong lô lỗi → gọi thường riêng request đó
-      return Promise.all(out.map(async (v, i) => {
-        if (!(v instanceof Error)) return { status: 'fulfilled', value: v };
-        console.warn(`[gemini] ${v.message} → gọi thường yêu cầu này`);
-        try { return { status: 'fulfilled', value: await generateJson(requests[i].models, requests[i].parts, requests[i].opts) }; } catch (e) { return { status: 'rejected', reason: e }; }
-      }));
-    } catch (err) {
-      if (err.fallback) { console.warn(`[gemini] ${err.message}`); return realtime(); }
-      if (!isRetryableModelError(err)) throw err;
-      console.warn(`[gemini] lô trên ${model} lỗi (${String(err.message).slice(0, 120)}) → thử model tiếp theo`);
+    for (let key = keys.batchKey(model); key; key = keys.batchKey(model)) {
+      try {
+        const out = await runBatch(model, requests, key, { maxWaitMs });
+        // Request nào trong lô lỗi → gọi thường riêng request đó
+        return Promise.all(out.map(async (v, i) => {
+          if (!(v instanceof Error)) return { status: 'fulfilled', value: v };
+          console.warn(`[gemini] ${v.message} → gọi thường yêu cầu này`);
+          try { return { status: 'fulfilled', value: await generateJson(requests[i].models, requests[i].parts, requests[i].opts) }; } catch (e) { return { status: 'rejected', reason: e }; }
+        }));
+      } catch (err) {
+        if (err.nextKey) continue; // key này hết lượt / không hỗ trợ batch → key khác
+        if (err.fallback) { console.warn(`[gemini] ${err.message}`); return realtime(); }
+        if (!isRetryableModelError(err)) throw err;
+        console.warn(`[gemini] lô trên ${model} lỗi (${String(err.message).slice(0, 120)}) → thử model tiếp theo`);
+        break;
+      }
     }
   }
   return realtime();
 }
 
-module.exports = { generateJson, generateJsonMulti, generateOnce, isRetryableModelError, isQuotaError, batchEnabled };
+module.exports = { generateJson, generateJsonMulti, generateOnce, isRetryableModelError, isQuotaError, isKeyError, batchEnabled, apiGet };

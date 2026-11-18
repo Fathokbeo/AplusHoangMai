@@ -312,9 +312,11 @@ async function gradeRecord(kind, submissionId, { force = false } = {}) {
       // Hết quota các model mạnh (free tier giới hạn theo ngày/phút) → không phải lỗi của bài: trả lại lượt
       // thử, chờ lâu rồi chấm lại, không chấm bằng model yếu hơn.
       db.prepare(`UPDATE ${K.table} SET grading_status='pending', grading_attempts=MAX(0,COALESCE(grading_attempts,1)-1) WHERE id=?`).run(submissionId);
-      quotaBlockedUntil = Date.now() + QUOTA_RETRY_MS;
-      console.warn(`[grading-queue] Hết quota model chấm → chấm lại ${kind} #${submissionId} sau ${QUOTA_RETRY_MS / 60000} phút`);
-      setTimeout(() => enqueue(submissionId, kind), QUOTA_RETRY_MS);
+      // Hẹn đúng lúc sớm nhất có key × model mạnh dùng lại được (tối thiểu 1 phút, tối đa 6 giờ)
+      const delay = Math.min(6 * 3600_000, Math.max(60_000, (err.retryAt || 0) - Date.now() || QUOTA_RETRY_MS));
+      quotaBlockedUntil = Date.now() + delay;
+      console.warn(`[grading-queue] Mọi API key đã hết lượt model chấm → chấm lại ${kind} #${submissionId} sau ${Math.round(delay / 60000)} phút`);
+      setTimeout(() => enqueue(submissionId, kind), delay);
       throw err;
     }
     const attempts = (sub.grading_attempts || 0) + 1;

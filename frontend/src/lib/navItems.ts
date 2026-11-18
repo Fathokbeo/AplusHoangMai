@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, Users, BookOpen, GraduationCap, School, LayoutTemplate, UserCog, Sparkles, Home, ClipboardCheck,
+  LayoutDashboard, Users, BookOpen, GraduationCap, School, LayoutTemplate, UserCog, Sparkles, Home, ClipboardCheck, Bot,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -17,6 +17,7 @@ const ADMIN: NavItem[] = [
   { to: '/admin/classes', icon: School, label: 'Lớp học', short: 'Lớp học' },
   { to: '/admin/mock-exams', icon: ClipboardCheck, label: 'Thi thử', short: 'Thi thử' },
   { to: '/admin/content', icon: LayoutTemplate, label: 'Nội dung trang', short: 'Nội dung' }, // gồm cả Quảng cáo + Trợ giảng
+  { to: '/admin/ai', icon: Bot, label: 'AI chấm bài', short: 'AI chấm' },
 ];
 
 const TEACHER: NavItem[] = [

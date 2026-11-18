@@ -15,6 +15,7 @@ import CourseManagement from './pages/admin/CourseManagement';
 import AdminCourseDetail from './pages/admin/AdminCourseDetail';
 import ClassManagement from './pages/admin/ClassManagement';
 import SiteContent from './pages/admin/SiteContent';
+import AiKeys from './pages/admin/AiKeys';
 import MockExamManagement from './pages/admin/MockExamManagement';
 
 import TeacherDashboard from './pages/teacher/TeacherDashboard';
@@ -72,6 +73,7 @@ function AppRoutes() {
         <Route path="classes" element={<ClassManagement />} />
         <Route path="mock-exams" element={<MockExamManagement />} />
         <Route path="content" element={<SiteContent />} />
+        <Route path="ai" element={<AiKeys />} />
         {/* Quảng cáo đã gộp vào Nội dung trang */}
         <Route path="ads" element={<Navigate to="/admin/content?tab=ads" replace />} />
       </Route>

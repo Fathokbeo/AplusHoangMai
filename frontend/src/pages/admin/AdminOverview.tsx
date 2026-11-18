@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
-import { Users, BookOpen, School, GraduationCap, ClipboardList, FileCheck, ChevronRight, ClipboardCheck, Sparkles, Image, UserCog, LayoutTemplate, Phone, Trophy } from 'lucide-react';
+import { Users, BookOpen, School, GraduationCap, ClipboardList, FileCheck, ChevronRight, ClipboardCheck, Sparkles, Image, UserCog, LayoutTemplate, Phone, Trophy, Bot } from 'lucide-react';
 import TeachingOverview from '../../components/TeachingOverview';
 import { greeting, todayLabel, SectionHeader, EmptyState } from '../../components/overviewUi';
 
@@ -18,6 +18,7 @@ const QUICK_ACTIONS = [
   { to: '/admin/content?tab=ads', label: 'Quảng cáo (banner)', icon: Image, color: '#00695C', bg: '#E0F2F1' },
   { to: '/admin/content?tab=settings', label: 'Liên hệ & mạng xã hội', icon: Phone, color: '#2E7D32', bg: '#E8F5E9' },
   { to: '/admin/content', label: 'Nội dung trang chủ', icon: LayoutTemplate, color: '#555', bg: '#F0F0F0' },
+  { to: '/admin/ai', label: 'AI chấm bài (API key)', icon: Bot, color: '#6A1B9A', bg: '#F3E5F5' },
 ];
 
 export default function AdminOverview() {

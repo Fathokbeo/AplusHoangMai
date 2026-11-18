@@ -15,5 +15,8 @@ services:
       # Lay tu file backend/.env cua ban. De trong neu chua dung tinh nang cham bai AI.
       - key: GEMINI_API_KEY
         sync: false
+      # Nhiều key Gemini (cách nhau dấu phẩy) — hoặc thêm ở trang Admin → AI chấm bài
+      - key: GEMINI_API_KEYS
+        sync: false
       - key: ANTHROPIC_API_KEY
         sync: false

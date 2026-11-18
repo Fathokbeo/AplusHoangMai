@@ -115,6 +115,7 @@ function clearLoginFailures(req, username) {
 const SECRET_PATTERNS = [
   /AIza[0-9A-Za-z_-]{20,}/g,
   /sk-ant-[0-9A-Za-z_-]{20,}/g,
+  /AQ\.[0-9A-Za-z_.-]{20,}/g, // dạng API key Google mới
   /([?&](?:key|api_?key|access_token)=)[^&\s"']+/gi,
 ];
 
@@ -125,8 +126,10 @@ function redactSecrets(text) {
     if (val && val.length >= 8) out = out.split(val).join('***');
   }
   if (cachedSecret && cachedSecret.length >= 8) out = out.split(cachedSecret).join('***');
-  out = out.replace(SECRET_PATTERNS[0], '***').replace(SECRET_PATTERNS[1], '***');
-  return out.replace(SECRET_PATTERNS[2], '$1***');
+  // Mọi key trong kho key AI (bảng ai_keys + GEMINI_API_KEYS)
+  try { require('./aiKeys').allKeys().forEach(({ key }) => { if (key && key.length >= 8) out = out.split(key).join('***'); }); } catch { /* ignore */ }
+  out = out.replace(SECRET_PATTERNS[0], '***').replace(SECRET_PATTERNS[1], '***').replace(SECRET_PATTERNS[2], '***');
+  return out.replace(SECRET_PATTERNS[3], '$1***');
 }
 
 module.exports = {

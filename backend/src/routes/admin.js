@@ -315,4 +315,76 @@ router.get('/classes', (req, res) => {
   `).all());
 });
 
+// ── Kho API key Gemini cho AI chấm bài ─────────────────────────────────────────────────
+// Nhiều key cùng lúc; hệ thống tự đổi key / đổi model mạnh khi chạm giới hạn. Key KHÔNG bao giờ được
+// trả về đầy đủ — chỉ dạng che (6 ký tự đầu + 4 ký tự cuối).
+const aiKeys = require('../services/aiKeys');
+const KEY_RE = /^[A-Za-z0-9._-]{20,200}$/;
+
+router.get('/ai-keys', (req, res) => {
+  const { gradingModels } = require('../services/aiGrading');
+  const db = getDb();
+  const models = gradingModels();
+  const status = aiKeys.statusList(models);
+  const rows = db.prepare('SELECT id, label, active, created_at FROM ai_keys ORDER BY id').all();
+  // Key đang tắt không nằm trong statusList → thêm vào để admin bật lại / xoá
+  const inactive = db.prepare('SELECT id, api_key, label, created_at FROM ai_keys WHERE active=0 ORDER BY id').all()
+    .map((r) => ({ id: r.id, source: 'db', label: r.label || '', masked: aiKeys.mask(r.api_key), active: false, models: [], calls: 0 }));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  res.json({
+    models,
+    keys: [
+      ...status.map((s) => ({ ...s, active: true, created_at: s.id ? (byId.get(s.id) || {}).created_at : null })),
+      ...inactive,
+    ],
+  });
+});
+
+// Thêm nhiều key cùng lúc: dán mỗi key 1 dòng (hoặc cách nhau dấu phẩy)
+router.post('/ai-keys', (req, res) => {
+  const list = aiKeys.splitKeys(req.body && req.body.keys);
+  const label = String((req.body && req.body.label) || '').trim().slice(0, 60) || null;
+  if (!list.length) return res.status(400).json({ message: 'Chưa có key nào hợp lệ — dán mỗi key 1 dòng' });
+  const db = getDb();
+  const ins = db.prepare('INSERT OR IGNORE INTO ai_keys (api_key, label) VALUES (?, ?)');
+  let added = 0, duplicates = 0, invalid = 0;
+  list.forEach((k) => {
+    if (!KEY_RE.test(k)) { invalid++; return; }
+    const r = ins.run(k, label);
+    if (r.changes) added++; else duplicates++;
+  });
+  res.json({ added, duplicates, invalid, message: `Đã thêm ${added} key${duplicates ? `, ${duplicates} key đã có sẵn` : ''}${invalid ? `, ${invalid} dòng không phải key` : ''}` });
+});
+
+router.put('/ai-keys/:id', (req, res) => {
+  const db = getDb();
+  const { active, label } = req.body || {};
+  if (active !== undefined) db.prepare('UPDATE ai_keys SET active=? WHERE id=?').run(active ? 1 : 0, req.params.id);
+  if (label !== undefined) db.prepare('UPDATE ai_keys SET label=? WHERE id=?').run(String(label).trim().slice(0, 60) || null, req.params.id);
+  res.json({ message: 'Đã lưu' });
+});
+
+router.delete('/ai-keys/:id', (req, res) => {
+  getDb().prepare('DELETE FROM ai_keys WHERE id=?').run(req.params.id);
+  res.json({ message: 'Đã xoá key' });
+});
+
+// Kiểm tra key còn dùng được không: chỉ gọi lệnh liệt kê model (KHÔNG tốn lượt chấm bài)
+router.post('/ai-keys/test', async (req, res) => {
+  const { apiGet } = require('../services/geminiClient');
+  const { redactSecrets } = require('../services/security');
+  const results = await Promise.all(aiKeys.allKeys().map(async ({ key, id, source }) => {
+    try {
+      const r = await apiGet('models?pageSize=1', key);
+      if (r.ok) return { id: id || null, source, masked: aiKeys.mask(key), ok: true, message: 'Key dùng được' };
+      const msg = redactSecrets((r.body && r.body.error && r.body.error.message) || `HTTP ${r.status}`);
+      if (r.status === 400 || r.status === 401 || r.status === 403) aiKeys.markBad(key, msg);
+      return { id: id || null, source, masked: aiKeys.mask(key), ok: false, message: msg.slice(0, 160) };
+    } catch (e) {
+      return { id: id || null, source, masked: aiKeys.mask(key), ok: false, message: redactSecrets(e.message).slice(0, 160) };
+    }
+  }));
+  res.json({ results });
+});
+
 module.exports = router;

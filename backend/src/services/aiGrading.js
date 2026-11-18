@@ -10,11 +10,11 @@ const { preparePages, renderGradedPages } = require('./gradingPages');
 // mạnh nhất. Ghi đè bằng biến môi trường GEMINI_GRADING_MODELS="m1,m2,..." (theo thứ tự ưu tiên).
 // Không rơi xuống bản Lite khi chấm: hết quota thì để hàng đợi chấm lại sau, không chấm kém chính xác.
 const DEFAULT_GRADING_MODELS = [
+  'gemini-4-hydrogen',  // đo thực tế: chấm sát giáo viên nhất trong các model đã thử
   'gemini-3.8-flash',
   'gemini-3.7-flash',
   'gemini-3.6-flash',
   'gemini-3.5-flash',
-  'gemini-3-flash-preview',
 ];
 // Việc nhẹ (đọc bảng đáp án, tóm tắt chủ đề) → Lite trước để dành quota model mạnh cho chấm bài.
 const LITE_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite', ...DEFAULT_GRADING_MODELS];
