@@ -482,6 +482,17 @@ function initSchema() {
   // Tách riêng khỏi site_settings vì site_settings có API công khai.
   // Đợt chấm gom đã chạy (để không chạy trùng: "daily:YYYY-MM-DD", "predue:<bài tập>:<hạn nộp>")
   db.exec('CREATE TABLE IF NOT EXISTS grading_runs (run_key TEXT PRIMARY KEY, ran_at TEXT)');
+  // Sổ kinh nghiệm chấm AI: giáo viên ghi lý do khi sửa điểm bài AI chấm → gửi kèm các lần chấm sau
+  // (homework_id NULL = áp dụng cho mọi bài tập)
+  db.exec(`CREATE TABLE IF NOT EXISTS grading_lessons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    homework_id INTEGER,
+    lesson TEXT NOT NULL,
+    context TEXT,
+    active INTEGER DEFAULT 1,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
   db.exec(`CREATE TABLE IF NOT EXISTS ai_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     api_key TEXT NOT NULL UNIQUE,

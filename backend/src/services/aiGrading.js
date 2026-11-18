@@ -233,11 +233,11 @@ const GROUP_REVIEW_SCHEMA = groupOf(REVIEW_SCHEMA);
 // Nhiều học sinh trong CÙNG một lượt gọi → tiết kiệm lượt gọi/ngày (giới hạn RPD của Google); đề + đáp án
 // chỉ gửi 1 lần cho cả nhóm. Quy trình mỗi học sinh giữ nguyên: 2 lần chấm độc lập (2 lượt gọi cho CẢ nhóm),
 // server so từng ý, học sinh nào có ý lệch thì gom chung 1 lượt đối chiếu, rồi vẽ ảnh chấm cho từng em.
-// common: { answerFilePath, maxScore, gradingNote, partsConfig, scope, models, realtime }
+// common: { answerFilePath, maxScore, gradingNote, partsConfig, scope, models, realtime, lessons, hints }
 // students: [{ files, studentAnswers, annotatePrefix }]
 // Trả về mảng cùng thứ tự: { ok: true, score, feedback, details, marks, raw } | { ok: false, error }.
 async function gradeGroup(common, students) {
-  const { answerFilePath, maxScore = 10, gradingNote = '', partsConfig = null, scope = null, models: modelsOverride = null, realtime = false } = common;
+  const { answerFilePath, maxScore = 10, gradingNote = '', partsConfig = null, scope = null, models: modelsOverride = null, realtime = false, lessons = [], hints = [] } = common;
   const cfg = parsePartsConfig(partsConfig);
 
   // Phần nào AI cần chấm (scope do hàng đợi truyền vào). Bài cũ (không cfg) → chấm toàn bộ kiểu tự luận.
@@ -280,6 +280,15 @@ async function gradeGroup(common, students) {
   const answerKeyBlock = gradeObjective
     ? `\nĐÁP ÁN CÁC PHẦN KHÁCH QUAN (key chính thức):\n${describeAnswerKey(cfg, objOnly)}\n`
     : '';
+  // Sổ kinh nghiệm: giáo viên đã sửa điểm AI trước đây và ghi lý do → AI phải tuân theo khi gặp tình huống tương tự
+  const hasLessons = Array.isArray(lessons) && lessons.length > 0;
+  const lessonBlock = hasLessons
+    ? `\nKINH NGHIỆM CHẤM CỦA TRUNG TÂM (giáo viên đã sửa điểm AI ở các lần trước — gặp tình huống tương tự thì BẮT BUỘC chấm theo):\n${lessons.map((l) => `- ${l}`).join('\n')}\n`
+    : '';
+  // Lỗi nhiều em đã mắc ở chính đề này → chỉ để soi kỹ, không được mặc định trừ điểm
+  const hintBlock = Array.isArray(hints) && hints.length
+    ? `\nLỖI NHIỀU HỌC SINH ĐÃ MẮC Ở ĐỀ NÀY (CHỈ để soi thật kỹ đúng các chỗ này; TUYỆT ĐỐI không mặc định trừ điểm — chỉ trừ khi THẤY ĐÚNG lỗi đó trong bài của học sinh đang chấm):\n${hints.map((h) => `- ${h}`).join('\n')}\n`
+    : '';
 
   const scopeNames = [];
   if (objOnly.multiple_choice) scopeNames.push('TRẮC NGHIỆM');
@@ -314,14 +323,15 @@ async function gradeGroup(common, students) {
   // ── Prompt chia 2 phần để Gemini tự CACHE phần đầu: phần ĐẦU giống nhau cho mọi bài nộp của cùng một bài
   //    tập (luật chấm + file đáp án), phần SAU là bài làm từng học sinh + nhiệm vụ của lượt gọi.
   const intro = `Bạn là giáo viên Toán chấm bài cực kỳ cẩn thận. Chấm bài làm của học sinh trên thang ${maxScore} điểm cho phần được giao.
-${scopeBlock}${answerKeyBlock}${noteBlock}
+${scopeBlock}${answerKeyBlock}${noteBlock}${lessonBlock}${hintBlock}
 LUẬT CHẤM MẶC ĐỊNH:
 ${ruleLines.join('\n')}
 
 THỨ TỰ ƯU TIÊN KHI CHẤM (để các quy định không xung đột):
 1. ${hasNote ? 'GHI CHÚ CHẤM CỦA GIÁO VIÊN ở trên là cao nhất: cách chia điểm từng câu/từng ý, mức trừ điểm cho từng loại lỗi, yêu cầu khoanh/chú thích... trong ghi chú LUÔN được áp dụng, kể cả khi khác biểu điểm trong file đáp án hay luật mặc định.' : '(Giáo viên không có ghi chú riêng.)'}
-2. Biểu điểm / hướng dẫn chấm trong FILE ĐÁP ÁN: dùng cho mọi điều ghi chú của giáo viên không nói tới (vd điểm từng bước nhỏ bên trong 1 ý).
-3. Luật chấm mặc định ở trên: CHỈ dùng để lấp chỗ mà cả ghi chú lẫn biểu điểm đều không quy định.
+${hasLessons ? `2. KINH NGHIỆM CHẤM CỦA TRUNG TÂM ở trên: đứng ngay sau ghi chú chấm của bài này (mâu thuẫn thì theo ghi chú của bài này), cao hơn biểu điểm file đáp án và luật mặc định.
+` : ''}${hasLessons ? '3' : '2'}. Biểu điểm / hướng dẫn chấm trong FILE ĐÁP ÁN: dùng cho mọi điều ghi chú của giáo viên không nói tới (vd điểm từng bước nhỏ bên trong 1 ý).
+${hasLessons ? '4' : '3'}. Luật chấm mặc định ở trên: CHỈ dùng để lấp chỗ mà các mục trên đều không quy định.
 Kết hợp: (a) điểm tối đa từng ý lấy theo mức ưu tiên cao nhất có quy định; (b) MỘT lỗi chỉ bị trừ MỘT lần — ghi chú giáo viên đã có mức trừ cho loại lỗi đó (vd "thiếu kết luận trừ 0,25đ") thì dùng đúng mức đó, KHÔNG trừ thêm theo luật mặc định cho cùng lỗi; (c) các lỗi KHÁC NHAU trong cùng 1 ý thì cộng dồn mức trừ, nhưng điểm ý không xuống dưới 0 và không vượt điểm tối đa của ý; (d) trong reason ghi rõ từng khoản trừ và căn cứ, vd "−0,25 thiếu điều kiện x ≠ 2 (theo ghi chú GV)".
 
 CÁCH CHẤM BẮT BUỘC (để không cho điểm sai):
@@ -577,9 +587,9 @@ Trả về JSON theo schema.`,
 
 // Chấm 1 bài (giáo viên bấm "chấm lại", bài thi thử...): nhóm 1 học sinh.
 async function gradeSubmission(answerFilePath, submissionFilePaths, maxScore = 10, gradingNote = '', opts = {}) {
-  const { partsConfig = null, scope = null, studentAnswers = null, annotatePrefix = null, models = null, realtime = false } = opts;
+  const { partsConfig = null, scope = null, studentAnswers = null, annotatePrefix = null, models = null, realtime = false, lessons = [], hints = [] } = opts;
   const [r] = await gradeGroup(
-    { answerFilePath, maxScore, gradingNote, partsConfig, scope, models, realtime },
+    { answerFilePath, maxScore, gradingNote, partsConfig, scope, models, realtime, lessons, hints },
     [{ files: submissionFilePaths, studentAnswers, annotatePrefix }],
   );
   if (!r.ok) throw r.error;

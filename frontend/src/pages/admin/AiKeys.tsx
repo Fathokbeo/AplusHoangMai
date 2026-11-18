@@ -68,6 +68,22 @@ export default function AiKeys() {
     load();
   };
 
+  // ── Sổ kinh nghiệm chấm AI (giáo viên dạy AI qua các lần sửa điểm + admin thêm kinh nghiệm chung) ──
+  const [lessons, setLessons] = useState<any[] | null>(null);
+  const [newLesson, setNewLesson] = useState('');
+  const loadLessons = () => api.get('/admin/ai-lessons').then((r) => setLessons(r.data)).catch(() => setLessons([]));
+  useEffect(() => { loadLessons(); }, []);
+  const addLesson = async () => {
+    if (newLesson.trim().length < 4) { toast.error('Nhập nội dung kinh nghiệm'); return; }
+    try { await api.post('/admin/ai-lessons', { lesson: newLesson }); setNewLesson(''); toast.success('Đã thêm'); loadLessons(); }
+    catch (e: any) { toast.error(e?.response?.data?.message || 'Không thêm được'); }
+  };
+  const toggleLesson = async (l: any) => { await api.put(`/ai-lessons/${l.id}`, { active: !l.active }); loadLessons(); };
+  const deleteLesson = async (l: any) => {
+    if (!confirm('Xoá kinh nghiệm này? AI sẽ không áp dụng nó nữa.')) return;
+    await api.delete(`/ai-lessons/${l.id}`); loadLessons();
+  };
+
   const testAll = async () => {
     setTesting(true);
     try {
@@ -191,6 +207,41 @@ export default function AiKeys() {
       </div>
       <div style={{ marginTop: 8, fontSize: '0.75rem', color: '#999', display: 'flex', alignItems: 'center', gap: 4 }}>
         <RefreshCw size={11} /> Trạng thái tự làm mới mỗi 30 giây. Số lượt gọi tính từ lần khởi động server gần nhất.
+      </div>
+
+      <div className="card" style={{ padding: '1rem', marginTop: 20 }}>
+        <div style={{ fontWeight: 700, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}><Bot size={16} /> Sổ kinh nghiệm chấm</div>
+        <div style={{ fontSize: '0.82rem', color: '#555', lineHeight: 1.6, marginBottom: 10 }}>
+          AI không tự nhớ giữa các lần chấm, nên các kinh nghiệm dưới đây được gửi kèm mỗi lần chấm và AI <strong>bắt buộc</strong> làm theo
+          (chỉ đứng sau ghi chú chấm của từng bài). Giáo viên thêm kinh nghiệm khi <strong>Sửa điểm</strong> một bài AI đã chấm và ghi lý do;
+          admin có thể thêm kinh nghiệm chung ở đây.
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+          <input className="input" style={{ flex: '1 1 320px' }} placeholder="Vd: Bài hình vẽ tay không cần đúng tỉ lệ, chỉ cần đúng quan hệ các điểm"
+            value={newLesson} onChange={(e) => setNewLesson(e.target.value)} />
+          <button className="btn btn-primary" onClick={addLesson}><Plus size={15} /> Thêm cho mọi bài</button>
+        </div>
+        {lessons === null ? <div style={{ color: '#999' }}>Đang tải...</div> : lessons.length === 0 ? (
+          <div style={{ color: '#999', fontSize: '0.85rem' }}>Chưa có kinh nghiệm nào.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {lessons.map((l) => (
+              <div key={l.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 10px', background: '#FAFAFA', borderRadius: 8, opacity: l.active ? 1 : 0.5 }}>
+                <div style={{ flex: 1, fontSize: '0.85rem' }}>
+                  {l.lesson}
+                  <div style={{ fontSize: '0.72rem', color: '#999', marginTop: 2 }}>
+                    {l.homework_id ? `Chỉ bài: ${l.homework_title || `#${l.homework_id}`}` : 'Mọi bài tập'} · {l.created_by_name || '—'}
+                    {l.context ? ` · ${l.context}` : ''} · {new Date(l.created_at + 'Z').toLocaleDateString('vi-VN')}
+                  </div>
+                </div>
+                <button className="btn btn-ghost btn-sm btn-icon" onClick={() => toggleLesson(l)} title={l.active ? 'Tạm tắt' : 'Bật lại'}>
+                  {l.active ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+                <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} onClick={() => deleteLesson(l)} title="Xoá"><Trash2 size={14} /></button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

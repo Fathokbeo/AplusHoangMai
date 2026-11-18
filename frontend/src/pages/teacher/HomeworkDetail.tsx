@@ -26,7 +26,10 @@ export default function HomeworkDetail() {
   const [hw, setHw] = useState<any>(null);
   const [gradeModal, setGradeModal] = useState(false);
   const [grading, setGrading] = useState<any>(null);
-  const [gradeForm, setGradeForm] = useState({ score: '', feedback: '' });
+  const [gradeForm, setGradeForm] = useState({ score: '', feedback: '', lesson: '', lessonScope: 'homework' as 'homework' | 'all' });
+  // Sổ kinh nghiệm chấm AI của bài tập này (giáo viên đã dạy AI) + lỗi hay gặp của đề
+  const [lessonsOpen, setLessonsOpen] = useState(false);
+  const [lessonsData, setLessonsData] = useState<{ lessons: any[]; hints: string[] } | null>(null);
   const [loading, setLoading] = useState(false);
   const [regrading, setRegrading] = useState<number | null>(null);
   const [viewFiles, setViewFiles] = useState<string[] | null>(null);
@@ -81,7 +84,7 @@ export default function HomeworkDetail() {
 
   const openGrade = (sub: any) => {
     setGrading(sub);
-    setGradeForm({ score: sub.score ?? '', feedback: sub.feedback ?? '' });
+    setGradeForm({ score: sub.score ?? '', feedback: sub.feedback ?? '', lesson: '', lessonScope: 'homework' });
     setGradeModal(true);
   };
 
@@ -89,7 +92,11 @@ export default function HomeworkDetail() {
     if (gradeForm.score === '') { toast.error('Nhập điểm'); return; }
     setLoading(true);
     try {
-      await api.put(`/submissions/${grading.id}/grade`, { score: parseFloat(gradeForm.score), feedback: gradeForm.feedback });
+      await api.put(`/submissions/${grading.id}/grade`, {
+        score: parseFloat(gradeForm.score), feedback: gradeForm.feedback,
+        // Bài AI đã chấm: lý do sửa điểm → AI học để lần sau chấm đúng hơn
+        lesson: gradeForm.lesson, lesson_scope: gradeForm.lessonScope,
+      });
       toast.success('Đã lưu điểm');
       setGradeModal(false);
       fetchHw();
@@ -98,6 +105,18 @@ export default function HomeworkDetail() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadLessons = async () => {
+    try {
+      const { data } = await api.get(`/homework/${id}/ai-lessons`);
+      setLessonsData(data);
+    } catch { toast.error('Không tải được kinh nghiệm chấm'); }
+  };
+  const openLessons = () => { setLessonsOpen(true); loadLessons(); };
+  const removeLesson = async (l: any) => {
+    if (!confirm('Xoá kinh nghiệm này? AI sẽ không áp dụng nó nữa.')) return;
+    try { await api.delete(`/ai-lessons/${l.id}`); loadLessons(); } catch (err: any) { toast.error(err.response?.data?.message || 'Không xoá được'); }
   };
 
   // Chấm ngay các bài đang chờ đợt chấm gom (chạy nền, điểm cập nhật dần)
@@ -287,6 +306,9 @@ export default function HomeworkDetail() {
               </button>
             ))}
           </div>
+          <button className="btn btn-ghost btn-sm" onClick={openLessons} title="Kinh nghiệm chấm thầy cô đã dạy AI + lỗi nhiều học sinh mắc ở đề này">
+            <Bot size={14} style={{ color: '#6A1B9A' }} /> Kinh nghiệm AI
+          </button>
           {scheduledCount > 0 && (
             <button className="btn btn-secondary btn-sm" onClick={gradeNow} disabled={gradingNow}
               title={`AI sẽ tự chấm gom lúc ${hw.next_grading_at ? new Date(hw.next_grading_at).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '21:30'}. Bấm để chấm luôn (vẫn chấm gom nhiều bài/lượt để tiết kiệm).`}>
@@ -431,6 +453,21 @@ export default function HomeworkDetail() {
           <label className="label">Nhận xét</label>
           <textarea className="input" rows={4} placeholder="Nhận xét về bài làm..." value={gradeForm.feedback} onChange={(e) => setGradeForm({ ...gradeForm, feedback: e.target.value })} />
         </div>
+        {!!grading?.graded_by_ai && (
+          <div className="form-group" style={{ background: '#F3E5F5', borderRadius: 8, padding: '0.6rem 0.75rem' }}>
+            <label className="label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Bot size={14} /> Vì sao sửa điểm AI? (tuỳ chọn — AI sẽ học để lần sau chấm đúng hơn)</label>
+            <textarea className="input" rows={2} placeholder={'Vd: Hình vẽ tay không cần đúng tỉ lệ, chỉ cần đúng quan hệ các điểm.\nVd: Thiếu điều kiện x ≠ 0 chỉ trừ 0,25đ, không trừ cả ý.'}
+              value={gradeForm.lesson} onChange={(e) => setGradeForm({ ...gradeForm, lesson: e.target.value })} />
+            <div style={{ display: 'flex', gap: 14, marginTop: 6, fontSize: '0.8rem', flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input type="radio" checked={gradeForm.lessonScope === 'homework'} onChange={() => setGradeForm({ ...gradeForm, lessonScope: 'homework' })} /> Chỉ áp dụng cho bài tập này
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input type="radio" checked={gradeForm.lessonScope === 'all'} onChange={() => setGradeForm({ ...gradeForm, lessonScope: 'all' })} /> Áp dụng cho mọi bài tập
+              </label>
+            </div>
+          </div>
+        )}
         {grading && submissionFileUrls(grading).length > 0 && (
           <button className="btn btn-ghost btn-sm" onClick={() => setViewFiles(submissionFileUrls(grading))}>
             <Eye size={13} /> Xem bài nộp{submissionFileUrls(grading).length > 1 ? ` (${submissionFileUrls(grading).length})` : ''}
@@ -443,6 +480,33 @@ export default function HomeworkDetail() {
       {/* Nộp hộ học sinh */}
       <SubmitForStudentModal open={!!submitFor} onClose={() => setSubmitFor(null)} homeworkId={id!} student={submitFor}
         resubmit={!!submitFor?.submission_id} onDone={fetchHw} />
+
+      {/* Sổ kinh nghiệm chấm AI của bài tập */}
+      <Modal open={lessonsOpen} onClose={() => setLessonsOpen(false)} title="Kinh nghiệm chấm AI"
+        footer={<button className="btn btn-ghost" onClick={() => setLessonsOpen(false)}>Đóng</button>}>
+        <div style={{ fontSize: '0.82rem', color: '#555', lineHeight: 1.6 }}>
+          AI không tự nhớ giữa các lần chấm, nên những dòng dưới đây được gửi kèm mỗi lần chấm. Thêm kinh nghiệm bằng cách
+          <strong> Sửa điểm</strong> một bài AI đã chấm và ghi lý do.
+        </div>
+        <div style={{ fontWeight: 700, margin: '12px 0 6px' }}>Thầy cô đã dạy AI</div>
+        {!lessonsData ? <div style={{ color: '#999' }}>Đang tải...</div> : lessonsData.lessons.length === 0 ? (
+          <div style={{ color: '#999', fontSize: '0.82rem' }}>Chưa có kinh nghiệm nào.</div>
+        ) : lessonsData.lessons.map((l: any) => (
+          <div key={l.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '6px 8px', background: '#FAFAFA', borderRadius: 6, marginBottom: 6, opacity: l.active ? 1 : 0.5 }}>
+            <div style={{ flex: 1, fontSize: '0.82rem' }}>
+              {l.lesson}
+              <div style={{ fontSize: '0.72rem', color: '#999', marginTop: 2 }}>
+                {l.homework_id ? 'Chỉ bài này' : 'Mọi bài tập'} · {l.created_by_name || '—'}{l.context ? ` · ${l.context}` : ''}
+              </div>
+            </div>
+            <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} onClick={() => removeLesson(l)} title="Xoá"><XCircle size={14} /></button>
+          </div>
+        ))}
+        <div style={{ fontWeight: 700, margin: '12px 0 6px' }}>Lỗi nhiều học sinh mắc ở đề này (AI tự thống kê)</div>
+        {lessonsData && lessonsData.hints.length === 0 && <div style={{ color: '#999', fontSize: '0.82rem' }}>Chưa đủ bài đã chấm để thống kê.</div>}
+        {lessonsData?.hints.map((h, i) => <div key={i} style={{ fontSize: '0.82rem', padding: '3px 0' }}>• {h}</div>)}
+        <div style={{ fontSize: '0.72rem', color: '#999', marginTop: 6 }}>Phần này chỉ nhắc AI soi kỹ đúng chỗ, AI không được mặc định trừ điểm.</div>
+      </Modal>
 
       {/* File Viewer Modal */}
       {viewFiles && <FileViewer files={viewFiles} onClose={() => setViewFiles(null)} />}

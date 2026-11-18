@@ -8,6 +8,7 @@ const { settleBest } = require('./bestAttempt');
 const { removeGradedFiles } = require('./gradingPages');
 const { batchEnabled } = require('./geminiClient');
 const aiKeys = require('./aiKeys');
+const { lessonsFor, commonErrorHints } = require('./gradingLessons');
 const { scoreStructured, scoreHsa, partMax, round2, rawMaxScore, scaleToTarget, composeAutoFeedback, composeEssayFeedback, essayDetailsOf } = require('./homeworkScoring');
 
 const MAX_ATTEMPTS = 5;            // số lần thử chấm tối đa trước khi đánh dấu thất bại
@@ -395,6 +396,9 @@ async function gradeRecord(kind, submissionId, { force = false } = {}) {
         studentAnswers: sub.structured_answers,
         annotatePrefix: `${kind}_${submissionId}_${Date.now()}`, // vẽ đúng/sai lên ảnh bài làm
         realtime: force, // giáo viên bấm "chấm lại" đang chờ → gọi thường; chấm nền → Batch (rẻ 50%)
+        // Sổ kinh nghiệm chấm (giáo viên đã sửa AI) + lỗi hay gặp của đề (chỉ với bài tập của lớp)
+        lessons: lessonsFor(db, kind === 'hw' ? sub.hw_id : null),
+        hints: kind === 'hw' ? commonErrorHints(db, sub.hw_id) : [],
       });
     }
     return finalize(kind, K, sub, submissionId, ctx, aiResult);
@@ -455,6 +459,9 @@ async function runScheduledGrading({ homeworkId = null, reason = '' } = {}) {
           gradingNote: first.sub.grading_note,
           partsConfig: first.ctx.cfg || first.sub.parts_config,
           scope: first.ctx.scope,
+          lessons: lessonsFor(db, first.sub.hw_id),
+          // Lỗi hay gặp tính lại trước MỖI nhóm: nhóm sau được hưởng thống kê từ các nhóm đã chấm xong
+          hints: commonErrorHints(db, first.sub.hw_id),
         }, chunk.map((it) => ({ files: it.ctx.subPaths, studentAnswers: it.sub.structured_answers, annotatePrefix: `hw_${it.id}_${Date.now()}` })));
       } catch (err) {
         results = chunk.map(() => ({ ok: false, error: err }));

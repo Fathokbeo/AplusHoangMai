@@ -389,4 +389,17 @@ router.post('/ai-keys/test', async (req, res) => {
   res.json({ results });
 });
 
+// ── Sổ kinh nghiệm chấm AI (toàn trung tâm) ─────────────────────────────────────────────
+router.get('/ai-lessons', (req, res) => {
+  const { listLessons } = require('../services/gradingLessons');
+  res.json(listLessons(getDb()));
+});
+// Admin thêm kinh nghiệm chung (áp dụng cho mọi bài tập)
+router.post('/ai-lessons', (req, res) => {
+  const { addLesson } = require('../services/gradingLessons');
+  const id = addLesson(getDb(), { homeworkId: null, text: req.body && req.body.lesson, createdBy: req.user.id, context: 'Admin thêm' });
+  if (!id) return res.status(400).json({ message: 'Nội dung quá ngắn' });
+  res.json({ id, message: 'Đã thêm kinh nghiệm' });
+});
+
 module.exports = router;

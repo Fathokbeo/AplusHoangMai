@@ -13,6 +13,7 @@ const { redactSecrets } = require('../services/security');
 const { scheduleRubricGeneration, sanitizePartsConfig, sanitizeHsaConfig, sanitizeTimeLimit, originalName } = require('../services/homeworkForm');
 const { archiveBeforeResubmit, settleBest, parseBest, bestFilenames } = require('../services/bestAttempt');
 const { removeGradedFiles, gradedPagesForStudent } = require('../services/gradingPages');
+const { addLesson, listLessons, commonErrorHints } = require('../services/gradingLessons');
 
 router.use(authMiddleware);
 
@@ -518,13 +519,49 @@ router.put('/homework/:id/report-info', requireRole('teacher', 'admin'), (req, r
 
 // ── Grade submission (teacher/admin) ──────────────────────────────────
 router.put('/submissions/:id/grade', requireRole('teacher', 'admin'), (req, res) => {
-  const { score, feedback } = req.body;
+  const { score, feedback, lesson, lesson_scope } = req.body;
   const db = getDb();
+  // Sửa điểm bài AI đã chấm + ghi lý do → lưu vào "sổ kinh nghiệm chấm" để AI chấm đúng hơn ở các lần sau
+  const before = db.prepare('SELECT homework_id, score, graded_by_ai FROM submissions WHERE id=?').get(req.params.id);
+  if (before && before.graded_by_ai && lesson && String(lesson).trim()) {
+    addLesson(db, {
+      homeworkId: lesson_scope === 'all' ? null : before.homework_id,
+      text: lesson,
+      createdBy: req.user.id,
+      context: `AI chấm ${before.score ?? '?'} → giáo viên sửa ${score}`,
+    });
+  }
   db.prepare('UPDATE submissions SET score=?,feedback=?,graded_at=?,graded_by_ai=0 WHERE id=?')
     .run(score, feedback, new Date().toISOString(), req.params.id);
   // Học sinh nộp nhiều lần → giữ lần có điểm cao nhất
   const kept = settleBest(db, req.params.id);
   res.json({ message: kept === 'best' ? 'Đã chấm điểm — lần nộp trước có điểm cao hơn nên được giữ làm điểm chính thức' : 'Đã chấm điểm' });
+});
+
+// ── Sổ kinh nghiệm chấm AI của 1 bài tập (kèm kinh nghiệm chung) + lỗi hay gặp của đề ──────────
+router.get('/homework/:id/ai-lessons', requireRole('teacher', 'admin'), (req, res) => {
+  const db = getDb();
+  const hw = db.prepare("SELECT h.id FROM homework h JOIN classes c ON h.class_id=c.id WHERE h.id=? AND (c.teacher_id=? OR ?='admin')").get(req.params.id, req.user.id, req.user.role);
+  if (!hw) return res.status(404).json({ message: 'Không tìm thấy bài tập' });
+  res.json({ lessons: listLessons(db, { homeworkId: hw.id }), hints: commonErrorHints(db, hw.id) });
+});
+
+// Tắt/bật hoặc xoá 1 kinh nghiệm (người ghi hoặc admin)
+router.put('/ai-lessons/:id', requireRole('teacher', 'admin'), (req, res) => {
+  const db = getDb();
+  const l = db.prepare('SELECT created_by FROM grading_lessons WHERE id=?').get(req.params.id);
+  if (!l) return res.status(404).json({ message: 'Không tìm thấy' });
+  if (req.user.role !== 'admin' && l.created_by !== req.user.id) return res.status(403).json({ message: 'Chỉ người ghi hoặc admin được sửa' });
+  db.prepare('UPDATE grading_lessons SET active=? WHERE id=?').run(req.body && req.body.active ? 1 : 0, req.params.id);
+  res.json({ message: 'Đã lưu' });
+});
+router.delete('/ai-lessons/:id', requireRole('teacher', 'admin'), (req, res) => {
+  const db = getDb();
+  const l = db.prepare('SELECT created_by FROM grading_lessons WHERE id=?').get(req.params.id);
+  if (!l) return res.status(404).json({ message: 'Không tìm thấy' });
+  if (req.user.role !== 'admin' && l.created_by !== req.user.id) return res.status(403).json({ message: 'Chỉ người ghi hoặc admin được xoá' });
+  db.prepare('DELETE FROM grading_lessons WHERE id=?').run(req.params.id);
+  res.json({ message: 'Đã xoá' });
 });
 
 // ── Chấm ngay các bài đang chờ đợt chấm gom của 1 bài tập (vẫn gom nhiều học sinh / lượt gọi) ───
