@@ -5,10 +5,12 @@ const { generateJson, generateJsonMulti, isQuotaError } = require('./geminiClien
 const { preparePages, renderGradedPages } = require('./gradingPages');
 
 // ── Chọn model ───────────────────────────────────────────────────────────────────────
-// Chấm bài: CHỈ dùng model "mạnh" (Flash đời mới, có suy luận). Hai lần chấm độc lập dùng 2 model KHÁC
-// nhau (lỗi của 2 model ít trùng nhau → đối chiếu bắt được nhiều chỗ sai hơn), lần đối chiếu dùng model
-// mạnh nhất. Ghi đè bằng biến môi trường GEMINI_GRADING_MODELS="m1,m2,..." (theo thứ tự ưu tiên).
-// Không rơi xuống bản Lite khi chấm: hết quota thì để hàng đợi chấm lại sau, không chấm kém chính xác.
+// Thứ tự ưu tiên khi chấm (xoay vòng ở geminiClient.generateJson):
+//   1) TẦNG MẠNH: lần lượt từng model mạnh, mỗi model thử HẾT các API key trong kho rồi mới sang model sau
+//      → dùng hết model mạnh của TẤT CẢ các key trước.
+//   2) TẦNG DỰ PHÒNG (yếu hơn một chút): chỉ dùng khi mọi key đã hết lượt mọi model mạnh; bài chấm bằng
+//      tầng này được gắn cờ "nên xem lại" cho giáo viên.
+// Không bao giờ dùng bản Lite để chấm. Ghi đè: GEMINI_GRADING_MODELS / GEMINI_FALLBACK_MODELS="m1,m2,...".
 const DEFAULT_GRADING_MODELS = [
   'gemini-4-hydrogen',  // đo thực tế: chấm sát giáo viên nhất trong các model đã thử
   'gemini-3.8-flash',
@@ -16,12 +18,25 @@ const DEFAULT_GRADING_MODELS = [
   'gemini-3.6-flash',
   'gemini-3.5-flash',
 ];
+const DEFAULT_FALLBACK_MODELS = [
+  'gemini-3-flash-preview', // đo thực tế: chấm rộng tay hơn giáo viên → chỉ để dự phòng
+];
 // Việc nhẹ (đọc bảng đáp án, tóm tắt chủ đề) → Lite trước để dành quota model mạnh cho chấm bài.
 const LITE_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest', 'gemini-2.5-flash-lite', ...DEFAULT_GRADING_MODELS];
 
-function gradingModels() {
-  const env = String(process.env.GEMINI_GRADING_MODELS || '').split(',').map((s) => s.trim()).filter(Boolean);
+const envList = (name) => String(process.env[name] || '').split(',').map((s) => s.trim()).filter(Boolean);
+function strongModels() {
+  const env = envList('GEMINI_GRADING_MODELS');
   return env.length ? env : DEFAULT_GRADING_MODELS;
+}
+function fallbackModels() {
+  const strong = strongModels();
+  const env = envList('GEMINI_FALLBACK_MODELS');
+  return (env.length ? env : DEFAULT_FALLBACK_MODELS).filter((m) => !strong.includes(m));
+}
+// Toàn bộ thứ tự dùng khi chấm: tầng mạnh trước, tầng dự phòng sau
+function gradingModels() {
+  return [...strongModels(), ...fallbackModels()];
 }
 
 function fileToBase64(filePath) {
@@ -313,8 +328,9 @@ ${hasAnswerFile ? '\nTài liệu đính kèm ngay sau đây là FILE ĐÁP ÁN /
   const useBatch = !realtime;
   const toResult = (r) => ({ ...normalizeResult(r.json, maxScore, N), model: r.model });
 
-  // ── LẦN 1 + LẦN 2: chấm độc lập (gọi thường: 2 model mạnh khác nhau; batch: cùng 1 lô) ───────
-  const listB = all.length > 1 ? [...all.slice(1), all[0]] : all;
+  // ── LẦN 1 + LẦN 2: chấm độc lập, cùng ưu tiên model mạnh nhất (batch: chung 1 lô) ───────────
+  // Cả 2 lần đều ưu tiên model mạnh nhất (khác nhau ở cách chấm), để dùng hết model mạnh trước
+  const listB = all;
   const [s1, s2] = await generateJsonMulti([
     { models: all, parts: [...sharedParts, gradeTask(1)], opts: { ...genOpts, schema: GRADE_SCHEMA } },
     { models: useBatch ? all : listB, parts: [...sharedParts, gradeTask(2)], opts: { ...genOpts, schema: GRADE_SCHEMA } },
@@ -429,7 +445,10 @@ Trả về JSON theo schema.`,
   const spread = r1 && r2 ? round2(Math.abs(r1.score - r2.score)) : null;
   const missingItems = final.rubricTotal > 0 && final.sumMax < final.rubricTotal - 0.01;
   const reviewFailed = r1 && r2 && !reviewSkipped && !reviewModel;
-  const needsTeacher = spread == null || spread > 1 || reviewFailed || missingItems;
+  // Có lần nào phải dùng model dự phòng (yếu hơn) vì mọi key hết lượt model mạnh?
+  const fb = fallbackModels();
+  const usedFallback = usage.some((u) => fb.includes(u.model));
+  const needsTeacher = spread == null || spread > 1 || reviewFailed || missingItems || usedFallback;
   const review = {
     run1: r1 ? { score: r1.score, model: r1.model } : null,
     run2: r2 ? { score: r2.score, model: r2.model } : null,
@@ -440,7 +459,9 @@ Trả về JSON theo schema.`,
     note: spread == null ? 'Chỉ chấm được 1 lần (lần còn lại lỗi) — nên xem lại.'
       : reviewFailed ? 'Lần đối chiếu không chạy được — điểm lấy theo lần chấm chặt hơn.'
       : missingItems ? `AI chỉ liệt kê các ý có tổng ${final.sumMax}/${final.rubricTotal} điểm biểu điểm — phần thiếu tính 0 điểm, nên xem lại.`
-      : spread > 1 ? `Hai lần chấm lệch ${spread} điểm — nên xem lại.` : '',
+      : spread > 1 ? `Hai lần chấm lệch ${spread} điểm — nên xem lại.`
+      : usedFallback ? 'Mọi API key đã hết lượt model mạnh nên bài này chấm bằng model dự phòng (yếu hơn một chút) — nên xem lại.' : '',
+    used_fallback: usedFallback,
     comparison,
     usage,
   };
@@ -546,4 +567,4 @@ function normalizeExtractedKey(parsed, cfg) {
   return out;
 }
 
-module.exports = { gradeSubmission, extractAnswerKey, generateFeedbackRubric, normalizeResult, gradingModels };
+module.exports = { gradeSubmission, extractAnswerKey, generateFeedbackRubric, normalizeResult, gradingModels, strongModels, fallbackModels };

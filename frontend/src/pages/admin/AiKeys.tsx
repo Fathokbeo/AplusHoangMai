@@ -14,17 +14,22 @@ type KeyRow = {
 
 const hhmm = (t: number) => new Date(t).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
 
-function keyStatus(k: KeyRow, models: string[]) {
+function keyStatus(k: KeyRow, strong: string[]) {
   if (!k.active) return { text: 'Đang tắt', cls: 'badge-gray' };
   if (k.bad) return { text: 'Key lỗi', cls: 'badge-red' };
-  const limited = k.models.filter((m) => m.until).length;
-  if (models.length && limited >= models.length) return { text: 'Hết lượt mọi model', cls: 'badge-orange' };
-  if (limited) return { text: `Hết lượt ${limited}/${models.length} model`, cls: 'badge-orange' };
+  const strongRows = k.models.filter((m) => strong.includes(m.model));
+  const limited = strongRows.filter((m) => m.until).length;
+  if (strongRows.length && limited >= strongRows.length) {
+    return k.models.some((m) => !strong.includes(m.model) && !m.until)
+      ? { text: 'Hết model mạnh — còn dự phòng', cls: 'badge-orange' }
+      : { text: 'Hết lượt mọi model', cls: 'badge-red' };
+  }
+  if (limited) return { text: `Hết lượt ${limited}/${strongRows.length} model mạnh`, cls: 'badge-orange' };
   return { text: 'Sẵn sàng', cls: 'badge-green' };
 }
 
 export default function AiKeys() {
-  const [data, setData] = useState<{ models: string[]; keys: KeyRow[] } | null>(null);
+  const [data, setData] = useState<{ models: string[]; strong?: string[]; fallback?: string[]; keys: KeyRow[] } | null>(null);
   const [text, setText] = useState('');
   const [label, setLabel] = useState('');
   const [saving, setSaving] = useState(false);
@@ -77,8 +82,11 @@ export default function AiKeys() {
   };
 
   const models = data?.models || [];
+  const strong = data?.strong || models;
+  const fallback = data?.fallback || [];
   const keys = data?.keys || [];
-  const ready = keys.filter((k) => k.active && !k.bad && k.models.some((m) => !m.until)).length;
+  // Key còn ít nhất 1 model MẠNH dùng được
+  const ready = keys.filter((k) => k.active && !k.bad && k.models.some((m) => strong.includes(m.model) && !m.until)).length;
 
   return (
     <div className="fade-in">
@@ -90,13 +98,22 @@ export default function AiKeys() {
       </div>
 
       <div className="card" style={{ padding: '1rem', marginBottom: 16, fontSize: '0.85rem', color: '#555', lineHeight: 1.6 }}>
-        Thêm được nhiều API key Gemini. Khi một key hết lượt (giới hạn theo phút hoặc theo ngày) hệ thống tự chuyển sang key khác;
-        hết lượt ở mọi key thì chuyển sang model mạnh tiếp theo. <strong>Chỉ dùng model mạnh để chấm bài</strong>, theo thứ tự ưu tiên:
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-          {models.map((m, i) => <span key={m} className="badge badge-purple">{i + 1}. {m}</span>)}
+        Thêm được nhiều API key Gemini. Thứ tự dùng khi chấm: model mạnh nhất được thử với <strong>tất cả</strong> các key,
+        key nào hết lượt thì chuyển key khác; mọi key đều hết lượt model đó mới sang model mạnh tiếp theo.
+        <strong> Dùng hết model mạnh của tất cả các key trước</strong>, sau đó mới tới model dự phòng.
+        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <strong style={{ fontSize: '0.8rem' }}>Model mạnh (ưu tiên):</strong>
+          {strong.map((m, i) => <span key={m} className="badge badge-purple">{i + 1}. {m}</span>)}
         </div>
+        {fallback.length > 0 && (
+          <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <strong style={{ fontSize: '0.8rem' }}>Dự phòng (yếu hơn một chút):</strong>
+            {fallback.map((m, i) => <span key={m} className="badge badge-gray">{strong.length + i + 1}. {m}</span>)}
+            <span style={{ fontSize: '0.75rem', color: '#888' }}>— chỉ dùng khi mọi key hết lượt mọi model mạnh; bài chấm bằng tầng này được gắn cờ "nên xem lại".</span>
+          </div>
+        )}
         <div style={{ marginTop: 8 }}>
-          Đang có <strong>{ready}</strong>/{keys.filter((k) => k.active).length} key sẵn sàng.
+          Đang có <strong>{ready}</strong>/{keys.filter((k) => k.active).length} key còn lượt model mạnh.
           Mỗi key free tier chỉ được khoảng 20 lượt/ngày cho mỗi model (1 bài cần 2–3 lượt) — key của project đã bật thanh toán thì không bị giới hạn này và chấm theo lô rẻ hơn 50%.
         </div>
       </div>
@@ -124,7 +141,7 @@ export default function AiKeys() {
           </thead>
           <tbody>
             {keys.map((k, i) => {
-              const st = keyStatus(k, models);
+              const st = keyStatus(k, strong);
               const t = tests[k.masked];
               return (
                 <tr key={`${k.source}-${k.id ?? i}-${k.masked}`} style={{ opacity: k.active ? 1 : 0.55 }}>
@@ -143,7 +160,7 @@ export default function AiKeys() {
                     {k.active ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                         {k.models.map((m) => (
-                          <span key={m.model} style={{ color: m.until ? '#E65100' : '#2E7D32', whiteSpace: 'nowrap' }}>
+                          <span key={m.model} style={{ color: m.until ? '#E65100' : fallback.includes(m.model) ? '#888' : '#2E7D32', whiteSpace: 'nowrap' }}>
                             {m.until ? '⏳' : '✓'} {m.model}{m.until ? ` — ${m.reason}, dùng lại lúc ${hhmm(m.until)}` : ''}
                           </span>
                         ))}

@@ -322,7 +322,7 @@ const aiKeys = require('../services/aiKeys');
 const KEY_RE = /^[A-Za-z0-9._-]{20,200}$/;
 
 router.get('/ai-keys', (req, res) => {
-  const { gradingModels } = require('../services/aiGrading');
+  const { gradingModels, strongModels, fallbackModels } = require('../services/aiGrading');
   const db = getDb();
   const models = gradingModels();
   const status = aiKeys.statusList(models);
@@ -333,6 +333,8 @@ router.get('/ai-keys', (req, res) => {
   const byId = new Map(rows.map((r) => [r.id, r]));
   res.json({
     models,
+    strong: strongModels(),
+    fallback: fallbackModels(),
     keys: [
       ...status.map((s) => ({ ...s, active: true, created_at: s.id ? (byId.get(s.id) || {}).created_at : null })),
       ...inactive,
