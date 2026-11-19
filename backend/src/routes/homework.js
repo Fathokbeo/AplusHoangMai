@@ -5,7 +5,7 @@ const fs = require('fs');
 const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { uploadHomework, uploadSubmission } = require('../middleware/upload');
-const { enqueue, gradeOne, runScheduledGrading, nextGradingAt, scheduleMode } = require('../services/gradingQueue');
+const { enqueue, runScheduledGrading, nextGradingAt, scheduleMode, queueRegrade, soonAt } = require('../services/gradingQueue');
 const { needsAiGrading, stripAnswers, stripHsaAnswers } = require('../services/homeworkParts');
 const { computeMaxScore } = require('../services/homeworkScoring');
 const { compareVietnameseName } = require('../services/vietnameseName');
@@ -261,7 +261,7 @@ router.get('/homework/:id', (req, res) => {
       can_see_answer: canSeeAnswer,
       attempts_left: attemptsLeft,
       // Bài đang chờ đợt chấm gom → giờ chấm dự kiến (21:30 hoặc trước hạn nộp)
-      next_grading_at: submission && submission.grading_status === 'scheduled' ? new Date(nextGradingAt(hw.due_date)).toISOString() : null,
+      next_grading_at: submission && submission.grading_status === 'scheduled' ? new Date(nextGradingAt(hw.due_date, hw.id)).toISOString() : null,
     });
   }
 
@@ -293,7 +293,9 @@ router.get('/homework/:id', (req, res) => {
   res.json({
     ...hw, submissions, roster, is_overdue: hw.due_date ? now > hw.due_date : false,
     grading_schedule: scheduleMode(),
-    next_grading_at: new Date(nextGradingAt(hw.due_date)).toISOString(),
+    next_grading_at: new Date(nextGradingAt(hw.due_date, hw.id)).toISOString(),
+    // Đã hẹn đợt chấm sớm (nộp hộ / bấm chấm lại / giờ trung tâm) → giao diện hiện "Sắp chấm" và tự làm mới
+    soon_grading_at: soonAt(hw.id) ? new Date(soonAt(hw.id)).toISOString() : null,
   });
 });
 
@@ -586,17 +588,11 @@ router.post('/submissions/:id/regrade', requireRole('teacher', 'admin'), async (
   if (!needsAiGrading(sub)) return res.status(400).json({ message: 'Bài này không có đáp án để AI chấm' });
   if (submissionFilenames(sub).length === 0 && !sub.structured_answers) return res.status(400).json({ message: 'Học sinh chưa nộp bài' });
 
-  // Chấm lại từ đầu → reset số lần thử rồi chấm ngay (force), trả kết quả cho giáo viên
-  db.prepare('UPDATE submissions SET grading_attempts=0 WHERE id=?').run(req.params.id);
-  try {
-    const result = await gradeOne(Number(req.params.id), { force: true });
-    if (!result) return res.status(400).json({ message: 'Không thể chấm bài này' });
-    // gradeOne có thể đã khôi phục lần nộp trước (điểm cao hơn) → đọc lại kết quả chính thức
-    const fin = db.prepare('SELECT score,feedback,grading_details FROM submissions WHERE id=?').get(req.params.id);
-    res.json({ message: 'Đã chấm lại', score: fin.score, feedback: fin.feedback, details: fin.grading_details ? JSON.parse(fin.grading_details) : [] });
-  } catch (err) {
-    res.status(500).json({ message: 'Lỗi chấm bài: ' + redactSecrets(err.message) });
-  }
+  if (sub.grading_status === 'grading') return res.json({ queued: false, message: 'Bài này đang được chấm' });
+  // Không chấm ngay từng bài (bấm nhiều bài cùng lúc sẽ dồn lượt gọi → lỗi): xếp vào hàng, các bài bấm liên tiếp
+  // trong ~20 giây được gom chấm chung theo nhóm, gọi nhanh; điểm cập nhật sau khoảng 1–5 phút.
+  const at = queueRegrade(Number(req.params.id));
+  res.json({ queued: true, at: at ? new Date(at).toISOString() : null, message: 'Đã xếp chấm lại — các bài bấm liên tiếp sẽ được chấm chung' });
 });
 
 module.exports = router;

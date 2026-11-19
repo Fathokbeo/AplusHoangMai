@@ -189,6 +189,15 @@ async function renderGradedPages(pages, final, opts = {}) {
     // Điểm tổng ở đầu trang đầu tiên (như giáo viên ghi điểm)
     if (k === 0 && opts.score != null) {
       label(g, `Điểm: ${fmt(opts.score)}/${fmt(opts.maxScore)}`, 16, fs1 * 1.6 + 6, fs1 * 1.6, COLORS.wrong);
+      // Ý không có trên ảnh để đánh dấu: học sinh không làm, hoặc bị trừ điểm mà không định vị được
+      const items = final.items || [];
+      const validBox = (it) => it.page && boxToRect(it.box_2d, 1000, 1000);
+      const notDone = items.filter((it) => it.status === 'missing').map((it) => `${it.short} (0/${fmt(it.max_points)})`);
+      const unplaced = items.filter((it) => (it.status === 'partial' || it.status === 'wrong') && !validBox(it))
+        .map((it) => `${it.short} (${fmt(it.points)}/${fmt(it.max_points)})`);
+      let ly = fs1 * 1.6 + 6 + fs1 * 1.4;
+      if (notDone.length) { label(g, `Không làm: ${notDone.join(', ')}`, 16, ly, fs1 * 0.85, COLORS.wrong); ly += fs1 * 1.2; }
+      if (unplaced.length) label(g, `Bị trừ điểm (xem chi tiết): ${unplaced.join(', ')}`, 16, ly, fs1 * 0.85, COLORS.partial);
     }
     // Số trang đã sắp xếp (góc phải trên)
     label(g, `Trang ${k + 1}/${order.length}`, W - fs1 * 6.5, fs1 + 8, fs1 * 0.8, '#555');

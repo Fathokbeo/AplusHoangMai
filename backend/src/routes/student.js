@@ -83,7 +83,7 @@ router.get('/my-classes/:id', (req, res) => {
       graded_pages: canSeeAnswer ? gradedPagesForStudent(hw.graded_pages) : null,
       attempt_started_at: attemptInProgress ? attemptStartedAt : null,
       // Bài đang chờ đợt chấm gom → giờ chấm dự kiến
-      next_grading_at: hw.grading_status === 'scheduled' ? new Date(nextGradingAt(hw.due_date)).toISOString() : null,
+      next_grading_at: hw.grading_status === 'scheduled' ? new Date(nextGradingAt(hw.due_date, hw.id)).toISOString() : null,
     };
   });
 

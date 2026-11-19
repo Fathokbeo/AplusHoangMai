@@ -44,7 +44,8 @@ export default function HomeworkDetail() {
 
   // Tự làm mới khi còn bài đang được AI chấm nền, để cập nhật điểm
   useEffect(() => {
-    const pending = hw?.submissions?.some((s: any) => s.grading_status === 'pending' || s.grading_status === 'grading');
+    const pending = hw?.submissions?.some((s: any) => s.grading_status === 'pending' || s.grading_status === 'grading'
+      || (s.grading_status === 'scheduled' && hw?.soon_grading_at)); // đã hẹn chấm sớm → tự làm mới để thấy điểm
     if (!pending) return;
     const t = setInterval(fetchHw, 8000);
     return () => clearInterval(t);
@@ -137,8 +138,9 @@ export default function HomeworkDetail() {
   const regrade = async (subId: number) => {
     setRegrading(subId);
     try {
-      await api.post(`/submissions/${subId}/regrade`);
-      toast.success('Đã chấm lại bằng AI');
+      // Xếp vào hàng chấm lại (bấm nhiều bài liên tiếp sẽ được gom chấm chung) — điểm cập nhật sau ít phút
+      const { data } = await api.post(`/submissions/${subId}/regrade`);
+      toast.success(data?.message || 'Đã xếp chấm lại');
       fetchHw();
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Lỗi chấm bài');
@@ -393,7 +395,7 @@ export default function HomeworkDetail() {
                         </span>
                       ) : s.grading_status === 'scheduled' ? (
                         <span title="Chờ đợt chấm gom (tối 21h30 / trước hạn nộp / giáo viên bấm Chấm ngay)" style={{ color: '#6A1B9A', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
-                          <Clock size={12} /> Chờ chấm {hw.next_grading_at ? new Date(hw.next_grading_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : ''}
+                          <Clock size={12} /> {hw.soon_grading_at ? 'Sắp chấm' : `Chờ chấm ${hw.next_grading_at ? new Date(hw.next_grading_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : ''}`}
                         </span>
                       ) : (s.grading_status === 'pending' || s.grading_status === 'grading') ? (
                         <span style={{ color: '#1565C0', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}>

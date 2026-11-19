@@ -132,6 +132,14 @@ const REVIEW_SCHEMA = {
   propertyOrdering: ['comparison', 'page_order', 'rubric_total', 'items', 'feedback'],
 };
 
+// Lý do ngắn (≤ 70 ký tự) để ghi cạnh chỗ khoanh: ưu tiên câu nói về chỗ sai/thiếu
+function shortReason(reason) {
+  const parts = String(reason || '').split(/(?<=[.;])\s+|,\s*nhưng\s+|\s+nhưng\s+/i).map((s) => s.trim()).filter(Boolean);
+  const hit = parts.find((s) => /sai|thiếu|nhầm|không|chưa|lỗi|trừ/i.test(s)) || parts[0] || 'Chưa đúng';
+  const t = hit.replace(/\(\s*[-−+]?\s*\d+([.,]\d+)?\s*đ[^)]*\)/gi, '').replace(/\s+/g, ' ').trim();
+  return t.length > 70 ? `${t.slice(0, 67)}…` : t;
+}
+
 // Chuẩn hóa kết quả AI → items hợp lệ + điểm do SERVER cộng (không tin con số tổng AI tự ghi).
 //  - ý học sinh không làm (attempted=false / status missing / không có trang) → 0 điểm
 //  - điểm từng ý bị kẹp trong [0, max_points]
@@ -171,6 +179,15 @@ function normalizeResult(raw, maxScore, pageCount) {
         error_types: status === 'correct' || status === 'missing' ? []
           : [...new Set((Array.isArray(it.error_types) ? it.error_types : []).filter((t) => ['TT', 'TB', 'DD', 'KT', 'KL'].includes(t)))],
       };
+    })
+    // Ý bị trừ điểm mà AI quên khoanh chỗ sai → tự khoanh vùng bài làm của ý đó, ghi lý do ngắn
+    // (để ảnh chấm luôn khớp với nhận xét: ý nào bị trừ điểm đều có dấu khoanh đỏ + chú thích).
+    .map((it) => {
+      if ((it.status === 'partial' || it.status === 'wrong') && it.errors.length === 0 && it.page
+        && Array.isArray(it.box_2d) && it.box_2d.length === 4 && it.box_2d.every(Number.isFinite)) {
+        it.errors = [{ page: it.page, box_2d: it.box_2d.slice(), note: shortReason(it.reason), auto: true }];
+      }
+      return it;
     });
 
   const sumMax = round2(items.reduce((s, it) => s + it.max_points, 0));
@@ -338,7 +355,7 @@ CÁCH CHẤM BẮT BUỘC (để không cho điểm sai):
 1. Lập DANH SÁCH TẤT CẢ CÁC Ý NHỎ NHẤT có điểm riêng theo biểu điểm (vd Bài 1 có a, b, c, d → 4 ý riêng; Bài I có 1), 2), 3) → 3 ý riêng; trắc nghiệm mỗi câu 1 ý). max_points của từng ý LẤY theo THỨ TỰ ƯU TIÊN ở trên (ghi chú giáo viên → biểu điểm file đáp án → chia hợp lý). max_points ghi đúng ĐIỂM GỐC trong biểu điểm (vd ý được 0,5đ thì ghi 0.5), KHÔNG tự quy đổi; rubric_total = tổng điểm gốc các ý trong phạm vi chấm — nếu khác thang ${maxScore} thì hệ thống tự quy đổi. Liệt kê ĐỦ mọi ý của đề trong phạm vi chấm — kể cả ý học sinh KHÔNG làm.
 2. Với TỪNG ý: tìm bài làm của ý đó trong các trang ảnh, chép lại ngắn gọn (student_work). Nếu KHÔNG tìm thấy bài làm cho ý đó → attempted=false, status "missing", points = 0. TUYỆT ĐỐI không cho điểm ý mà học sinh không viết gì; không suy ra "chắc học sinh biết làm".
 3. So với đáp án từng bước, ghi reason: đúng ở đâu, SAI Ở BƯỚC NÀO, sai thế nào (vd "dòng 3 tính 15/24 - 22/24 = 7/24, sai dấu, đúng là -7/24"), thiếu gì, vì sao trừ điểm. Rồi mới cho points (0..max_points).
-4. Với mỗi chỗ sai, ghi vào errors: trang, box_2d bao đúng chỗ viết sai (dòng/biểu thức sai), note ngắn. Ghi error_types cho ý bị trừ điểm: TT tính toán sai; TB trình bày/lập luận chưa chặt chẽ, thiếu bước, thiếu điều kiện; DD đọc đề sai/sót yêu cầu; KT sai kiến thức/công thức/phương pháp; KL thiếu/sai kết luận, kí hiệu, đơn vị (có thể nhiều loại).
+4. Với mỗi chỗ sai, ghi vào errors: trang, box_2d bao đúng chỗ viết sai (dòng/biểu thức sai), note ngắn. BẮT BUỘC: ý nào bị trừ điểm (points < max_points) mà học sinh CÓ làm thì phải có ÍT NHẤT 1 phần tử errors khoanh đúng chỗ sai/thiếu (thiếu bước/thiếu kết luận → khoanh chỗ lẽ ra phải viết, ngay sau dòng cuối của ý đó) — giáo viên đối chiếu nhận xét với dấu khoanh trên ảnh. Ghi error_types cho ý bị trừ điểm: TT tính toán sai; TB trình bày/lập luận chưa chặt chẽ, thiếu bước, thiếu điều kiện; DD đọc đề sai/sót yêu cầu; KT sai kiến thức/công thức/phương pháp; KL thiếu/sai kết luận, kí hiệu, đơn vị (có thể nhiều loại).
    short = nhãn ngắn theo đúng số câu/ý của đề, dạng "5a", "6b", "I.2", "TN3" (không thêm chữ "Câu").
 5. page và box_2d của ý: vùng bài làm của ý đó. box_2d = [ymin, xmin, ymax, xmax] thang 0–1000 theo chiều cao/chiều rộng của CHÍNH trang đó.
 6. page_order: các trang có thể bị chụp/ghép LỘN THỨ TỰ — xác định thứ tự đọc đúng dựa vào số bài/số câu và mạch lời giải.
