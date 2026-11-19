@@ -154,6 +154,9 @@ function gradeHsaSubmission(db, K, sub, submissionId) {
 const VN_TZ = 'Asia/Ho_Chi_Minh';
 const scheduleMode = () => (String(process.env.GRADING_SCHEDULE || 'daily').toLowerCase() === 'immediate' ? 'immediate' : 'daily');
 const groupSize = () => Math.max(1, Math.min(5, Number(process.env.GRADING_GROUP_SIZE) || 3));
+// Đợt ƯU TIÊN (bài đến hạn hôm nay / trước hạn nộp / nộp hộ / bấm chấm lại): số bài mỗi lượt gọi tự chia theo số
+// key đang có (xem runScheduledGrading) → có điểm nhanh nhất. Đợt thường (21:30) giữ GRADING_GROUP_SIZE, chạy theo lô.
+let priorityActive = 0; // số đợt ưu tiên đang chạy — đợt thường tạm nhường khi > 0
 const predueMinutes = () => (Number(process.env.GRADING_PREDUE_MINUTES) >= 0 ? Number(process.env.GRADING_PREDUE_MINUTES) : 60);
 function dailyTime() {
   const m = String(process.env.GRADING_DAILY_TIME || '21:30').match(/^(\d{1,2}):(\d{2})$/);
@@ -167,22 +170,33 @@ function vnNow(t = Date.now()) {
   return { date: `${parts.year}-${parts.month}-${parts.day}`, minutes: Number(parts.hour) * 60 + Number(parts.minute), weekday };
 }
 
-// ── GIỜ HOẠT ĐỘNG CỦA TRUNG TÂM (mặc định T2–T7, 18:30–21:30): bài của bài tập ĐẾN HẠN HÔM NAY được chấm gom
-//    NGAY (gom các bài nộp sát nhau ~1 phút), gọi thường cho nhanh — để có kết quả ngay sau buổi học.
-//    GRADING_CENTER_HOURS="18:30-21:30", GRADING_CENTER_DAYS="1-6" (1 = Thứ 2 … 6 = Thứ 7, 0 = Chủ nhật).
-function centerWindow() {
-  const m = String(process.env.GRADING_CENTER_HOURS || '18:30-21:30').match(/^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/);
-  const start = m ? Number(m[1]) * 60 + Number(m[2]) : 18 * 60 + 30;
-  const end = m ? Number(m[3]) * 60 + Number(m[4]) : 21 * 60 + 30;
-  const dm = String(process.env.GRADING_CENTER_DAYS || '1-6').match(/^(\d)\s*-\s*(\d)$/);
+// ── GIỜ HOẠT ĐỘNG CỦA TRUNG TÂM: bài của bài tập ĐẾN HẠN HÔM NAY được chấm gom NGAY (gom các bài nộp sát nhau
+//    ~1 phút), gọi thường cho nhanh — để có kết quả ngay sau buổi học. Mặc định:
+//      • Thứ 2 – Thứ 7: 18:30–21:30   (GRADING_CENTER_DAYS="1-6", GRADING_CENTER_HOURS="18:30-21:30")
+//      • Chủ nhật học cả ngày: 07:00–21:30   (GRADING_CENTER_SUNDAY_HOURS="07:00-21:30"; để trống = không ưu tiên)
+//    Thứ: 1 = Thứ 2 … 6 = Thứ 7, 0 = Chủ nhật.
+function parseRange(text) {
+  const m = String(text || '').match(/^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/);
+  return m ? { start: Number(m[1]) * 60 + Number(m[2]), end: Number(m[3]) * 60 + Number(m[4]) } : null;
+}
+function parseDays(text) {
   const days = new Set();
-  if (dm) { for (let d = Number(dm[1]); d <= Number(dm[2]); d++) days.add(d % 7); } else String(process.env.GRADING_CENTER_DAYS).split(',').forEach((d) => days.add(Number(d) % 7));
-  return { start, end, days };
+  const dm = String(text || '').match(/^(\d)\s*-\s*(\d)$/);
+  if (dm) { for (let d = Number(dm[1]); d <= Number(dm[2]); d++) days.add(d % 7); } else String(text || '').split(',').filter(Boolean).forEach((d) => days.add(Number(d) % 7));
+  return days;
+}
+function centerWindows() {
+  const list = [];
+  const weekday = parseRange(process.env.GRADING_CENTER_HOURS || '18:30-21:30');
+  if (weekday) list.push({ ...weekday, days: parseDays(process.env.GRADING_CENTER_DAYS || '1-6') });
+  const sunEnv = process.env.GRADING_CENTER_SUNDAY_HOURS;
+  const sunday = parseRange(sunEnv === undefined ? '07:00-21:30' : sunEnv);
+  if (sunday) list.push({ ...sunday, days: new Set([0]) });
+  return list;
 }
 function inCenterHours(t = Date.now()) {
-  const { start, end, days } = centerWindow();
   const v = vnNow(t);
-  return days.has(v.weekday) && v.minutes >= start && v.minutes < end;
+  return centerWindows().some((w) => w.days.has(v.weekday) && v.minutes >= w.start && v.minutes < w.end);
 }
 // Hạn nộp rơi vào HÔM NAY (giờ Việt Nam)
 function dueToday(dueDate, t = Date.now()) {
@@ -202,7 +216,7 @@ function nextDailyRunAt(t = Date.now()) {
 function nextGradingAt(dueDate, homeworkId = null) {
   const soon = homeworkId != null ? soonRuns.get(Number(homeworkId)) : null;
   if (soon) return soon.at;
-  if (inCenterHours() && dueToday(dueDate)) return Date.now() + 60_000;
+  if (inCenterHours() && dueToday(dueDate)) return Date.now() + centerDelayMs();
   const daily = nextDailyRunAt();
   const due = dueDate ? Date.parse(dueDate) : NaN;
   const pre = Number.isFinite(due) ? due - predueMinutes() * 60_000 : NaN;
@@ -212,16 +226,22 @@ function nextGradingAt(dueDate, homeworkId = null) {
 // Giáo viên NỘP HỘ (thường cả lớp 1 lúc, cần điểm sớm để gửi nhận xét) → không chờ 21:30: đợi vài phút
 // sau lần nộp hộ cuối của bài tập đó (gom đủ cả loạt) rồi chấm gom luôn.
 const teacherDelayMs = () => (Number(process.env.GRADING_TEACHER_DELAY_MIN) >= 0 ? Number(process.env.GRADING_TEACHER_DELAY_MIN) : 2) * 60_000;
-const soonRuns = new Map(); // id bài tập → { at, first, realtime, reason }
+const soonRuns = new Map(); // id bài tập → { at, first, maxWait, realtime, reason }
+// Giờ trung tâm: đợi 10 phút sau bài nộp gần nhất (gom nhiều bài, phòng lệch giờ nộp), tối đa 15 phút kể từ bài đầu
+const centerDelayMs = () => (Number(process.env.GRADING_CENTER_DELAY_MIN) > 0 ? Number(process.env.GRADING_CENTER_DELAY_MIN) : 10) * 60_000;
+const centerMaxWaitMs = () => Math.max(centerDelayMs(), (Number(process.env.GRADING_CENTER_MAX_WAIT_MIN) > 0 ? Number(process.env.GRADING_CENTER_MAX_WAIT_MIN) : 15) * 60_000);
 // Hẹn chấm gom SỚM 1 bài tập: gọi nhiều lần liên tiếp (nhiều bài nộp / nhiều lần bấm "chấm lại") thì lùi mốc
 // để gom chung 1 đợt, nhưng không chờ quá 3 phút kể từ lần đầu.
-function queueSoon(hwId, delayMs, { realtime = false, reason = '' } = {}) {
+// maxWaitMs: chờ lâu nhất bao lâu kể từ lần hẹn đầu tiên (mặc định 3 phút).
+function queueSoon(hwId, delayMs, { realtime = false, reason = '', maxWaitMs = 3 * 60_000 } = {}) {
   const id = Number(hwId);
   const now = Date.now();
   const cur = soonRuns.get(id);
   const first = cur ? cur.first : now;
+  const maxWait = Math.max(maxWaitMs, cur ? cur.maxWait || 0 : 0);
   soonRuns.set(id, {
-    at: Math.min(now + delayMs, first + 3 * 60_000),
+    at: Math.min(now + delayMs, first + maxWait),
+    maxWait,
     first,
     realtime: !!(realtime || (cur && cur.realtime)),
     reason: reason || (cur && cur.reason) || '',
@@ -423,8 +443,8 @@ async function gradeRecord(kind, submissionId, { force = false } = {}) {
       queueSoon(sub.hw_id, teacherDelayMs(), { realtime: true, reason: `giáo viên nộp hộ bài #${sub.hw_id}` }); // gom đủ cả loạt
       console.log(`[grading-queue] ⏳ Bài nộp hộ #${submissionId} → chấm gom sau ${Math.round(teacherDelayMs() / 60000)} phút`);
     } else if (inCenterHours() && dueToday(sub.due_date)) {
-      queueSoon(sub.hw_id, 60_000, { realtime: true, reason: `giờ trung tâm — bài #${sub.hw_id} đến hạn hôm nay` });
-      console.log(`[grading-queue] ⚡ Bài nộp #${submissionId} (đến hạn hôm nay, giờ trung tâm) → chấm gom sau ~1 phút`);
+      queueSoon(sub.hw_id, centerDelayMs(), { realtime: true, reason: `giờ trung tâm — bài #${sub.hw_id} đến hạn hôm nay`, maxWaitMs: centerMaxWaitMs() });
+      console.log(`[grading-queue] ⚡ Bài nộp #${submissionId} (đến hạn hôm nay, giờ trung tâm) → chấm gom sau ~${Math.round(centerDelayMs() / 60000)} phút`);
     } else {
       console.log(`[grading-queue] ⏳ Bài nộp #${submissionId} chờ đợt chấm gom (${new Date(nextGradingAt(sub.due_date)).toLocaleString('vi-VN', { timeZone: VN_TZ })})`);
     }
@@ -463,6 +483,8 @@ async function runScheduledGrading({ homeworkId = null, reason = '', realtime = 
   const lockKey = homeworkId ? `hw:${homeworkId}` : 'all';
   if (runningRuns.has(lockKey)) return { skipped: true };
   runningRuns.add(lockKey);
+  const fast = !!realtime; // đợt ưu tiên
+  if (fast) priorityActive += 1;
   const K = KINDS.hw;
   const db = getDb();
   let graded = 0, failed = 0;
@@ -498,10 +520,26 @@ async function runScheduledGrading({ homeworkId = null, reason = '', realtime = 
       groups.get(key).push(it);
     });
     const chunks = [];
-    const n = groupSize();
+    // Số "chỗ" chạy cùng lúc = số key còn lượt model mạnh × số nhóm mỗi key gánh (GRADING_PARALLEL_PER_KEY, mặc định 2)
+    const { gradingModels } = require('./aiGrading');
+    const usable = Math.max(...gradingModels().map((m) => aiKeys.keysFor(m, { rotate: false }).length), 1);
+    const perKey = Math.max(1, Number(process.env.GRADING_PARALLEL_PER_KEY) || 2);
+    const maxPar = fast
+      ? Math.max(1, Number(process.env.GRADING_FAST_MAX_PARALLEL) || 20) // ưu tiên: càng nhiều key càng nhiều nhóm chạy cùng lúc
+      : Math.max(1, Number(process.env.GRADING_MAX_PARALLEL) || 6);
+    const slots = Math.max(1, Math.min(maxPar, usable * perKey));
+    // Số bài mỗi lượt gọi:
+    //  • đợt ƯU TIÊN: chia đều số bài cho số chỗ đang có → nhiều key thì mỗi lượt ít bài (có thể 1 bài/lượt),
+    //    ít key thì gộp nhiều hơn; tối đa GRADING_FAST_GROUP_MAX (mặc định 3 — mức đã đo vẫn chấm chuẩn);
+    //  • đợt THƯỜNG (21:30): giữ GRADING_GROUP_SIZE (mặc định 3) để tiết kiệm lượt gọi.
+    const fastMax = Math.max(1, Math.min(5, Number(process.env.GRADING_FAST_GROUP_MAX) || 3));
+    const n = fast ? Math.max(1, Math.min(fastMax, Math.ceil(items.length / slots))) : groupSize();
     groups.forEach((list) => { for (let i = 0; i < list.length; i += n) chunks.push(list.slice(i, i + n)); });
+    console.log(`[grading-queue] Chia ${items.length} bài → ${chunks.length} lượt gọi × ≤${n} bài, ${usable} key còn lượt${fast ? ' (ưu tiên)' : ''}`);
 
     const runChunk = async (chunk) => {
+      // Đợt thường nhường đợt ưu tiên: chờ các đợt ưu tiên chấm xong mới gọi tiếp (không tranh lượt / key)
+      while (!fast && priorityActive > 0) await new Promise((r) => setTimeout(r, 5000));
       const first = chunk[0];
       let results;
       try {
@@ -533,17 +571,14 @@ async function runScheduledGrading({ homeworkId = null, reason = '', realtime = 
     // (mặc định 2; mỗi nhóm = 2 lượt gọi song song), tổng tối đa GRADING_MAX_PARALLEL (mặc định 6). Các nhóm
     // được xoay vòng sang key khác nhau (aiKeys.keysFor) để không dồn token/phút (TPM), lượt/phút (RPM) vào
     // 1 key; chạm giới hạn phút thì tự đổi key hoặc chờ vài chục giây (geminiClient.generateJson).
-    const { gradingModels } = require('./aiGrading');
-    const usable = Math.max(...gradingModels().map((m) => aiKeys.keysFor(m, { rotate: false }).length), 1);
-    const perKey = Math.max(1, Number(process.env.GRADING_PARALLEL_PER_KEY) || 2);
-    const maxPar = Math.max(1, Number(process.env.GRADING_MAX_PARALLEL) || 6);
-    const parallel = Math.max(1, Math.min(maxPar, usable * perKey, chunks.length));
+    const parallel = Math.max(1, Math.min(slots, chunks.length));
     const queueChunks = chunks.slice();
     await Promise.all(Array.from({ length: parallel }, async () => { while (queueChunks.length) await runChunk(queueChunks.shift()); }));
     console.log(`[grading-queue] 🗂️ Xong đợt chấm gom (${parallel} nhóm chạy song song): ${graded} bài đã chấm, ${failed} bài chưa chấm được (${chunks.length} lượt nhóm)`);
     return { graded, failed, groups: chunks.length };
   } finally {
     runningRuns.delete(lockKey);
+    if (fast) priorityActive = Math.max(0, priorityActive - 1);
   }
 }
 
@@ -582,10 +617,10 @@ async function scheduleTick() {
     if (inCenterHours(now)) {
       db.prepare(`SELECT DISTINCT h.id, h.due_date FROM homework h JOIN submissions s ON s.homework_id=h.id
         WHERE s.grading_status='scheduled' AND h.due_date IS NOT NULL`).all()
-        .filter((r) => dueToday(r.due_date, now) && !soonRuns.has(r.id) && !isRunning(`hw:${r.id}`) && now - (centerLaunched.get(r.id) || 0) > 5 * 60_000)
+        .filter((r) => dueToday(r.due_date, now) && !soonRuns.has(r.id) && !isRunning(`hw:${r.id}`) && now - (centerLaunched.get(r.id) || 0) > centerMaxWaitMs())
         .forEach((r) => {
           centerLaunched.set(r.id, now);
-          launch({ homeworkId: r.id, reason: `giờ trung tâm — bài #${r.id} đến hạn hôm nay`, realtime: true });
+          queueSoon(r.id, centerDelayMs(), { realtime: true, reason: `giờ trung tâm — bài #${r.id} đến hạn hôm nay`, maxWaitMs: centerMaxWaitMs() });
         });
     }
     // 2) Mỗi tối 21:30 (chạy bù nếu server ngủ đúng giờ)
