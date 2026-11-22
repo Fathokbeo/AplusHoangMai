@@ -9,6 +9,7 @@ import HsaEditor from '../../components/HsaEditor';
 import { toast } from '../../components/Toast';
 import useIsMobile from '../../lib/useIsMobile';
 import { matchesNameSearch } from '../../lib/vietnameseName';
+import { MOCK_GRADES } from '../../lib/mockInfoFields';
 import {
   emptyPartsConfig, normalizePartsConfig, computeMaxScore, anyPartEnabled, emptyHsaConfig, parseHsaConfig, hsaMaxScore,
   PART_LABELS, PART_ORDER, type PartsConfig, type HsaConfig, type ExamType,
@@ -213,11 +214,13 @@ function ExamsTab({ exams, reload }: { exams: any[]; reload: () => void }) {
   const [hsa, setHsa] = useState<HsaConfig>(emptyHsaConfig());
   const [files, setFiles] = useState<{ pdf?: File; answer?: File }>({});
   const [saving, setSaving] = useState(false);
+  // Lọc theo khối: 'all' = xem tất cả (chia mục theo lớp), số = 1 khối, 0 = đề "Mọi khối"
+  const [gradeFilter, setGradeFilter] = useState<'all' | number>('all');
   const pdfRef = useRef<HTMLInputElement>(null);
   const answerRef = useRef<HTMLInputElement>(null);
 
   const openCreate = () => {
-    setEditing(null); setForm(emptyForm); setParts(emptyPartsConfig()); setHsa(emptyHsaConfig()); setFiles({}); setModal(true);
+    setEditing(null); setForm({ ...emptyForm, grade: typeof gradeFilter === 'number' && gradeFilter > 0 ? String(gradeFilter) : '' }); setParts(emptyPartsConfig()); setHsa(emptyHsaConfig()); setFiles({}); setModal(true);
   };
   const openEdit = (e: any) => {
     setEditing(e);
@@ -273,38 +276,73 @@ function ExamsTab({ exams, reload }: { exams: any[]; reload: () => void }) {
     return on.length ? on.map((k) => PART_LABELS[k]).join(' · ') : 'Chưa chọn phần';
   };
 
+  // Chia đề theo khối: Lớp 6 → 12, rồi "Mọi khối" (đề không gắn khối, hiện ở mọi lớp)
+  const byGrade = new Map<number, any[]>();
+  exams.forEach((e) => { const g = Number(e.grade) || 0; byGrade.set(g, [...(byGrade.get(g) || []), e]); });
+  const gradeOrder = [...MOCK_GRADES, ...[...byGrade.keys()].filter((g) => g && !MOCK_GRADES.includes(g)).sort((a, b) => a - b), 0];
+  const gradeChips: ['all' | number, string, number][] = [
+    ['all', 'Tất cả', exams.length],
+    ...gradeOrder.filter((g) => g !== 0 || byGrade.has(0)).map((g): [number, string, number] => [g, g ? `Lớp ${g}` : 'Mọi khối', (byGrade.get(g) || []).length]),
+  ];
+  const visibleSections: [number, any[]][] = gradeOrder
+    .filter((g) => (gradeFilter === 'all' ? byGrade.has(g) : g === gradeFilter))
+    .map((g): [number, any[]] => [g, byGrade.get(g) || []])
+    .filter(([, list]) => list.length > 0);
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
-        <button className="btn btn-primary" onClick={openCreate}><Plus size={16} /> Thêm đề thi thử</button>
+        <button className="btn btn-primary" onClick={openCreate}><Plus size={16} /> Thêm đề thi thử{typeof gradeFilter === 'number' && gradeFilter > 0 ? ` lớp ${gradeFilter}` : ''}</button>
       </div>
       {exams.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', color: '#999', padding: '2.5rem' }}>Chưa có đề thi thử nào. Bấm “Thêm đề thi thử” để tạo.</div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(300px, 100%), 1fr))', gap: 14 }}>
-          {exams.map((e) => (
-            <div key={e.id} className="card" style={{ padding: '1rem 1.1rem', opacity: e.active ? 1 : 0.6, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                <div style={{ flex: 1, minWidth: 0, fontWeight: 800, fontSize: '1rem', color: '#1A1A2E' }}>{e.title}</div>
-                <span className="badge badge-blue">{e.grade ? `Lớp ${e.grade}` : 'Mọi khối'}</span>
-                {!e.active && <span className="badge badge-gray">Đang ẩn</span>}
-              </div>
-              {e.description && <div style={{ fontSize: '0.82rem', color: '#777', lineHeight: 1.5 }}>{e.description}</div>}
-              <div style={{ fontSize: '0.78rem', color: '#6A1B9A', fontWeight: 600 }}>{partSummary(e)}</div>
-              <div style={{ fontSize: '0.78rem', color: '#888' }}>
-                Thang {e.max_score} điểm{e.time_limit_minutes ? ` · ${e.time_limit_minutes} phút` : ''} · {e.pdf_file ? 'có đề PDF' : 'chưa có đề PDF'} · {e.answer_file ? 'có đáp án' : 'chưa có đáp án'}
-              </div>
-              <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#1565C0' }}>{e.attempt_count || 0} bài làm</div>
-              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                <a className="btn btn-ghost btn-sm" href={`/thi-thu/${e.id}`} target="_blank" rel="noreferrer"><Eye size={13} /> Xem trang thi</a>
-                <span style={{ flex: 1 }} />
-                <button className="btn btn-ghost btn-sm btn-icon" title={e.active ? 'Ẩn khỏi trang chủ' : 'Hiện trên trang chủ'} onClick={() => toggleActive(e)}>{e.active ? <EyeOff size={14} /> : <Eye size={14} />}</button>
-                <button className="btn btn-ghost btn-sm btn-icon" title="Sửa" onClick={() => openEdit(e)}><Edit size={14} /></button>
-                <button className="btn btn-ghost btn-sm btn-icon" title="Xóa" style={{ color: '#C62828' }} onClick={() => remove(e)}><Trash2 size={14} /></button>
-              </div>
+        <>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
+            {gradeChips.map(([g, label, n]) => (
+              <button key={String(g)} onClick={() => setGradeFilter(g)}
+                className={`btn btn-sm ${gradeFilter === g ? 'btn-primary' : 'btn-ghost'}`} style={{ borderRadius: 999 }}>
+                {label}{g === 'all' ? '' : ` · ${n}`}
+              </button>
+            ))}
+          </div>
+          {visibleSections.length === 0 ? (
+            <div className="card" style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>
+              Chưa có đề nào cho {gradeFilter === 0 ? 'mọi khối' : `lớp ${gradeFilter}`}. Bấm “Thêm đề thi thử” để tạo.
             </div>
+          ) : visibleSections.map(([g, list]) => (
+            <section key={g} style={{ marginBottom: 22 }}>
+              <h3 style={{ margin: '0 0 10px', fontSize: '1.02rem', fontWeight: 800, color: '#2E7D32', display: 'flex', alignItems: 'center', gap: 8 }}>
+                {g ? `Lớp ${g}` : 'Mọi khối'}
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#888' }}>{list.length} đề</span>
+              </h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(300px, 100%), 1fr))', gap: 14 }}>
+                {list.map((e) => (
+                <div key={e.id} className="card" style={{ padding: '1rem 1.1rem', opacity: e.active ? 1 : 0.6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0, fontWeight: 800, fontSize: '1rem', color: '#1A1A2E' }}>{e.title}</div>
+                    <span className="badge badge-blue">{e.grade ? `Lớp ${e.grade}` : 'Mọi khối'}</span>
+                    {!e.active && <span className="badge badge-gray">Đang ẩn</span>}
+                  </div>
+                  {e.description && <div style={{ fontSize: '0.82rem', color: '#777', lineHeight: 1.5 }}>{e.description}</div>}
+                  <div style={{ fontSize: '0.78rem', color: '#6A1B9A', fontWeight: 600 }}>{partSummary(e)}</div>
+                  <div style={{ fontSize: '0.78rem', color: '#888' }}>
+                    Thang {e.max_score} điểm{e.time_limit_minutes ? ` · ${e.time_limit_minutes} phút` : ''} · {e.pdf_file ? 'có đề PDF' : 'chưa có đề PDF'} · {e.answer_file ? 'có đáp án' : 'chưa có đáp án'}
+                  </div>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#1565C0' }}>{e.attempt_count || 0} bài làm</div>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                    <a className="btn btn-ghost btn-sm" href={`/thi-thu/${e.id}`} target="_blank" rel="noreferrer"><Eye size={13} /> Xem trang thi</a>
+                    <span style={{ flex: 1 }} />
+                    <button className="btn btn-ghost btn-sm btn-icon" title={e.active ? 'Ẩn khỏi trang chủ' : 'Hiện trên trang chủ'} onClick={() => toggleActive(e)}>{e.active ? <EyeOff size={14} /> : <Eye size={14} />}</button>
+                    <button className="btn btn-ghost btn-sm btn-icon" title="Sửa" onClick={() => openEdit(e)}><Edit size={14} /></button>
+                    <button className="btn btn-ghost btn-sm btn-icon" title="Xóa" style={{ color: '#C62828' }} onClick={() => remove(e)}><Trash2 size={14} /></button>
+                  </div>
+                </div>
+                ))}
+              </div>
+            </section>
           ))}
-        </div>
+        </>
       )}
 
       <Modal open={modal} onClose={() => setModal(false)} title={editing ? 'Sửa đề thi thử' : 'Thêm đề thi thử'} size="xl"
