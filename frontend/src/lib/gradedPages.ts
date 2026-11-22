@@ -8,6 +8,8 @@ export type GradedReview = {
   final?: { score: number; model?: string } | null;
   spread?: number | null;
   skipped?: boolean;
+  group_size?: number;
+  used_fallback?: boolean;
   needs_teacher?: boolean;
   note?: string;
   comparison?: { question: string; run1_points: number; run2_points: number; final_points: number; analysis: string }[];

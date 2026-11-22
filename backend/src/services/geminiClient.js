@@ -4,6 +4,7 @@
 
 const API = 'https://generativelanguage.googleapis.com/v1beta/models';
 const REQUEST_TIMEOUT_MS = 6 * 60_000; // model có "thinking" chấm bài nhiều trang có thể mất vài phút
+const OVERLOAD_RETRY_MS = 10 * 60_000; // mọi model đều quá tải → hẹn chấm lại sau 10 phút
 
 // POST JSON bằng module https (KHÔNG dùng fetch: fetch của Node tự ngắt sau 300s chờ phản hồi, trong khi
 // model có suy luận chấm bài nhiều trang lúc máy chủ Google đông có thể lâu hơn).
@@ -174,6 +175,10 @@ async function generateJson(models, parts, opts = {}) {
   if (isQuotaError(err) || models.every((m) => !keys.keysFor(m).length)) {
     err.quota = true;
     err.retryAt = keys.nextAvailableAt(models);
+  } else if (/503|overloaded|UNAVAILABLE|high demand|timeout/i.test(String(err.message))) {
+    // Mọi model trong danh sách đang quá tải (lỗi tạm của Google) → hàng đợi hẹn chấm lại sau, không tính lần thử
+    err.overloaded = true;
+    err.retryAt = Date.now() + OVERLOAD_RETRY_MS;
   }
   throw err;
 }

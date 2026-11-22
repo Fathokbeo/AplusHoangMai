@@ -507,7 +507,7 @@ export default function HomeworkDetail() {
         <div style={{ fontWeight: 700, margin: '12px 0 6px' }}>Lỗi nhiều học sinh mắc ở đề này (AI tự thống kê)</div>
         {lessonsData && lessonsData.hints.length === 0 && <div style={{ color: '#999', fontSize: '0.82rem' }}>Chưa đủ bài đã chấm để thống kê.</div>}
         {lessonsData?.hints.map((h, i) => <div key={i} style={{ fontSize: '0.82rem', padding: '3px 0' }}>• {h}</div>)}
-        <div style={{ fontSize: '0.72rem', color: '#999', marginTop: 6 }}>Phần này chỉ nhắc AI soi kỹ đúng chỗ, AI không được mặc định trừ điểm.</div>
+        <div style={{ fontSize: '0.72rem', color: '#999', marginTop: 6 }}>Thống kê này để thầy cô tham khảo (lấy từ kết quả AI, chưa được kiểm tra) nên không gửi kèm khi chấm. Muốn AI chấm theo, hãy Sửa điểm bài đó và ghi lý do.</div>
       </Modal>
 
       {/* File Viewer Modal */}
@@ -541,6 +541,11 @@ function GradedAside({ sub }: { sub: any }) {
             {review.run1 && <span className="badge badge-gray">Lần 1: {review.run1.score}</span>}
             {review.run2 && <span className="badge badge-gray">Lần 2: {review.run2.score}</span>}
             {review.final && <span className="badge badge-purple">Chốt: {review.final.score}</span>}
+          </div>
+          {/* Model đã chấm — để đối chiếu bài lệch có phải do chấm bằng model yếu hơn (key hết lượt model mạnh) */}
+          <div style={{ marginTop: 4, fontSize: '0.72rem', color: '#999' }}>
+            Model: {[...new Set([review.run1?.model, review.run2?.model, review.final?.model].filter(Boolean))].join(', ') || '—'}
+            {(review.group_size || 1) > 1 ? ` · chấm chung ${review.group_size} bài/lượt` : ''}
           </div>
           {review.needs_teacher && (
             <div style={{ marginTop: 8, padding: '6px 10px', background: '#FFF3E0', color: '#E65100', borderRadius: 8, display: 'flex', gap: 6, alignItems: 'flex-start' }}>

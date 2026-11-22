@@ -545,7 +545,7 @@ router.get('/homework/:id/ai-lessons', requireRole('teacher', 'admin'), (req, re
   const db = getDb();
   const hw = db.prepare("SELECT h.id FROM homework h JOIN classes c ON h.class_id=c.id WHERE h.id=? AND (c.teacher_id=? OR ?='admin')").get(req.params.id, req.user.id, req.user.role);
   if (!hw) return res.status(404).json({ message: 'Không tìm thấy bài tập' });
-  res.json({ lessons: listLessons(db, { homeworkId: hw.id }), hints: commonErrorHints(db, hw.id) });
+  res.json({ lessons: listLessons(db, { homeworkId: hw.id }), hints: commonErrorHints(db, hw.id, { forDisplay: true }), hints_in_prompt: process.env.GRADING_HINTS === '1' });
 });
 
 // Tắt/bật hoặc xoá 1 kinh nghiệm (người ghi hoặc admin)

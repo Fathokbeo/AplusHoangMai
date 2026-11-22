@@ -34,6 +34,12 @@ function fallbackModels() {
   const env = envList('GEMINI_FALLBACK_MODELS');
   return (env.length ? env : DEFAULT_FALLBACK_MODELS).filter((m) => !strong.includes(m));
 }
+// Tầng CHÍNH XÁC NHẤT (đã đo sát điểm giáo viên nhất): hàng đợi chỉ chấm bằng tầng này; model này quá tải /
+// hết lượt thì HOÃN bài (chờ vài phút → vài giờ) thay vì hạ ngay xuống model yếu hơn. Ghi đè: GEMINI_PRECISE_MODELS.
+function preciseModels() {
+  const env = envList('GEMINI_PRECISE_MODELS');
+  return env.length ? env : strongModels().slice(0, 1);
+}
 // Toàn bộ thứ tự dùng khi chấm: tầng mạnh trước, tầng dự phòng sau
 function gradingModels() {
   return [...strongModels(), ...fallbackModels()];
@@ -531,8 +537,10 @@ Trả về JSON theo schema.`,
   }
 
   // ── Kết quả từng học sinh ───────────────────────────────────────────────────────────────────
-  const fb = fallbackModels();
-  const usedFallback = usage.some((u) => fb.includes(u.model));
+  // Có bước nào (chấm lần 1/2, đối chiếu) không chạy trên tầng chính xác nhất → gắn cờ "nên xem lại"
+  const precise = preciseModels();
+  const fallbackUsed = [...new Set(usage.map((u) => u.model).filter((m) => m && !precise.includes(m)))];
+  const usedFallback = fallbackUsed.length > 0;
   for (const s of S) {
     const p = per.get(s.idx);
     const { r1, r2 } = p;
@@ -540,6 +548,8 @@ Trả về JSON theo schema.`,
       const e1 = errs[1], e2 = errs[2];
       const err = new Error(`Chấm bài thất bại (cả 2 lần chấm đều lỗi): ${(e1 || e2 || { message: 'AI không trả kết quả cho bài này' }).message}`);
       err.quota = !!(e1 && e2 && isQuotaError(e1) && isQuotaError(e2));
+      // Cả 2 lần đều vướng quá tải / hết lượt (lỗi tạm) → hàng đợi hẹn lại, không tính là chấm hỏng
+      err.overloaded = !err.quota && !!(e1 && e2 && (e1.overloaded || e1.quota || isQuotaError(e1)) && (e2.overloaded || e2.quota || isQuotaError(e2)));
       err.retryAt = (e1 && e1.retryAt) || (e2 && e2.retryAt) || null;
       results[s.i] = { ok: false, error: err };
       continue;
@@ -567,7 +577,7 @@ Trả về JSON theo schema.`,
         : reviewFailed ? 'Lần đối chiếu không chạy được — điểm lấy theo lần chấm chặt hơn.'
         : missingItems ? `AI chỉ liệt kê các ý có tổng ${final.sumMax}/${final.rubricTotal} điểm biểu điểm — phần thiếu tính 0 điểm, nên xem lại.`
         : spread > 1 ? `Hai lần chấm lệch ${spread} điểm — nên xem lại.`
-        : usedFallback ? 'Mọi API key đã hết lượt model mạnh nên bài này chấm bằng model dự phòng (yếu hơn một chút) — nên xem lại.' : '',
+        : usedFallback ? `Model chấm chính (${precise.join(', ')}) quá tải / hết lượt quá lâu nên bài này chấm bằng model dự phòng (${fallbackUsed.join(', ')}, kém chính xác hơn) — nên xem lại.` : '',
       used_fallback: usedFallback,
       group_size: S.length, // số học sinh chấm chung 1 lượt gọi
       comparison: p.comparison,
@@ -688,4 +698,4 @@ function normalizeExtractedKey(parsed, cfg) {
   return out;
 }
 
-module.exports = { gradeSubmission, gradeGroup, extractAnswerKey, generateFeedbackRubric, normalizeResult, gradingModels, strongModels, fallbackModels };
+module.exports = { gradeSubmission, gradeGroup, extractAnswerKey, generateFeedbackRubric, normalizeResult, gradingModels, strongModels, fallbackModels, preciseModels };

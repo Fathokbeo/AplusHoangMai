@@ -38,7 +38,14 @@ function listLessons(db, { homeworkId } = {}) {
 
 // Lỗi nhiều học sinh mắc ở cùng bài tập: từ kết quả AI đã lưu (graded_pages.items — nhãn ý, trạng thái,
 // ghi chú lỗi). Chỉ nêu ý có ≥ 2 em sai, kèm vài ghi chú lỗi hay gặp nhất.
-function commonErrorHints(db, homeworkId, { minStudents = 2, max = 8 } = {}) {
+// TẮT mặc định (GRADING_HINTS=1 để bật): thống kê lấy từ chính kết quả AI chấm, CHƯA được giáo viên kiểm tra —
+// AI chấm sai vài bài đầu thì gợi ý sai lan sang các bài sau. Ưu tiên độ chính xác → chỉ dùng sổ kinh nghiệm
+// do giáo viên ghi (lessonsFor). Trang "Kinh nghiệm AI" vẫn hiện thống kê này cho giáo viên tham khảo.
+function commonErrorHints(db, homeworkId, opts = {}) {
+  if (process.env.GRADING_HINTS !== '1' && !opts.forDisplay) return [];
+  return computeHints(db, homeworkId, opts);
+}
+function computeHints(db, homeworkId, { minStudents = 2, max = 8 } = {}) {
   if (!homeworkId) return [];
   let rows = [];
   try {

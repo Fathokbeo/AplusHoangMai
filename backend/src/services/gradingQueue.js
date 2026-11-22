@@ -2,7 +2,7 @@
 // việc chấm AI chạy nền tuần tự, có thử lại khi lỗi và tự phục hồi sau khi server khởi động lại.
 const path = require('path');
 const { getDb } = require('../db/database');
-const { gradeSubmission, gradeGroup, extractAnswerKey } = require('./aiGrading');
+const { gradeSubmission, gradeGroup, extractAnswerKey, preciseModels, gradingModels } = require('./aiGrading');
 const { needsAiGrading, hasAnswerKey, parsePartsConfig, partEnabled, missingKeyIndices, applyExtractedKeys, PART_LABELS, parseHsaConfig, hasHsaAnswerKey } = require('./homeworkParts');
 const { settleBest } = require('./bestAttempt');
 const { removeGradedFiles } = require('./gradingPages');
@@ -60,6 +60,21 @@ const KINDS = {
 };
 let running = 0; // số bài đang chấm cùng lúc
 let quotaBlockedUntil = 0; // hết quota → tạm ngừng quét bài chờ cho tới thời điểm này
+
+// ── Ưu tiên ĐỘ CHÍNH XÁC: chỉ chấm bằng model chính xác nhất (preciseModels). Model đó quá tải / hết lượt →
+// HOÃN bài, thử lại sau vài phút; chỉ khi đã hoãn quá lâu mới cho dùng model yếu hơn (bài đó được gắn cờ
+// "nên xem lại"). Giáo viên đang chờ (bấm chấm lại / nộp hộ / giờ trung tâm) thì chờ ngắn hơn.
+//   GRADING_PRECISE_WAIT_MIN (mặc định 180) / GRADING_PRECISE_WAIT_FAST_MIN (mặc định 30).
+const deferredSince = new Map(); // "<loại>:<id>" → lúc bắt đầu bị hoãn vì model chính xác không dùng được
+const preciseWaitMs = (fast) => (fast
+  ? Number(process.env.GRADING_PRECISE_WAIT_FAST_MIN ?? 30)
+  : Number(process.env.GRADING_PRECISE_WAIT_MIN ?? 180)) * 60_000;
+const pastPreciseWait = (kind, id, fast) => {
+  const t = deferredSince.get(`${kind}:${id}`);
+  return t != null && Date.now() - t >= preciseWaitMs(fast);
+};
+// Danh sách model cho 1 lượt chấm: còn trong thời gian chờ → chỉ tầng chính xác; quá hạn → toàn bộ
+const modelsForRun = (allPast) => (allPast ? gradingModels() : preciseModels());
 
 // Cache đáp án AI đọc được từ file đáp án, theo (loại : id đề : tên file đáp án).
 // Nhờ đó nhiều học sinh cùng bài chỉ tốn 1 lần đọc file; file đổi (tên mới) → tự đọc lại.
@@ -358,6 +373,7 @@ function finalize(kind, K, sub, submissionId, ctx, aiResult) {
     feedback = [detFeedback, aiFeedback].filter(Boolean).join(' ') || `Tổng điểm: ${total}/${sub.max_score}.`;
   }
 
+  deferredSince.delete(`${kind}:${submissionId}`);
   removeGradedFiles(sub.graded_pages); // ảnh chấm của lần chấm trước (chấm lại) không còn dùng
   db.prepare(`UPDATE ${K.table} SET score=?,feedback=?,grading_details=?,graded_pages=?,graded_at=?,graded_by_ai=?,grading_status='done' WHERE id=?`)
     .run(total, feedback, JSON.stringify(details), aiMarks ? JSON.stringify(aiMarks) : null, new Date().toISOString(), needAi ? 1 : 0, submissionId);
@@ -368,20 +384,26 @@ function finalize(kind, K, sub, submissionId, ctx, aiResult) {
 
 // ── Chấm lỗi: hết lượt mọi key → không tính lần thử, hẹn lại; lỗi khác → thử lại / đánh dấu thất bại ──
 let scheduledRetryAt = 0; // chấm gom gặp hết lượt → chạy lại các bài đang chờ vào lúc này
-function handleFail(kind, K, sub, submissionId, err, { scheduled = false } = {}) {
+let scheduledRetryFast = false; // có bài của đợt ưu tiên bị hoãn → đợt chạy lại cũng là ưu tiên (gọi nhanh)
+function handleFail(kind, K, sub, submissionId, err, { scheduled = false, fast = false } = {}) {
   const db = getDb();
   const waitStatus = scheduled ? 'scheduled' : 'pending';
-  if (err.quota) {
+  if (err.quota || err.overloaded) {
     db.prepare(`UPDATE ${K.table} SET grading_status=?, grading_attempts=MAX(0,COALESCE(grading_attempts,1)-1) WHERE id=?`).run(waitStatus, submissionId);
-    // Hẹn đúng lúc sớm nhất có key × model dùng lại được (tối thiểu 1 phút, tối đa 6 giờ)
-    const delay = Math.min(6 * 3600_000, Math.max(60_000, (err.retryAt || 0) - Date.now() || QUOTA_RETRY_MS));
+    const dk = `${kind}:${submissionId}`;
+    if (!deferredSince.has(dk)) deferredSince.set(dk, Date.now());
+    // Hẹn đúng lúc sớm nhất có key × model dùng lại được (tối thiểu 1 phút, tối đa 6 giờ), nhưng không quá
+    // lúc hết thời gian chờ model chính xác (khi đó chấm bằng model dự phòng)
+    let delay = Math.min(6 * 3600_000, Math.max(60_000, (err.retryAt || 0) - Date.now() || QUOTA_RETRY_MS));
+    delay = Math.max(60_000, Math.min(delay, deferredSince.get(dk) + preciseWaitMs(fast) - Date.now() + 5_000));
     if (scheduled) {
       scheduledRetryAt = scheduledRetryAt ? Math.min(scheduledRetryAt, Date.now() + delay) : Date.now() + delay;
+      if (fast) scheduledRetryFast = true;
     } else {
       quotaBlockedUntil = Date.now() + delay;
       setTimeout(() => enqueue(submissionId, kind), delay);
     }
-    console.warn(`[grading-queue] Mọi API key đã hết lượt model chấm → chấm lại ${kind} #${submissionId} sau ${Math.round(delay / 60000)} phút`);
+    console.warn(`[grading-queue] ${err.overloaded ? 'Model chấm đang quá tải' : 'Mọi API key đã hết lượt model chấm'} → chấm lại ${kind} #${submissionId} sau ${Math.round(delay / 60000)} phút`);
     return;
   }
   const attempts = (sub.grading_attempts || 0) + 1;
@@ -462,6 +484,7 @@ async function gradeRecord(kind, submissionId, { force = false } = {}) {
         studentAnswers: sub.structured_answers,
         annotatePrefix: `${kind}_${submissionId}_${Date.now()}`, // vẽ đúng/sai lên ảnh bài làm
         realtime: force, // giáo viên bấm "chấm lại" đang chờ → gọi thường; chấm nền → Batch (rẻ 50%)
+        models: modelsForRun(pastPreciseWait(kind, submissionId, force)),
         // Sổ kinh nghiệm chấm (giáo viên đã sửa AI) + lỗi hay gặp của đề (chỉ với bài tập của lớp)
         lessons: lessonsFor(db, kind === 'hw' ? sub.hw_id : null),
         hints: kind === 'hw' ? commonErrorHints(db, sub.hw_id) : [],
@@ -469,7 +492,7 @@ async function gradeRecord(kind, submissionId, { force = false } = {}) {
     }
     return finalize(kind, K, sub, submissionId, ctx, aiResult);
   } catch (err) {
-    handleFail(kind, K, sub, submissionId, err);
+    handleFail(kind, K, sub, submissionId, err, { fast: force });
     throw err;
   }
 }
@@ -521,7 +544,6 @@ async function runScheduledGrading({ homeworkId = null, reason = '', realtime = 
     });
     const chunks = [];
     // Số "chỗ" chạy cùng lúc = số key còn lượt model mạnh × số nhóm mỗi key gánh (GRADING_PARALLEL_PER_KEY, mặc định 2)
-    const { gradingModels } = require('./aiGrading');
     const usable = Math.max(...gradingModels().map((m) => aiKeys.keysFor(m, { rotate: false }).length), 1);
     const perKey = Math.max(1, Number(process.env.GRADING_PARALLEL_PER_KEY) || 2);
     const maxPar = fast
@@ -550,6 +572,7 @@ async function runScheduledGrading({ homeworkId = null, reason = '', realtime = 
           partsConfig: first.ctx.cfg || first.sub.parts_config,
           scope: first.ctx.scope,
           realtime, // chấm gấp (nộp hộ / chấm lại / giờ trung tâm) → gọi thường; đợt 21:30 → Batch nếu có (rẻ 50%)
+          models: modelsForRun(chunk.every((it) => pastPreciseWait('hw', it.id, fast))),
           lessons: lessonsFor(db, first.sub.hw_id),
           // Lỗi hay gặp tính lại trước MỖI nhóm: nhóm sau được hưởng thống kê từ các nhóm đã chấm xong
           hints: commonErrorHints(db, first.sub.hw_id),
@@ -560,9 +583,9 @@ async function runScheduledGrading({ homeworkId = null, reason = '', realtime = 
       chunk.forEach((it, i) => {
         const r = results[i];
         if (r && r.ok) {
-          try { finalize('hw', K, it.sub, it.id, it.ctx, r); graded++; } catch (e) { handleFail('hw', K, it.sub, it.id, e, { scheduled: true }); failed++; }
+          try { finalize('hw', K, it.sub, it.id, it.ctx, r); graded++; } catch (e) { handleFail('hw', K, it.sub, it.id, e, { scheduled: true, fast }); failed++; }
         } else {
-          handleFail('hw', K, it.sub, it.id, (r && r.error) || new Error('Không có kết quả'), { scheduled: true });
+          handleFail('hw', K, it.sub, it.id, (r && r.error) || new Error('Không có kết quả'), { scheduled: true, fast });
           failed++;
         }
       });
@@ -641,8 +664,10 @@ async function scheduleTick() {
     }
     // 4) Đợt trước gặp hết lượt / lỗi tạm thời → chạy lại khi đã tới giờ hẹn
     if (scheduledRetryAt && now >= scheduledRetryAt && !isRunning('all')) {
+      const realtime = scheduledRetryFast;
       scheduledRetryAt = 0;
-      launch({ reason: 'chấm lại bài còn chờ (hết lượt/lỗi tạm thời)' });
+      scheduledRetryFast = false;
+      launch({ reason: 'chấm lại bài còn chờ (quá tải/hết lượt/lỗi tạm thời)', realtime });
     }
   } catch (err) {
     console.error('[grading-queue] lịch chấm gom lỗi:', err.message);
