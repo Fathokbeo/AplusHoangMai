@@ -57,6 +57,8 @@ export default function StudentClassDetail() {
   const [solutionVideo, setSolutionVideo] = useState<{ title: string; url: string } | null>(null);
   const [submitModal, setSubmitModal] = useState(false);
   const [submitting, setSubmitting] = useState<any>(null);
+  // Giờ chấm dự kiến trả về ngay lúc nộp (trước khi hàng đợi kịp chuyển bài sang "chờ đợt chấm")
+  const [gradingEta, setGradingEta] = useState<Record<number, string>>({});
   const [submitFiles, setSubmitFiles] = useState<File[]>([]);
   const [studentAnswers, setStudentAnswers] = useState<StudentAnswers>({ multiple_choice: [], true_false: [], short_answer: [] });
   const [hsaAnswers, setHsaAnswers] = useState<string[]>([]);
@@ -202,7 +204,8 @@ export default function StudentClassDetail() {
       if (isHsa) body.append('structured_answers', JSON.stringify({ hsa: hsaAnswers }));
       else if (objective) body.append('structured_answers', JSON.stringify(studentAnswers));
       const { data } = await api.post(`/homework/${submitting.id}/submit`, body);
-      toast.success(data.message);
+      toast.success(data.grading_note ? `${data.message}\n${data.grading_note}` : data.message);
+      if (data.next_grading_at) setGradingEta((m) => ({ ...m, [submitting.id]: data.next_grading_at }));
       localStorage.removeItem(draftKey(submitting.id));
       setSubmitModal(false);
       fetchClass();
@@ -424,12 +427,12 @@ export default function StudentClassDetail() {
 
             {/* Đã nộp nhưng chưa có điểm: cho biết hệ thống đang chấm tự động */}
             {/* Chờ đợt chấm gom (tối 21h30 hoặc trước hạn nộp) */}
-            {isSubmitted && !hasGrade && hw.grading_status === 'scheduled' && (
+            {isSubmitted && !hasGrade && (hw.grading_status === 'scheduled' || (hw.grading_status === 'pending' && gradingEta[hw.id])) && (
               <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem', color: '#6A1B9A', background: '#F3E5F5', borderRadius: 8, padding: '0.6rem 0.8rem' }}>
-                <Clock size={15} /> Đã nhận bài — bài sẽ được chấm{hw.next_grading_at ? ` lúc ${new Date(hw.next_grading_at).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}` : ' trong hôm nay'}.
+                <Clock size={15} /> Đã nộp bài thành công — {resultTimeText(hw.next_grading_at || gradingEta[hw.id])}
               </div>
             )}
-            {isSubmitted && !hasGrade && (hw.grading_status === 'pending' || hw.grading_status === 'grading') && (
+            {isSubmitted && !hasGrade && ((hw.grading_status === 'pending' && !gradingEta[hw.id]) || hw.grading_status === 'grading') && (
               <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem', color: '#1565C0', background: '#E3F2FD', borderRadius: 8, padding: '0.6rem 0.8rem' }}>
                 <Bot size={15} /> Đã nhận bài — hệ thống đang tự động chấm, kết quả sẽ hiển thị sau ít phút.
               </div>
@@ -804,4 +807,16 @@ export default function StudentClassDetail() {
       />
     </div>
   );
+}
+
+// "kết quả được trả về sau 21h30 hôm nay." / "… sau khoảng 15 phút nữa."
+function resultTimeText(iso?: string | null): string {
+  const t = iso ? Date.parse(iso) : NaN;
+  if (!Number.isFinite(t)) return 'kết quả được trả về trong hôm nay.';
+  const mins = Math.round((t - Date.now()) / 60000);
+  if (mins <= 20) return `kết quả được trả về sau khoảng ${Math.max(mins, 0) + 5} phút nữa.`;
+  const d = new Date(t);
+  const hm = `${String(d.getHours()).padStart(2, '0')}h${String(d.getMinutes()).padStart(2, '0')}`;
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return `kết quả được trả về sau ${hm}${sameDay ? ' hôm nay' : ` ngày ${d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })}`}.`;
 }

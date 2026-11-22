@@ -26,7 +26,8 @@ export default function ToastContainer() {
     addToastFn = (message: string, type: ToastType) => {
       const id = ++toastId;
       setToasts((t) => [...t, { id, message, type }]);
-      setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
+      // Thông báo nhiều dòng (vd "Nộp bài thành công" + giờ trả kết quả) → hiện lâu hơn để kịp đọc
+      setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), message.includes('\n') ? 8000 : 4000);
     };
     return () => { addToastFn = null; };
   }, []);
@@ -66,7 +67,7 @@ export default function ToastContainer() {
             }}
           >
             <Icon size={18} style={{ flexShrink: 0 }} />
-            <span style={{ flex: 1, fontSize: '0.9rem', fontWeight: 500 }}>{message}</span>
+            <span style={{ flex: 1, fontSize: '0.9rem', fontWeight: 500, whiteSpace: 'pre-line' }}>{message}</span>
             <button
               onClick={() => remove(id)}
               style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', padding: 2, borderRadius: 4, display: 'flex' }}

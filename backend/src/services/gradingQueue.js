@@ -114,7 +114,8 @@ function enqueue(submissionId, kind = 'hw') {
   const key = `${kind}:${id}`;
   if (inQueue.has(key)) return;
   inQueue.add(key);
-  queue.push(key);
+  if (kind === 'mock') queue.unshift(key); // khách thi thử đang chờ kết quả → chen lên đầu hàng
+  else queue.push(key);
   processQueue();
 }
 
@@ -445,6 +446,7 @@ async function gradeRecord(kind, submissionId, { force = false } = {}) {
   const K = KINDS[kind];
   if (!K) return null;
   const db = getDb();
+  const urgent = force || kind === 'mock'; // có người đang chờ kết quả
   const pre = precheck(K, kind, submissionId, force);
   if (!pre.sub) return pre.result;
   const sub = pre.sub;
@@ -483,8 +485,10 @@ async function gradeRecord(kind, submissionId, { force = false } = {}) {
         scope: ctx.scope,
         studentAnswers: sub.structured_answers,
         annotatePrefix: `${kind}_${submissionId}_${Date.now()}`, // vẽ đúng/sai lên ảnh bài làm
-        realtime: force, // giáo viên bấm "chấm lại" đang chờ → gọi thường; chấm nền → Batch (rẻ 50%)
-        models: modelsForRun(pastPreciseWait(kind, submissionId, force)),
+        // Giáo viên bấm "chấm lại" / khách thi thử đang chờ kết quả → gọi thường; chấm nền → Batch (rẻ 50%)
+        realtime: urgent,
+        // Khách thi thử: chấm NGAY — model chính xác nhất trước, quá tải thì dùng luôn model dự phòng (gắn cờ)
+        models: kind === 'mock' ? gradingModels() : modelsForRun(pastPreciseWait(kind, submissionId, force)),
         // Sổ kinh nghiệm chấm (giáo viên đã sửa AI) + lỗi hay gặp của đề (chỉ với bài tập của lớp)
         lessons: lessonsFor(db, kind === 'hw' ? sub.hw_id : null),
         hints: kind === 'hw' ? commonErrorHints(db, sub.hw_id) : [],
@@ -492,7 +496,7 @@ async function gradeRecord(kind, submissionId, { force = false } = {}) {
     }
     return finalize(kind, K, sub, submissionId, ctx, aiResult);
   } catch (err) {
-    handleFail(kind, K, sub, submissionId, err, { fast: force });
+    handleFail(kind, K, sub, submissionId, err, { fast: urgent });
     throw err;
   }
 }

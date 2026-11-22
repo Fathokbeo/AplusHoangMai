@@ -6,7 +6,7 @@ const { getDb } = require('../db/database');
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const { uploadHomework, uploadSubmission } = require('../middleware/upload');
 const { enqueue, runScheduledGrading, nextGradingAt, scheduleMode, queueRegrade, soonAt } = require('../services/gradingQueue');
-const { needsAiGrading, stripAnswers, stripHsaAnswers } = require('../services/homeworkParts');
+const { needsAiGrading, stripAnswers, stripHsaAnswers, parsePartsConfig, partEnabled } = require('../services/homeworkParts');
 const { computeMaxScore } = require('../services/homeworkScoring');
 const { compareVietnameseName } = require('../services/vietnameseName');
 const { redactSecrets } = require('../services/security');
@@ -386,8 +386,26 @@ function acceptSubmission(db, { hw, studentId, uploaded, structuredJson, enforce
   let message = aiGrade
     ? 'Nộp bài thành công. Hệ thống đang tự động chấm, kết quả sẽ hiển thị sau ít phút.'
     : 'Nộp bài thành công.';
+  // Bài tự luận (cần AI) học sinh tự nộp, đang chạy lịch chấm gom → báo giờ chấm dự kiến thay vì "sau ít phút"
+  let nextGradingAtIso = null;
+  let gradingNote = null; // dòng thứ 2 dưới "Nộp bài thành công"
+  const vnTime = (t) => new Date(t).toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' }).replace(':', 'h');
+  const vnDay = (t) => new Date(t).toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: '2-digit' });
+  if (aiGrade && !submittedBy && filenames.length && hw.exam_type !== 'hsa' && scheduleMode() === 'daily') {
+    const cfg = parsePartsConfig(hw.parts_config);
+    if (hw.answer_file && (!cfg || partEnabled(cfg, 'essay'))) {
+      const at = nextGradingAt(hw.due_date, hw.id);
+      nextGradingAtIso = new Date(at).toISOString();
+      const mins = Math.round((at - Date.now()) / 60000);
+      const sameDay = vnDay(at) === vnDay(Date.now());
+      gradingNote = mins <= 20
+        ? `Kết quả được trả về sau khoảng ${Math.max(mins, 5) + 5} phút nữa.`
+        : `Kết quả được trả về sau ${vnTime(at)}${sameDay ? ' hôm nay' : ` ngày ${vnDay(at)}`}.`;
+      message = 'Nộp bài thành công.';
+    }
+  }
   if (enforceLimits && hw.max_attempts) message += ` (đã dùng ${newSubmitCount}/${hw.max_attempts} lần nộp)`;
-  return { status: 200, body: { message, submission: sub } };
+  return { status: 200, body: { message, grading_note: gradingNote, submission: sub, next_grading_at: nextGradingAtIso } };
 }
 
 // Đáp án có cấu trúc điền ở giao diện làm bài (trắc nghiệm / đúng-sai / trả lời ngắn) → chuỗi JSON hoặc null
