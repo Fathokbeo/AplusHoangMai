@@ -19,7 +19,7 @@ import { Plus, Edit, Trash2, Eye, EyeOff, FileText, Upload, RefreshCw, Download,
 //  - Bài làm: danh sách khách vãng lai đã thi (thông tin học sinh + điểm), xem bài, chấm lại, xuất Excel.
 //  - Đề thi: soạn đề bằng đúng bộ công cụ của bài tập (đề PDF, đáp án, các phần / HSA, thời gian làm bài).
 
-type Tab = 'attempts' | 'exams';
+type Tab = 'attempts' | 'exams' | 'info';
 const fmtTime = (iso?: string) => (iso ? new Date(iso).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }) : '—');
 
 function scoreTone(score: number, max: number) {
@@ -80,6 +80,7 @@ function AttemptsTab({ exams }: { exams: any[] }) {
     const data = visible.map((a, i) => ({
       'STT': i + 1, 'Thời gian nộp': fmtTime(a.submitted_at), 'Họ tên': a.full_name, 'Khối': a.grade ?? '', 'Lớp': a.class_name, 'Trường': a.school,
       'ĐTB kì gần nhất': a.gpa, 'SĐT phụ huynh': a.parent_phone, 'Đề thi': a.exam_title,
+      ...extraInfoOf(a),
       'Điểm': a.score ?? '', 'Thang điểm': a.max_score, 'Nhận xét': a.feedback || '',
     }));
     const ws = XLSX.utils.json_to_sheet(data);
@@ -177,7 +178,8 @@ function AttemptsTab({ exams }: { exams: any[] }) {
               {[
                 ['Lớp', detail.class_name], ['Trường', detail.school], ['ĐTB kì gần nhất', detail.gpa],
                 ['SĐT phụ huynh', detail.parent_phone], ['Đề thi', detail.exam_title], ['Nộp lúc', fmtTime(detail.submitted_at)],
-              ].map(([k, v]) => (
+                ...Object.entries(extraInfoOf(detail)),
+              ].filter(([, v]) => v !== '' && v != null).map(([k, v]) => (
                 <div key={k} style={{ background: '#FAFAFA', borderRadius: 10, padding: '0.6rem 0.75rem' }}>
                   <div style={{ fontSize: '0.72rem', color: '#999' }}>{k}</div>
                   <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{v}</div>
@@ -423,17 +425,90 @@ export default function MockExamManagement() {
       </Link>
       <h1 className="page-title">Thi thử</h1>
       <p style={{ color: '#888', margin: '-0.5rem 0 1.25rem', fontSize: '0.9rem' }}>
-        Khách vãng lai làm đề ở trang chủ (mục “Thi thử”), điền thông tin học sinh trước khi làm; kết quả gửi về đây.
+        Khách vãng lai (không cần đăng nhập) chọn khối ở mục “Thi thử” để xem đề, điền thông tin học sinh khi bắt đầu làm; kết quả gửi về đây.
       </p>
       <div style={{ display: 'inline-flex', gap: 4, background: '#F0F0F0', borderRadius: 10, padding: 4, marginBottom: 16 }}>
-        {([['attempts', `Bài làm (${totalAttempts})`], ['exams', `Đề thi (${exams.length})`]] as const).map(([k, l]) => (
+        {([['attempts', `Bài làm (${totalAttempts})`], ['exams', `Đề thi (${exams.length})`], ['info', 'Thông tin cần điền']] as const).map(([k, l]) => (
           <button key={k} className="btn btn-sm" onClick={() => setTab(k)} style={{
             background: tab === k ? 'white' : 'transparent', color: tab === k ? '#C62828' : '#777', border: 'none',
             boxShadow: tab === k ? '0 2px 6px rgba(0,0,0,0.08)' : 'none',
           }}>{l}</button>
         ))}
       </div>
-      {tab === 'attempts' ? <AttemptsTab exams={exams} /> : <ExamsTab exams={exams} reload={loadExams} />}
+      {tab === 'attempts' ? <AttemptsTab exams={exams} /> : tab === 'exams' ? <ExamsTab exams={exams} reload={loadExams} /> : <InfoFieldsTab />}
+    </div>
+  );
+}
+
+// Các ô admin tự thêm (extra_info) → { 'Tên ô': giá trị }
+function extraInfoOf(a: any): Record<string, string> {
+  let list: any[] = [];
+  try { list = Array.isArray(a?.extra_info) ? a.extra_info : (a?.extra_info ? JSON.parse(a.extra_info) : []); } catch { list = []; }
+  return Object.fromEntries(list.filter((x) => x && x.label).map((x) => [x.label, String(x.value ?? '')]));
+}
+
+// ── Tab "Thông tin cần điền": admin chỉnh các ô khách phải điền trước khi làm đề ─────────────────
+const FIELD_TYPES: { v: string; l: string }[] = [
+  { v: 'text', l: 'Chữ' }, { v: 'phone', l: 'Số điện thoại' }, { v: 'score', l: 'Điểm (0–10)' }, { v: 'number', l: 'Số' },
+];
+function InfoFieldsTab() {
+  const [fields, setFields] = useState<any[] | null>(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { api.get('/admin/mock-exams/info-fields').then((r) => setFields(r.data)).catch(() => toast.error('Không tải được cấu hình')); }, []);
+  const set = (i: number, patch: any) => setFields((fs) => (fs || []).map((f, j) => (j === i ? { ...f, ...patch } : f)));
+  const move = (i: number, d: number) => setFields((fs) => {
+    const a = [...(fs || [])]; const j = i + d;
+    if (j < 2 || j >= a.length || i < 2) return a; // họ tên + khối luôn đứng đầu
+    [a[i], a[j]] = [a[j], a[i]]; return a;
+  });
+  const save = async () => {
+    setSaving(true);
+    try { const { data } = await api.put('/admin/mock-exams/info-fields', { fields }); setFields(data.fields); toast.success(data.message); }
+    catch (e: any) { toast.error(e?.response?.data?.message || 'Không lưu được'); } finally { setSaving(false); }
+  };
+  if (!fields) return <div style={{ color: '#999' }}>Đang tải…</div>;
+  return (
+    <div className="card" style={{ maxWidth: 860 }}>
+      <div style={{ fontSize: '0.85rem', color: '#666', lineHeight: 1.6, marginBottom: 12 }}>
+        Chọn các ô khách phải điền trước khi làm đề thi thử. <strong>Họ tên</strong> và <strong>Khối lớp</strong> luôn bắt buộc (để biết bài của ai và lọc đề theo khối).
+        Thêm ô riêng nếu cần (vd: “Facebook phụ huynh”, “Mục tiêu điểm thi”) — câu trả lời hiện trong danh sách bài làm và file Excel.
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {fields.map((f, i) => (
+          <div key={f.key} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: '8px 10px', background: f.enabled ? '#FAFAFA' : '#F3F3F3', borderRadius: 8, opacity: f.enabled ? 1 : 0.6 }}>
+            <input className="input" style={{ flex: '1 1 220px', minWidth: 0 }} value={f.label} maxLength={60} onChange={(e) => set(i, { label: e.target.value })} />
+            {f.builtin ? (
+              <span className="badge badge-gray" style={{ whiteSpace: 'nowrap' }}>Ô có sẵn</span>
+            ) : (
+              <select className="input" style={{ width: 150 }} value={f.type} onChange={(e) => set(i, { type: e.target.value })}>
+                {FIELD_TYPES.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
+              </select>
+            )}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
+              <input type="checkbox" checked={!!f.enabled} disabled={f.locked} onChange={(e) => set(i, { enabled: e.target.checked })} /> Hiện
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
+              <input type="checkbox" checked={!!f.required} disabled={f.locked || !f.enabled} onChange={(e) => set(i, { required: e.target.checked })} /> Bắt buộc
+            </label>
+            {!f.locked && (
+              <span style={{ display: 'inline-flex', gap: 2 }}>
+                <button className="btn btn-ghost btn-sm btn-icon" title="Lên" onClick={() => move(i, -1)} disabled={i <= 2}>↑</button>
+                <button className="btn btn-ghost btn-sm btn-icon" title="Xuống" onClick={() => move(i, 1)} disabled={i >= fields.length - 1}>↓</button>
+              </span>
+            )}
+            {!f.builtin && (
+              <button className="btn btn-ghost btn-sm btn-icon" style={{ color: '#C62828' }} title="Xoá ô này" onClick={() => setFields(fields.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+        <button className="btn btn-ghost btn-sm" onClick={() => setFields([...fields, { key: '', label: 'Ô mới', type: 'text', enabled: true, required: false, builtin: false }])}
+          disabled={fields.filter((f) => !f.builtin).length >= 10}>
+          <Plus size={14} /> Thêm ô
+        </button>
+        <button className="btn btn-primary btn-sm" onClick={save} disabled={saving} style={{ marginLeft: 'auto' }}>{saving ? 'Đang lưu…' : 'Lưu'}</button>
+      </div>
     </div>
   );
 }

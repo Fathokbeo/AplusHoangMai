@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import api from '../../lib/api';
 import PublicLayout from '../../components/PublicLayout';
 import SubmitHomeworkView from '../../components/SubmitHomeworkView';
 import GradingDetails from '../../components/GradingDetails';
+import Modal from '../../components/Modal';
 import { type StudentAnswers } from '../../components/PartsSolver';
 import { toast } from '../../components/Toast';
 import { PAGE_MAX } from '../../lib/layout';
@@ -11,25 +12,44 @@ import {
   parsePartsConfig, hasObjectiveParts, hasEssay, emptyStudentAnswers, parseHsaConfig, emptyHsaStudentAnswers,
   PART_LABELS, PART_ORDER, type PartKey,
 } from '../../lib/homeworkParts';
+import { DEFAULT_INFO_FIELDS, MOCK_GRADES as GRADES, validateInfoValues, displayValue, type InfoField, type InfoValues } from '../../lib/mockInfoFields';
 import { ClipboardCheck, Clock, FileText, ChevronRight, CheckCircle2, RotateCcw, ArrowLeft, Edit, Loader2 } from 'lucide-react';
 
-// Thi thử cho khách vãng lai:
-//   /thi-thu       1) điền thông tin học sinh (có khối lớp)  2) chọn đề của đúng khối đó
+// Thi thử cho khách vãng lai (KHÔNG cần đăng nhập):
+//   /thi-thu       chọn khối 6–12 → thấy ngay các đề của khối; bấm "Làm bài" lần đầu → điền thông tin (admin
+//                  tự chỉnh các ô cần điền) → vào làm bài. Thông tin chỉ lưu trên máy này.
 //   /thi-thu/:id   làm bài (giao diện làm bài như học sinh) → "vui lòng chờ" → điểm + thông tin
-// Chưa điền thông tin mà vào thẳng /thi-thu/:id → quay về /thi-thu để điền trước.
+// Chưa điền thông tin mà vào thẳng /thi-thu/:id → về /thi-thu?lam=<id> để điền rồi làm luôn đề đó.
 // Bài làm + thông tin gửi về trang "Thi thử" của admin.
 
 const INFO_KEY = 'aplus-mock-info';          // thông tin đã điền (chỉ lưu trên máy này)
+const GRADE_KEY = 'aplus-mock-grade';        // khối đang xem
 const resultKey = (id: string | number) => `aplus-mock-result-${id}`; // giữ kết quả khi tải lại trang
-const GRADES = [6, 7, 8, 9, 10, 11, 12];
-
-type Info = { full_name: string; grade: string; class_name: string; school: string; gpa: string; parent_phone: string };
-const EMPTY_INFO: Info = { full_name: '', grade: '', class_name: '', school: '', gpa: '', parent_phone: '' };
 
 const store = {
   get<T>(k: string): T | null { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch { return null; } },
   set(k: string, v: unknown) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* bỏ qua */ } },
   del(k: string) { try { localStorage.removeItem(k); } catch { /* bỏ qua */ } },
+};
+
+// Các ô thông tin admin đã cấu hình (tải 1 lần mỗi trang)
+function useInfoFields(): InfoField[] | null {
+  const [fields, setFields] = useState<InfoField[] | null>(null);
+  useEffect(() => {
+    api.get('/public/mock-exams/info-fields').then((r) => setFields(r.data)).catch(() => setFields(DEFAULT_INFO_FIELDS));
+  }, []);
+  return fields;
+}
+
+const storedInfo = (): InfoValues => {
+  const i = store.get<Record<string, any>>(INFO_KEY) || {};
+  return Object.fromEntries(Object.entries(i).map(([k, v]) => [k, String(v ?? '')]));
+};
+// Thông tin đã lưu có đủ & đúng theo cấu hình hiện tại không (admin đổi ô bắt buộc → điền bổ sung)
+const savedInfo = (fields: InfoField[] | null): InfoValues | null => {
+  if (!fields) return null;
+  const i = storedInfo();
+  return Object.keys(validateInfoValues(fields, i)).length === 0 ? i : null;
 };
 
 // Tóm tắt các phần của đề: "Trắc nghiệm 12 · Đúng/Sai 4 · Tự luận"
@@ -41,122 +61,194 @@ function partsSummary(exam: any): string {
     .map((k) => `${PART_LABELS[k]}${k === 'essay' ? '' : ` ${(cfg as any)[k].count}`}`).join(' · ');
 }
 
-function validate(info: Info): Partial<Record<keyof Info, string>> {
-  const e: Partial<Record<keyof Info, string>> = {};
-  if (info.full_name.trim().length < 2) e.full_name = 'Nhập họ tên học sinh';
-  if (!GRADES.includes(Number(info.grade))) e.grade = 'Chọn khối lớp';
-  if (!info.class_name.trim()) e.class_name = 'Nhập lớp';
-  if (!info.school.trim()) e.school = 'Nhập trường';
-  const g = Number(info.gpa.replace(',', '.'));
-  if (!info.gpa.trim() || !Number.isFinite(g) || g < 0 || g > 10) e.gpa = 'Điểm từ 0 đến 10';
-  if (!/^(\+84|0)\d{9,10}$/.test(info.parent_phone.replace(/[\s.-]/g, ''))) e.parent_phone = 'Số điện thoại chưa đúng';
-  return e;
-}
-const savedInfo = (): Info | null => {
-  const i = store.get<Info>(INFO_KEY);
-  return i && Object.keys(validate({ ...EMPTY_INFO, ...i })).length === 0 ? { ...EMPTY_INFO, ...i } : null;
-};
-
-// Thẻ tóm tắt thông tin học sinh (dùng ở danh sách đề, lúc làm bài và trang kết quả)
-function InfoSummary({ info, onEdit }: { info: Partial<Info> & { gpa?: any; grade?: any }; onEdit?: () => void }) {
+// Thẻ tóm tắt thông tin học sinh theo đúng các ô đã cấu hình (dùng ở danh sách đề, lúc làm bài và trang kết quả).
+// values: thông tin đã điền, hoặc bản ghi kết quả từ server (có extra_info cho các ô thêm).
+function InfoSummary({ fields, values, onEdit }: { fields: InfoField[] | null; values: Record<string, any>; onEdit?: () => void }) {
+  const v: Record<string, any> = { ...values };
+  (Array.isArray(values.extra_info) ? values.extra_info : []).forEach((x: any) => { if (x && x.key) v[x.key] = x.value; });
+  const list = fields || DEFAULT_INFO_FIELDS;
+  const name = String(v.full_name || '');
+  const rest = list.filter((f) => f.key !== 'full_name').map((f) => ({ f, s: displayValue(f, v[f.key]) })).filter((x) => x.s);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', background: '#F9F9F9', borderRadius: 10, padding: '0.7rem 0.9rem', fontSize: '0.85rem', color: '#555' }}>
-      <strong style={{ color: '#1A1A2E' }}>{info.full_name}</strong>
-      <span>Lớp {info.class_name}{info.grade ? ` (khối ${info.grade})` : ''}</span>
-      <span>{info.school}</span>
-      <span>ĐTB {String(info.gpa ?? '').replace('.', ',')}</span>
-      <span>PH: {info.parent_phone}</span>
+      <strong style={{ color: '#1A1A2E' }}>{name}</strong>
+      {rest.map(({ f, s }) => <span key={f.key} title={f.label}>{f.type === 'grade' ? s : f.key === 'class_name' ? `Lớp ${s}` : `${f.label}: ${s}`}</span>)}
       {onEdit && <button type="button" className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={onEdit}><Edit size={13} /> Sửa thông tin</button>}
     </div>
   );
 }
 
-// ─────────────────────── /thi-thu: thông tin → danh sách đề theo khối ───────────────────────
+// Form điền thông tin theo cấu hình
+function InfoForm({ fields, values, onChange, touched, onTouch }: {
+  fields: InfoField[]; values: InfoValues; onChange: (v: InfoValues) => void;
+  touched: Record<string, boolean>; onTouch: (k: string) => void;
+}) {
+  const errors = validateInfoValues(fields, values);
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+      {fields.map((f) => {
+        const err = touched[f.key] && errors[f.key];
+        const style = err ? { borderColor: '#C62828' } : undefined;
+        return (
+          <div key={f.key} className="form-group" style={{ marginBottom: 0 }}>
+            <label className="label">{f.label}{f.required ? ' *' : ''}</label>
+            {f.type === 'grade' ? (
+              <select className="input" value={values[f.key] || ''} onChange={(e) => onChange({ ...values, [f.key]: e.target.value })} onBlur={() => onTouch(f.key)} style={style}>
+                <option value="">— Chọn khối —</option>
+                {GRADES.map((g) => <option key={g} value={g}>Lớp {g}</option>)}
+              </select>
+            ) : (
+              <input className="input" value={values[f.key] || ''} placeholder={f.placeholder || ''} onChange={(e) => onChange({ ...values, [f.key]: e.target.value })}
+                onBlur={() => onTouch(f.key)} style={style}
+                inputMode={f.type === 'phone' ? 'tel' : f.type === 'score' || f.type === 'number' ? 'decimal' : undefined}
+                autoComplete={f.key === 'full_name' ? 'name' : f.type === 'phone' ? 'tel' : undefined} />
+            )}
+            {err && <div style={{ fontSize: '0.75rem', color: '#C62828', marginTop: 4 }}>{err}</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─────────────────────── /thi-thu: chọn khối → danh sách đề → điền thông tin khi bắt đầu làm ───────────────────────
 export function MockExamList() {
-  const [info, setInfo] = useState<Info>(() => savedInfo() || { ...EMPTY_INFO, ...(store.get<Info>(INFO_KEY) || {}) });
-  const [editing, setEditing] = useState(() => !savedInfo());
-  const [touched, setTouched] = useState<Partial<Record<keyof Info, boolean>>>({});
-  const [exams, setExams] = useState<any[] | null>(null);
-  const errors = validate(info);
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const fields = useInfoFields();
+  const [allExams, setAllExams] = useState<any[] | null>(null);
+  const [grade, setGrade] = useState<number | null>(() => {
+    const q = Number(params.get('khoi'));
+    if (GRADES.includes(q)) return q;
+    const s = Number(storedInfo().grade);
+    if (GRADES.includes(s)) return s;
+    const g = Number(store.get<number>(GRADE_KEY));
+    return GRADES.includes(g) ? g : null;
+  });
+  const [info, setInfo] = useState<InfoValues>(() => storedInfo());
+  const [form, setForm] = useState<{ exam: any | null } | null>(null); // hộp điền thông tin (exam = đề sẽ làm sau khi điền)
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const hasInfo = !!savedInfo(fields);
 
   useEffect(() => {
-    if (editing) return;
-    setExams(null);
-    api.get('/public/mock-exams', { params: { grade: info.grade } }).then((r) => setExams(r.data)).catch(() => setExams([]));
-  }, [editing, info.grade]);
+    api.get('/public/mock-exams').then((r) => setAllExams(r.data)).catch(() => setAllExams([]));
+  }, []);
+
+  const pickGrade = (g: number) => {
+    setGrade(g);
+    store.set(GRADE_KEY, g);
+    params.set('khoi', String(g));
+    setParams(params, { replace: true });
+  };
+
+  // Bấm "Làm bài": đã có đủ thông tin → vào làm luôn; chưa có → hiện hộp điền (khối điền sẵn theo đề / tab)
+  const openStart = (exam: any) => {
+    const examGrade = exam.grade && GRADES.includes(Number(exam.grade)) ? String(exam.grade) : '';
+    const s = savedInfo(fields);
+    if (s) {
+      if (examGrade && s.grade !== examGrade) store.set(INFO_KEY, { ...s, grade: examGrade });
+      navigate(`/thi-thu/${exam.id}`);
+      return;
+    }
+    setInfo((prev) => ({ ...prev, grade: examGrade || prev.grade || (grade ? String(grade) : '') }));
+    setTouched({});
+    setForm({ exam });
+  };
+
+  // ?lam=<id>: vào thẳng link đề khi chưa điền thông tin → mở hộp điền cho đúng đề đó
+  useEffect(() => {
+    const lam = Number(params.get('lam'));
+    if (!lam || !allExams || !fields) return;
+    const e = allExams.find((x) => x.id === lam);
+    params.delete('lam');
+    setParams(params, { replace: true });
+    if (e) {
+      if (e.grade && GRADES.includes(Number(e.grade))) setGrade(Number(e.grade));
+      openStart(e);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allExams, fields]);
 
   const confirmInfo = () => {
-    setTouched(Object.fromEntries(Object.keys(EMPTY_INFO).map((k) => [k, true])));
-    if (Object.keys(errors).length) { toast.error('Vui lòng điền đủ và đúng thông tin học sinh'); return; }
+    if (!fields) return;
+    setTouched(Object.fromEntries(fields.map((f) => [f.key, true])));
+    if (Object.keys(validateInfoValues(fields, info)).length) { toast.error('Vui lòng điền đủ và đúng thông tin học sinh'); return; }
     store.set(INFO_KEY, info);
-    setEditing(false);
+    const exam = form && form.exam;
+    setForm(null);
+    if (exam) navigate(`/thi-thu/${exam.id}`);
   };
 
-  const field = (k: keyof Info, label: string, props: Record<string, any> = {}) => {
-    const err = touched[k] && errors[k];
-    return (
-      <div className="form-group" style={{ marginBottom: 0 }}>
-        <label className="label">{label} *</label>
-        <input className="input" value={info[k]} onChange={(e) => setInfo({ ...info, [k]: e.target.value })}
-          onBlur={() => setTouched({ ...touched, [k]: true })} style={err ? { borderColor: '#C62828' } : undefined} {...props} />
-        {err && <div style={{ fontSize: '0.75rem', color: '#C62828', marginTop: 4 }}>{err}</div>}
-      </div>
-    );
-  };
+  const forGrade = (g: number) => (allExams || []).filter((e) => e.grade == null || Number(e.grade) === g);
+  const exams = grade ? forGrade(grade) : [];
 
   return (
     <PublicLayout>
       <section style={{ maxWidth: PAGE_MAX, margin: '0 auto', padding: '2rem' }}>
         <h1 className="page-title" style={{ margin: 0 }}>Thi thử</h1>
         <p style={{ color: '#888', margin: '4px 0 1.25rem', fontSize: '0.9rem' }}>
-          Làm đề thi thử miễn phí ngay trên web. Nộp bài xong hệ thống chấm và trả điểm cho bạn sau vài phút.
+          Làm đề thi thử miễn phí ngay trên web, không cần tài khoản. Chọn khối lớp để xem các đề; nộp bài xong hệ thống chấm và trả điểm sau vài phút.
         </p>
 
-        {editing ? (
-          <div className="card" style={{ maxWidth: 760 }}>
-            <h2 className="section-title" style={{ margin: 0 }}>Bước 1 · Thông tin học sinh</h2>
-            <div style={{ fontSize: '0.85rem', color: '#888', margin: '4px 0 16px' }}>
-              Điền đầy đủ để xem các đề thi thử dành cho khối lớp của bạn. Trung tâm dùng thông tin này để gửi kết quả và tư vấn lộ trình học.
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
-              {field('full_name', 'Họ và tên học sinh', { placeholder: 'vd: Nguyễn Minh Anh', autoComplete: 'name' })}
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="label">Khối lớp *</label>
-                <select className="input" value={info.grade} onChange={(e) => setInfo({ ...info, grade: e.target.value })}
-                  onBlur={() => setTouched({ ...touched, grade: true })} style={touched.grade && errors.grade ? { borderColor: '#C62828' } : undefined}>
-                  <option value="">— Chọn khối —</option>
-                  {GRADES.map((g) => <option key={g} value={g}>Lớp {g}</option>)}
-                </select>
-                {touched.grade && errors.grade && <div style={{ fontSize: '0.75rem', color: '#C62828', marginTop: 4 }}>{errors.grade}</div>}
-              </div>
-              {field('class_name', 'Lớp', { placeholder: 'vd: 9A2' })}
-              {field('school', 'Trường', { placeholder: 'vd: THCS Hoàng Mai' })}
-              {field('gpa', 'Điểm trung bình kì gần nhất', { placeholder: 'vd: 8.2', inputMode: 'decimal' })}
-              {field('parent_phone', 'Số điện thoại phụ huynh', { placeholder: 'vd: 0912 345 678', inputMode: 'tel', autoComplete: 'tel' })}
-            </div>
-            <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 18 }} onClick={confirmInfo}>
-              Xem đề thi thử <ChevronRight size={16} />
-            </button>
+        {/* Chọn khối lớp */}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+          {GRADES.map((g) => {
+            const n = allExams ? forGrade(g).length : null;
+            const on = grade === g;
+            return (
+              <button key={g} type="button" onClick={() => pickGrade(g)} className="btn btn-sm"
+                style={{
+                  borderRadius: 99, padding: '0.45rem 1rem', fontWeight: 700,
+                  background: on ? '#C62828' : 'white', color: on ? 'white' : '#444',
+                  border: on ? '1px solid #C62828' : '1px solid #E0E0E0', boxShadow: on ? '0 2px 8px rgba(198,40,40,0.25)' : 'none',
+                }}>
+                Lớp {g}{n != null ? <span style={{ fontWeight: 500, opacity: 0.8 }}> · {n} đề</span> : null}
+              </button>
+            );
+          })}
+        </div>
+
+        {hasInfo && (
+          <div style={{ marginBottom: 16 }}>
+            <InfoSummary fields={fields} values={info} onEdit={() => { setTouched({}); setForm({ exam: null }); }} />
           </div>
+        )}
+
+        {!grade ? (
+          <div className="card" style={{ textAlign: 'center', color: '#888', padding: '2.5rem' }}>Chọn khối lớp ở trên để xem các đề thi thử.</div>
+        ) : allExams === null ? <div style={{ color: '#999' }}>Đang tải…</div> : exams.length === 0 ? (
+          <div className="card" style={{ textAlign: 'center', color: '#888', padding: '2.5rem' }}>Hiện chưa có đề thi thử nào cho lớp {grade}. Quay lại sau nhé!</div>
         ) : (
           <>
-            <InfoSummary info={info} onEdit={() => setEditing(true)} />
-            <h2 className="section-title" style={{ margin: '1.5rem 0 1rem' }}>Bước 2 · Chọn đề thi thử lớp {info.grade}</h2>
-            {exams === null ? <div style={{ color: '#999' }}>Đang tải…</div> : exams.length === 0 ? (
-              <div className="card" style={{ textAlign: 'center', color: '#888', padding: '2.5rem' }}>Hiện chưa có đề thi thử nào cho lớp {info.grade}. Quay lại sau nhé!</div>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 20 }}>
-                {exams.map((e) => <MockExamCard key={e.id} exam={e} />)}
-              </div>
-            )}
+            <h2 className="section-title" style={{ margin: '0 0 1rem' }}>Đề thi thử lớp {grade}</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 20 }}>
+              {exams.map((e) => <MockExamCard key={e.id} exam={e} onStart={() => openStart(e)} />)}
+            </div>
           </>
         )}
       </section>
+
+      {/* Điền thông tin học sinh: trước khi làm bài lần đầu, hoặc khi bấm "Sửa thông tin" */}
+      <Modal open={!!form} onClose={() => setForm(null)} size="lg"
+        title={form && form.exam ? `Thông tin học sinh — ${form.exam.title}` : 'Thông tin học sinh'}
+        footer={<>
+          <button className="btn btn-ghost" onClick={() => setForm(null)}>Hủy</button>
+          <button className="btn btn-primary" onClick={confirmInfo} disabled={!fields}>
+            {form && form.exam ? <>Bắt đầu làm bài <ChevronRight size={16} /></> : 'Lưu thông tin'}
+          </button>
+        </>}>
+        <div style={{ fontSize: '0.85rem', color: '#888', margin: '0 0 14px' }}>
+          Trung tâm dùng thông tin này để gửi kết quả và tư vấn lộ trình học. Chỉ cần điền một lần trên máy này.
+        </div>
+        {fields ? (
+          <InfoForm fields={fields} values={info} onChange={setInfo} touched={touched} onTouch={(k) => setTouched((t) => ({ ...t, [k]: true }))} />
+        ) : <div style={{ color: '#999' }}>Đang tải…</div>}
+      </Modal>
     </PublicLayout>
   );
 }
 
-export function MockExamCard({ exam }: { exam: any }) {
+export function MockExamCard({ exam, onStart }: { exam: any; onStart?: () => void }) {
   return (
     <div style={{ background: 'white', borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.07)', transition: 'transform 0.2s, box-shadow 0.2s', display: 'flex', flexDirection: 'column' }}
       onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 8px 24px rgba(0,0,0,0.12)'; }}
@@ -168,15 +260,22 @@ export function MockExamCard({ exam }: { exam: any }) {
         <h3 style={{ margin: '0 0 6px', fontSize: '1rem', fontWeight: 700, color: '#1A1A2E' }}>{exam.title}</h3>
         {exam.description && <p style={{ margin: '0 0 8px', fontSize: '0.85rem', color: '#888', lineHeight: 1.5 }}>{exam.description}</p>}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: '0.78rem', color: '#999', marginBottom: 12 }}>
+          <span>{exam.grade ? `Lớp ${exam.grade}` : 'Mọi khối'}</span>
           <span>{partsSummary(exam)}</span>
           {exam.time_limit_minutes && <span><Clock size={12} style={{ verticalAlign: 'middle', marginRight: 3 }} />{exam.time_limit_minutes} phút</span>}
           <span>Thang {exam.max_score} điểm</span>
         </div>
-        <Link to={`/thi-thu/${exam.id}`} style={{ textDecoration: 'none', marginTop: 'auto' }}>
-          <button className="btn btn-outline btn-sm" style={{ width: '100%', justifyContent: 'center' }}>
+        {onStart ? (
+          <button className="btn btn-outline btn-sm" style={{ width: '100%', justifyContent: 'center', marginTop: 'auto' }} onClick={onStart}>
             Làm bài <ChevronRight size={13} />
           </button>
-        </Link>
+        ) : (
+          <Link to={`/thi-thu/${exam.id}`} style={{ textDecoration: 'none', marginTop: 'auto' }}>
+            <button className="btn btn-outline btn-sm" style={{ width: '100%', justifyContent: 'center' }}>
+              Làm bài <ChevronRight size={13} />
+            </button>
+          </Link>
+        )}
       </div>
     </div>
   );
@@ -188,7 +287,8 @@ type Step = 'ready' | 'exam' | 'result';
 export default function MockExamTake() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
-  const [info] = useState<Info | null>(() => savedInfo());
+  const fields = useInfoFields();
+  const info = savedInfo(fields);
   const [exam, setExam] = useState<any>(null);
   const [notFound, setNotFound] = useState(false);
   // Đã nộp đề này trên máy này → mở thẳng màn kết quả
@@ -251,7 +351,7 @@ export default function MockExamTake() {
     setSubmitting(true);
     try {
       const body = new FormData();
-      (Object.keys(info) as (keyof Info)[]).forEach((k) => body.append(k, info[k]));
+      Object.entries(info).forEach(([k, v]) => body.append(k, v));
       files.forEach((f) => body.append('files', f));
       if (isHsa) body.append('structured_answers', JSON.stringify({ hsa: hsaAnswers }));
       else if (objective) body.append('structured_answers', JSON.stringify(answers));
@@ -270,8 +370,8 @@ export default function MockExamTake() {
   };
   const retake = () => { store.del(resultKey(id)); setAttempt(null); setResult(null); setStep('ready'); };
 
-  // Chưa điền thông tin học sinh → về /thi-thu điền trước (trừ khi đang xem lại kết quả đã nộp)
-  if (!info && !attempt) return <Navigate to="/thi-thu" replace />;
+  // Chưa điền đủ thông tin học sinh → về /thi-thu điền rồi làm luôn đề này (trừ khi đang xem lại kết quả đã nộp)
+  if (fields && !info && !attempt) return <Navigate to={`/thi-thu?lam=${id}`} replace />;
 
   if (notFound) return (
     <PublicLayout>
@@ -300,11 +400,11 @@ export default function MockExamTake() {
         {exam.description && <p style={{ color: '#666', lineHeight: 1.6, margin: '12px 0 0', fontSize: '0.9rem' }}>{exam.description}</p>}
 
         {step === 'result' ? (
-          <ResultCard result={result} onRetake={retake} />
+          <ResultCard result={result} fields={fields} onRetake={retake} />
         ) : (
           <div className="card" style={{ marginTop: '1.25rem' }}>
             <h2 className="section-title" style={{ margin: '0 0 10px' }}>Thông tin học sinh</h2>
-            {info && <InfoSummary info={info} onEdit={() => navigate('/thi-thu')} />}
+            {info && <InfoSummary fields={fields} values={info} onEdit={() => navigate(`/thi-thu?lam=${id}`)} />}
             <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 16 }} onClick={start}>
               Bắt đầu làm bài <ChevronRight size={16} />
             </button>
@@ -346,14 +446,14 @@ export default function MockExamTake() {
 }
 
 // Kết quả: "vui lòng chờ" khi đang chấm → điểm + thông tin học sinh + chi tiết từng câu
-function ResultCard({ result, onRetake }: { result: any; onRetake: () => void }) {
+function ResultCard({ result, fields, onRetake }: { result: any; fields: InfoField[] | null; onRetake: () => void }) {
   const grading = !result || result.grading_status === 'pending' || result.grading_status === 'grading';
   if (grading) return (
     <div className="card" style={{ marginTop: '1.25rem', textAlign: 'center', padding: '2rem 1.25rem' }}>
       <Loader2 size={34} color="#1565C0" className="animate-spin" style={{ margin: '0 auto', display: 'block' }} />
       <div style={{ fontWeight: 700, fontSize: '1.05rem', marginTop: 12 }}>Đã nộp bài — vui lòng chờ trong giây lát</div>
       <div style={{ color: '#888', fontSize: '0.88rem', marginTop: 4 }}>Hệ thống đang chấm bài, điểm và nhận xét sẽ hiện ngay tại đây. Bạn không cần tải lại trang.</div>
-      {result && <div style={{ marginTop: 16, textAlign: 'left' }}><InfoSummary info={result} /></div>}
+      {result && <div style={{ marginTop: 16, textAlign: 'left' }}><InfoSummary fields={fields} values={result} /></div>}
     </div>
   );
   if (result.score === null || result.score === undefined) return (
@@ -361,7 +461,7 @@ function ResultCard({ result, onRetake }: { result: any; onRetake: () => void })
       <CheckCircle2 size={36} color="#2E7D32" style={{ margin: '0 auto', display: 'block' }} />
       <div style={{ fontWeight: 700, fontSize: '1.05rem', marginTop: 10 }}>Đã nộp bài thành công</div>
       <div style={{ color: '#888', fontSize: '0.88rem', marginTop: 4 }}>Trung tâm sẽ chấm và liên hệ phụ huynh để báo kết quả.</div>
-      <div style={{ marginTop: 14, textAlign: 'left' }}><InfoSummary info={result} /></div>
+      <div style={{ marginTop: 14, textAlign: 'left' }}><InfoSummary fields={fields} values={result} /></div>
       <button className="btn btn-ghost btn-sm" style={{ marginTop: 14 }} onClick={onRetake}><RotateCcw size={14} /> Làm lại đề</button>
     </div>
   );
@@ -378,7 +478,7 @@ function ResultCard({ result, onRetake }: { result: any; onRetake: () => void })
           <div style={{ fontWeight: 800, fontSize: '1.15rem' }}>{result.score}/{result.max_score} điểm</div>
         </div>
       </div>
-      <InfoSummary info={result} />
+      <InfoSummary fields={fields} values={result} />
       {result.feedback && (
         <div style={{ fontSize: '0.88rem', color: '#555', lineHeight: 1.6, marginTop: 12 }}>
           <strong>Nhận xét:</strong> {result.feedback}

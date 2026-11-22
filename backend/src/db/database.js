@@ -478,6 +478,8 @@ function initSchema() {
   // JSON { pages: [{ name, page, file, filePage }], review: {...} } — ảnh nằm trong uploads/graded.
   addCol('submissions', 'graded_pages', 'TEXT');
   addCol('mock_attempts', 'graded_pages', 'TEXT');
+  // Thi thử: các ô thông tin admin tự thêm (JSON [{ key, label, value }])
+  addCol('mock_attempts', 'extra_info', 'TEXT');
   // Kho API key Gemini cho AI chấm bài (admin thêm/xoá ở trang "AI chấm bài"; luôn hiển thị dạng che).
   // Tách riêng khỏi site_settings vì site_settings có API công khai.
   // Đợt chấm gom đã chạy (để không chạy trùng: "daily:YYYY-MM-DD", "predue:<bài tập>:<hạn nộp>")

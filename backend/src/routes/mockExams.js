@@ -14,6 +14,7 @@ const { enqueue, gradeMock } = require('../services/gradingQueue');
 const { needsAiGrading, stripAnswers, stripHsaAnswers } = require('../services/homeworkParts');
 const { computeMaxScore } = require('../services/homeworkScoring');
 const { scheduleRubricGeneration, sanitizePartsConfig, sanitizeHsaConfig, sanitizeTimeLimit, originalName } = require('../services/homeworkForm');
+const { getFields, saveFields, validateInfo } = require('../services/mockInfoFields');
 
 const UPLOADS = path.join(__dirname, '../../uploads');
 const rmFile = (dir, name) => {
@@ -71,6 +72,11 @@ const rateLimited = (ip) => recentOf(ip).length >= RATE_MAX;
 // Chỉ tính các lần nộp THÀNH CÔNG (nhập sai thông tin rồi sửa lại không bị trừ lượt)
 const recordSubmit = (ip) => recentByIp.set(ip, [...recentOf(ip), Date.now()]);
 
+// Các ô thông tin khách phải điền trước khi làm bài (admin tự chỉnh) — đặt TRƯỚC '/:id'
+publicRouter.get('/info-fields', (req, res) => {
+  res.json(getFields(getDb()).filter((f) => f.enabled).map(({ key, label, type, placeholder, required }) => ({ key, label, type, placeholder, required })));
+});
+
 // ?grade=9 → chỉ các đề dành cho khối 9 + đề dùng chung mọi khối (grade NULL)
 publicRouter.get('/', (req, res) => {
   const grade = parseGrade(req.query.grade);
@@ -109,18 +115,12 @@ publicRouter.post('/:id/attempts', (req, res, next) => {
   if (!exam) return fail(404, 'Không tìm thấy đề thi');
 
   const b = req.body || {};
-  const fullName = String(b.full_name || '').trim().replace(/\s+/g, ' ');
-  const className = String(b.class_name || '').trim();
-  const school = String(b.school || '').trim();
-  const phone = String(b.parent_phone || '').replace(/[\s.-]/g, '');
-  const gpa = Number(String(b.gpa ?? '').replace(',', '.'));
-  if (fullName.length < 2 || fullName.length > 80) return fail(400, 'Vui lòng nhập họ tên học sinh');
-  const grade = parseGrade(b.grade);
+  // Kiểm tra thông tin theo đúng các ô admin đã cấu hình (bật/tắt, bắt buộc, ô thêm)
+  const { errors, builtin, extra } = validateInfo(getFields(db), b);
+  const firstErr = Object.values(errors)[0];
+  if (firstErr) return fail(400, firstErr);
+  const grade = parseGrade(builtin.grade);
   if (!grade) return fail(400, 'Vui lòng chọn khối lớp');
-  if (!className || className.length > 30) return fail(400, 'Vui lòng nhập lớp');
-  if (!school || school.length > 120) return fail(400, 'Vui lòng nhập trường');
-  if (String(b.gpa ?? '').trim() === '' || !Number.isFinite(gpa) || gpa < 0 || gpa > 10) return fail(400, 'Điểm trung bình kì gần nhất phải từ 0 đến 10');
-  if (!/^(\+84|0)\d{9,10}$/.test(phone)) return fail(400, 'Số điện thoại phụ huynh không hợp lệ');
 
   let structuredJson = null;
   if (b.structured_answers) {
@@ -134,9 +134,10 @@ publicRouter.post('/:id/attempts', (req, res, next) => {
   const aiGrade = needsAiGrading(exam);
   const token = crypto.randomBytes(18).toString('hex');
   const r = db.prepare(`
-    INSERT INTO mock_attempts (exam_id,full_name,grade,class_name,school,gpa,parent_phone,files,structured_answers,access_token,ip,submitted_at,grading_status,grading_attempts)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)
-  `).run(exam.id, fullName, grade, className, school, Math.round(gpa * 100) / 100, phone,
+    INSERT INTO mock_attempts (exam_id,full_name,grade,class_name,school,gpa,parent_phone,extra_info,files,structured_answers,access_token,ip,submitted_at,grading_status,grading_attempts)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
+  `).run(exam.id, builtin.full_name, grade, builtin.class_name || '', builtin.school || '', builtin.gpa, builtin.parent_phone || '',
+    extra.length ? JSON.stringify(extra) : null,
     uploaded.length ? JSON.stringify(uploaded.map((f) => f.filename)) : null, structuredJson,
     token, req.ip, new Date().toISOString(), aiGrade ? 'pending' : null);
   recordSubmit(req.ip);
@@ -159,6 +160,7 @@ publicRouter.get('/attempts/:id', (req, res) => {
   res.json({
     id: a.id, exam_title: a.exam_title, exam_type: a.exam_type, max_score: a.max_score, full_name: a.full_name,
     grade: a.grade, class_name: a.class_name, school: a.school, gpa: a.gpa, parent_phone: a.parent_phone,
+    extra_info: (() => { try { return a.extra_info ? JSON.parse(a.extra_info) : []; } catch { return []; } })(),
     submitted_at: a.submitted_at, grading_status: a.grading_status,
     score: a.score, feedback: a.score !== null ? a.feedback : null, grading_details: a.score !== null ? details : null,
   });
@@ -167,6 +169,13 @@ publicRouter.get('/attempts/:id', (req, res) => {
 // ════════════════════════════════ Admin ════════════════════════════════
 const adminRouter = express.Router();
 adminRouter.use(authMiddleware, requireRole('admin'));
+
+// Cấu hình các ô thông tin khách phải điền trước khi làm đề — đặt TRƯỚC '/:id'
+adminRouter.get('/info-fields', (req, res) => res.json(getFields(getDb())));
+adminRouter.put('/info-fields', (req, res) => {
+  const fields = saveFields(getDb(), req.body && req.body.fields);
+  res.json({ fields, message: 'Đã lưu thông tin cần điền' });
+});
 
 adminRouter.get('/', (req, res) => {
   res.json(getDb().prepare(`
