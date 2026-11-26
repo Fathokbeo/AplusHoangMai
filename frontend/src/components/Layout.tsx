@@ -16,32 +16,26 @@ export default function Layout() {
   const { user } = useAuth();
   const roleClass = user?.role === 'student' ? ' app-student' : '';
 
-  // Điện thoại: không có thanh bên — điều hướng bằng thanh tab dưới đáy màn hình (MobileNav)
-  if (isMobile) {
-    return (
-      <div className={`main-content${roleClass}`}>
-        <Topbar mobile />
-        <div className="content-area" style={{ paddingBottom: `calc(${MOBILE_TABBAR_H + 16}px + env(safe-area-inset-bottom))` }}>
-          <HolidayBanner />
-          <Outlet />
-        </div>
-        <MobileNav />
-      </div>
-    );
-  }
-
+  // MỘT cây giao diện cho cả điện thoại lẫn máy tính, <Outlet /> luôn ở cùng một chỗ. Trước đây mỗi cỡ màn hình
+  // dựng một cây riêng → kéo cửa sổ qua mốc 768px là React gỡ cả trang đang mở rồi dựng lại: form đang điền
+  // (vd đang tạo bài tập), bài đang làm… mất sạch. Giờ chỉ ẩn/hiện thanh bên (máy tính) và thanh tab (điện thoại).
   return (
-    <div style={{ display: 'flex' }}>
-      <Sidebar
-        collapsed={collapsed}
-        onToggle={() => setCollapsed(!collapsed)}
-      />
-      <div className={`main-content ${collapsed ? 'sidebar-collapsed' : ''}${roleClass}`} style={{ flex: 1 }}>
-        <Topbar onMenuClick={() => setCollapsed(!collapsed)} />
-        <div className="content-area">
+    <div style={isMobile ? undefined : { display: 'flex' }}>
+      {!isMobile && (
+        <Sidebar
+          collapsed={collapsed}
+          onToggle={() => setCollapsed(!collapsed)}
+        />
+      )}
+      <div className={`main-content${!isMobile && collapsed ? ' sidebar-collapsed' : ''}${roleClass}`} style={isMobile ? undefined : { flex: 1 }}>
+        <Topbar mobile={isMobile} onMenuClick={() => setCollapsed(!collapsed)} />
+        <div className="content-area"
+          style={isMobile ? { paddingBottom: `calc(${MOBILE_TABBAR_H + 16}px + env(safe-area-inset-bottom))` } : undefined}>
           <HolidayBanner />
           <Outlet />
         </div>
+        {/* Điện thoại: không có thanh bên — điều hướng bằng thanh tab dưới đáy màn hình */}
+        {isMobile && <MobileNav />}
       </div>
     </div>
   );
